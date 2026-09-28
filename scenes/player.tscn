@@ -1,0 +1,36 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/models/character-a.glb" id="1"]
+[ext_resource type="Script" path="res://scenes/player.gd" id="2"]
+
+[sub_resource type="CapsuleShape3D" id="1"]
+radius = 0.3
+height = 1.6
+
+[sub_resource type="SphereShape3D" id="2"]
+radius = 1.2
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("2")
+
+[node name="Pivot" type="Node3D" parent="."]
+
+[node name="Model" parent="Pivot" instance=ExtResource("1")]
+transform = Transform3D(0.667, 0, 0, 0, 0.667, 0, 0, 0, 0.667, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.8, 0)
+shape = SubResource("1")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="Pivot"]
+position = Vector3(0, 1.4, 0)
+rotation_degrees = Vector3(-20, 0, 0)
+spring_length = 4.0
+
+[node name="Camera3D" type="Camera3D" parent="Pivot/SpringArm3D"]
+current = true
+
+[node name="PickupArea" type="Area3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PickupArea"]
+shape = SubResource("2")
