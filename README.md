@@ -14,11 +14,14 @@ Mei also notices what's happening around her. She comments on your catches, the 
 
 ## Quick start
 
-1. **Install the local AI stack** (one time, about 1.7 GB):
+1. **On a fresh clone, run the bootstrap once** (about 10 minutes, needs Unity 6000.0.68f1 from Unity Hub):
    ```powershell
-   powershell -ExecutionPolicy Bypass -File Tools/setup-local-ai.ps1
+   powershell -ExecutionPolicy Bypass -File Tools/bootstrap.ps1
    ```
-   This fills `LocalAI/` (gitignored) with llama.cpp, the Qwen3.5-2B model, whisper.cpp, Piper and its voices.
+   The repo only contains code and settings; the big binaries are gitignored and re-created by this script:
+   - `Tools/fetch-assets.ps1` downloads the free models, audio and fonts into `Assets/ThirdParty/` (about 65 MB).
+   - `Tools/setup-local-ai.ps1` downloads llama.cpp, the Qwen3.5-2B model, whisper.cpp, Piper and its voices into `LocalAI/` (about 1.7 GB). Add `-SkipAI` to the bootstrap to skip this.
+   - Unity runs headless to set up URP and TextMeshPro and to generate the textures, materials, meshes and the `WillowLake` scene.
 2. **Open the project** in Unity **6000.0.68f1**. Open `Assets/Scenes/WillowLake.unity` and press **Play**.
    The AI servers start automatically; the HUD dots in the top right turn green when Mei is ready (about 5–10 s).
    In the editor they keep running between Play sessions and close when Unity closes.

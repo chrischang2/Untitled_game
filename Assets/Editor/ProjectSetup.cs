@@ -41,11 +41,67 @@ namespace UntitledGame.EditorTools
             {
                 string full = Path.GetFullPath(c);
                 if (!File.Exists(full)) continue;
-                AssetDatabase.ImportPackage(full, false);
-                Debug.Log($"[ProjectSetup] Imported TMP essentials from {c}");
+                // AssetDatabase.ImportPackage is asynchronous and never finishes in batch mode,
+                // so unpack the .unitypackage (a tar.gz of guid/{pathname,asset,asset.meta}) ourselves.
+                int n = ExtractUnityPackage(full);
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                Debug.Log($"[ProjectSetup] Extracted {n} TMP essential assets from {c}");
                 return;
             }
             Debug.LogWarning("[ProjectSetup] TMP Essential Resources package not found.");
+        }
+
+        private static int ExtractUnityPackage(string packagePath)
+        {
+            var entries = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, byte[]>>();
+            using (var gz = new System.IO.Compression.GZipStream(File.OpenRead(packagePath), System.IO.Compression.CompressionMode.Decompress))
+            {
+                var header = new byte[512];
+                while (ReadFully(gz, header) && header[0] != 0)
+                {
+                    string name = Encoding.ASCII.GetString(header, 0, 100).TrimEnd('\0');
+                    string prefix = Encoding.ASCII.GetString(header, 345, 155).TrimEnd('\0');
+                    if (prefix.Length > 0) name = prefix + "/" + name;
+                    long size = System.Convert.ToInt64(Encoding.ASCII.GetString(header, 124, 12).Trim('\0', ' '), 8);
+                    char type = (char)header[156];
+                    var data = new byte[size];
+                    ReadFully(gz, data);
+                    long pad = (512 - size % 512) % 512;
+                    if (pad > 0) ReadFully(gz, new byte[pad]);
+                    if (type != '0' && type != '\0') continue; // directories, pax headers
+                    var parts = name.TrimStart('.', '/').Split('/');
+                    if (parts.Length != 2) continue;
+                    if (!entries.TryGetValue(parts[0], out var files)) entries[parts[0]] = files = new System.Collections.Generic.Dictionary<string, byte[]>();
+                    files[parts[1]] = data;
+                }
+            }
+            int count = 0;
+            foreach (var files in entries.Values)
+            {
+                if (!files.TryGetValue("pathname", out var pn)) continue;
+                string path = Encoding.UTF8.GetString(pn).Split('\n')[0].Trim();
+                if (files.TryGetValue("asset", out var asset))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.WriteAllBytes(path, asset);
+                }
+                else Directory.CreateDirectory(path);
+                if (files.TryGetValue("asset.meta", out var meta)) File.WriteAllBytes(path + ".meta", meta);
+                count++;
+            }
+            return count;
+        }
+
+        private static bool ReadFully(Stream s, byte[] buffer)
+        {
+            int read = 0;
+            while (read < buffer.Length)
+            {
+                int r = s.Read(buffer, read, buffer.Length - read);
+                if (r <= 0) return false;
+                read += r;
+            }
+            return true;
         }
 
         private static void ConfigureUrp()

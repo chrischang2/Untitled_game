@@ -29,6 +29,16 @@ namespace UntitledGame.EditorTools
             if (Application.isBatchMode && s.result != BuildResult.Succeeded) EditorApplication.Exit(1);
         }
 
+        /// <summary>
+        /// Fresh-clone setup: configure URP/TMP and generate everything that's gitignored
+        /// (materials, meshes, textures, the WillowLake scene). Run after Tools/fetch-assets.ps1.
+        /// </summary>
+        public static void Bootstrap()
+        {
+            ProjectSetup.Run();
+            SceneBuilder.Build();
+        }
+
         /// <summary>Batch helper: regenerate the scene and build the player.</summary>
         public static void RebuildAll()
         {
