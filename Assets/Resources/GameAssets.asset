@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8904fbb06f9c3dd41a04d62d6624f4db, type: 3}
+  m_Name: GameAssets
+  m_EditorClassIdentifier: 
+  fishSmallModel: {fileID: 6137379402050629872, guid: 0626c90840cbd3c4d84b48746b4bfc21, type: 3}
+  fishLargeModel: {fileID: 419833443081759879, guid: 96b32f60e5c0e0c4a9622134b0df32b3, type: 3}
+  bottleModel: {fileID: 7368063719036398713, guid: 0be50faff19bd864587bf77249818360, type: 3}
+  teacupModel: {fileID: 6707817569031680114, guid: 23f7df34d2383694ba915a50cd00f2a9, type: 3}
+  driftwoodModel: {fileID: 2856959210479451974, guid: e4dd1c6848f5645418041adf44a5bffd, type: 3}
+  fishMaterial: {fileID: 2100000, guid: 46fcdaf9995913a4799edd4316ea9bac, type: 2}
+  bobberRed: {fileID: 2100000, guid: 865224e4a78619e4984c6a8d24ca557c, type: 2}
+  bobberWhite: {fileID: 2100000, guid: bf00b59357c40e545b50da6884df7895, type: 2}
+  rodMaterial: {fileID: 2100000, guid: 359b9880ed740074cb35bd3f9a37f3a3, type: 2}
+  lineMaterial: {fileID: 2100000, guid: 4bdcd41de4409ca49a922fa5a3b2a308, type: 2}
+  splashMaterial: {fileID: 2100000, guid: 88f0ca031617cec43a2fbec3ef0146e9, type: 2}
+  rippleMaterial: {fileID: 2100000, guid: 2f1da6ea89f512847beb3d9607cad62e, type: 2}
+  fireflyMaterial: {fileID: 2100000, guid: 4c89af88facc109439ffaf3865e4d451, type: 2}
+  fireMaterial: {fileID: 2100000, guid: 072aef49101ffe74aad0c9f682534d64, type: 2}
+  smokeMaterial: {fileID: 2100000, guid: 92dda7dd25065d74c8d8751ae9cfe9c7, type: 2}
+  glowMaterial: {fileID: 2100000, guid: 518d60cd9e407984194cd99e18b0957b, type: 2}
+  rainMaterial: {fileID: 2100000, guid: c57778c5b13e81744bf80b7e45ae1529, type: 2}
+  sparkleMaterial: {fileID: 2100000, guid: d12c3f57432ec204293581775e55c6dc, type: 2}
+  roundedRect: {fileID: 21300000, guid: 7e712833651de264386c286b692ff857, type: 3}
+  roundedRectSmall: {fileID: 21300000, guid: e6d018aafe02a4149bdf903b955bfa54, type: 3}
+  softShadow: {fileID: 21300000, guid: 26a1717788650164a9ad0de0beb96e0a, type: 3}
+  circle: {fileID: 21300000, guid: 191f6a54b9a7d5d4daef5bc61e0e3009, type: 3}
+  fishIcon: {fileID: 21300000, guid: dc7107051c54455479b3b92d1b91995d, type: 3}
+  ring: {fileID: 21300000, guid: 2b74ce1c60db4244c80de7f4820bb543, type: 3}
