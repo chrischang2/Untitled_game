@@ -4,6 +4,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using UntitledGame.Companion;
 using UntitledGame.Core;
+using UntitledGame.Economy;
+using UntitledGame.Language;
 using UntitledGame.Environment;
 using UntitledGame.Fishing;
 
@@ -57,7 +59,9 @@ namespace UntitledGame.UI
         {
             var s = r.species;
             _name.text = s.name;
-            _chinese.text = $"{s.hanzi}  <size=22><color=#8A7563>{s.pinyin}</color></size>";
+            _chinese.text = r.inBucket
+                ? $"Worth about ¥{Catalog.FishPrice(s, r.length)}  <size=22><color=#8A7563>· bucket {Inventory.BucketCount}/{Inventory.BucketCapacity}</color></size>"
+                : "<color=#E0604E>Bucket full: released</color>";
             string size = s.IsFish ? $"{r.length:0.#} cm · " : "";
             var rc = FishDatabase.RarityColor(s.rarity);
             _details.text = $"{size}<color=#{ColorUtility.ToHtmlStringRGB(rc)}>{FishDatabase.RarityLabel(s.rarity)}</color>";
@@ -178,7 +182,7 @@ namespace UntitledGame.UI
                 var rec = CatchJournal.Get(s.id);
                 bool known = rec != null && rec.count > 0;
                 icon.color = known ? (s.IsFish ? s.body : UITheme.InkSoft) : new Color(0.3f, 0.25f, 0.2f, 0.25f);
-                name.text = known ? $"{s.name}\n<size=20><font-weight=400><color=#2C7F79>{s.hanzi}</color> <color=#8A7563>{s.pinyin}</color></size>" : "???";
+                name.text = known ? s.name : "???";
                 string when = $"{FishDatabase.WhenText(s)} · {FishDatabase.WhereText(s)}";
                 info.text = known
                     ? (s.IsFish ? $"Caught {rec.count}× · best {rec.bestLength:0.#} cm\n{when}" : $"Found {rec.count}×\n{s.blurb}")
@@ -193,53 +197,53 @@ namespace UntitledGame.UI
         private readonly List<System.Action> _refreshers = new List<System.Action>();
         private readonly CompanionBrain _brain;
 
-        public SettingsPanel(RectTransform canvas, CompanionBrain brain) : base(canvas, "Settings", new Vector2(980, 960), "Take a break")
+        public SettingsPanel(RectTransform canvas, CompanionBrain brain, System.Action openSaves) : base(canvas, "Settings", new Vector2(1040, 1040), "Take a break")
         {
             _brain = brain;
-            var list = UIFactory.Rect("Rows", Window).Stretch(60, 60, 110, 130);
-            UIFactory.VLayout(list.gameObject, 12, new RectOffset(0, 0, 0, 0));
+            var list = UIFactory.Rect("Rows", Window).Stretch(60, 60, 100, 120);
+            UIFactory.VLayout(list.gameObject, 10, new RectOffset(0, 0, 0, 0));
 
             var st = SaveSystem.Settings;
             SliderRow(list, "Music", () => st.musicVolume, v => st.musicVolume = v);
             SliderRow(list, "Nature sounds", () => st.ambienceVolume, v => st.ambienceVolume = v);
             SliderRow(list, "Effects", () => st.sfxVolume, v => st.sfxVolume = v);
             SliderRow(list, "Mei's voice", () => st.voiceVolume, v => st.voiceVolume = v);
-            OptionRow(list, "Mei speaks aloud", () => st.speakReplies ? "On" : "Subtitles only", () => st.speakReplies = !st.speakReplies);
-            OptionRow(list, "Mei's voice", () => VoiceLabel(st.voiceName), () =>
+            OptionRow(list, "Voices", () => st.speakReplies ? "On" : "Subtitles only", () => st.speakReplies = !st.speakReplies);
+            OptionRow(list, "Talking speed", () => st.voiceSpeed < 0.85f ? "Slow" : st.voiceSpeed < 0.95f ? "Relaxed" : "Normal", () =>
             {
-                st.voiceName = st.voiceName == "en_US-kristin-medium" ? "en_US-ljspeech-medium" : "en_US-kristin-medium";
+                st.voiceSpeed = st.voiceSpeed < 0.85f ? 0.9f : st.voiceSpeed < 0.95f ? 1f : 0.8f;
             });
-            OptionRow(list, "Talking speed", () => st.voiceSpeed < 0.95f ? "Relaxed" : st.voiceSpeed > 1.05f ? "Brisk" : "Normal", () =>
+            OptionRow(list, "Mei's English", () => st.immersion switch
             {
-                st.voiceSpeed = st.voiceSpeed < 0.95f ? 1f : st.voiceSpeed < 1.05f ? 1.12f : 0.9f;
-            });
-            OptionRow(list, "Talking", () => st.handsFree ? "Hands-free (beta)" : "Hold V to talk", () => st.handsFree = !st.handsFree);
+                ImmersionLevel.Beginner => "Lots (beginner)",
+                ImmersionLevel.Intermediate => "A little",
+                _ => "None (full immersion)",
+            }, () => st.immersion = (ImmersionLevel)(((int)st.immersion + 1) % 3));
+            OptionRow(list, "Pinyin", () => st.pinyin switch
+            {
+                PinyinMode.Always => "Always",
+                PinyinMode.NewWordsOnly => "New words only",
+                _ => "Off",
+            }, () => st.pinyin = (PinyinMode)(((int)st.pinyin + 1) % 3));
+            OptionRow(list, "Talking", () => st.handsFree ? "Hands-free (beta)" : "Hold V / B to talk", () => st.handsFree = !st.handsFree);
             OptionRow(list, "Mei starts chats", () => st.companionChatter ? "Sometimes" : "Only when asked", () => st.companionChatter = !st.companionChatter);
-            OptionRow(list, "Language", () => st.language == LanguageMode.English ? "English" : "Mandarin practice (beta)", () =>
-            {
-                st.language = st.language == LanguageMode.English ? LanguageMode.MandarinPractice : LanguageMode.English;
-            });
             OptionRow(list, "Day length", () => $"{Mathf.RoundToInt(st.realSecondsPerHour * 24f / 60f)} minutes", () =>
             {
                 st.realSecondsPerHour = st.realSecondsPerHour <= 30f ? 60f : st.realSecondsPerHour <= 60f ? 120f : 30f;
                 if (DayNightCycle.Instance != null) DayNightCycle.Instance.RealSecondsPerHour = st.realSecondsPerHour;
             });
 
-            var buttons = UIFactory.Rect("Buttons", Window).Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 40), new Vector2(860, 70));
+            var buttons = UIFactory.Rect("Buttons", Window).Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 34), new Vector2(960, 70));
             var hl = UIFactory.HLayout(buttons.gameObject, 20, new RectOffset(0, 0, 0, 0));
             hl.childAlignment = TextAnchor.MiddleCenter;
             hl.childForceExpandWidth = true;
-            UIFactory.Button(buttons, "Keep fishing", Close, UITheme.Teal).GetComponent<RectTransform>().SetLayout(64, 260);
+            UIFactory.Button(buttons, "Keep fishing", Close, UITheme.Teal).GetComponent<RectTransform>().SetLayout(64, 240);
+            UIFactory.Button(buttons, "Saves & logs", () => { Close(); openSaves?.Invoke(); }, UITheme.TealDark).GetComponent<RectTransform>().SetLayout(64, 240);
             UIFactory.Button(buttons, "New chat", () => { _brain?.ClearConversation(); GameEvents.Toast("Mei's conversation was reset."); Close(); }, UITheme.Orange)
                 .GetComponent<RectTransform>().SetLayout(64, 220);
             UIFactory.Button(buttons, "Quit", Quit, UITheme.Red).GetComponent<RectTransform>().SetLayout(64, 180);
         }
 
-        private static string VoiceLabel(string voice) => voice switch
-        {
-            "en_US-ljspeech-medium" => "Linda (LJ)",
-            _ => "Kristin",
-        };
 
         private RectTransform Row(Transform parent, string label)
         {
@@ -298,6 +302,7 @@ namespace UntitledGame.UI
         private static void Quit()
         {
             SaveSystem.Save();
+            ChatAudit.Close();
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
 #else
@@ -306,54 +311,40 @@ namespace UntitledGame.UI
         }
     }
 
-    /// <summary>Scrollable transcript of the conversation (handy for language practice later).</summary>
+    /// <summary>Scrollable transcript of every conversation (study material), with pinyin.</summary>
     public class ChatPanel
     {
         private readonly RectTransform _root;
         private readonly RectTransform _content;
         private readonly ScrollRect _scroll;
-        private readonly CompanionBrain _brain;
         private int _shown;
+        private bool _dirty = true;
 
         public bool IsOpen { get; private set; }
 
-        public ChatPanel(RectTransform canvas, CompanionBrain brain)
+        private void MarkDirty() => _dirty = true;
+
+        public void Dispose() => ConversationLog.Changed -= MarkDirty;
+
+        public ChatPanel(RectTransform canvas)
         {
-            _brain = brain;
             var panel = UIFactory.Panel(canvas, "ChatLog");
             _root = panel.rectTransform;
             _root.anchorMin = new Vector2(1, 0.18f);
             _root.anchorMax = new Vector2(1, 0.86f);
             _root.pivot = new Vector2(1, 0.5f);
-            _root.sizeDelta = new Vector2(560, 0);
+            _root.sizeDelta = new Vector2(600, 0);
             _root.anchoredPosition = new Vector2(-34, 0);
 
-            var title = UIFactory.Text(_root, "Title", "Chat with Mei", 34, UITheme.Ink, TextAlignmentOptions.TopLeft, title: true);
+            var title = UIFactory.Text(_root, "Title", "Conversations", 34, UITheme.Ink, TextAlignmentOptions.TopLeft, title: true);
             title.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(26, -16), new Vector2(400, 46));
             var hint = UIFactory.Text(_root, "Hint", "[C] close", 20, UITheme.InkSoft, TextAlignmentOptions.TopRight);
             hint.rectTransform.Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-26, -24), new Vector2(160, 30));
 
-            var viewport = UIFactory.Rect("Viewport", _root).Stretch(20, 20, 72, 20);
-            viewport.gameObject.AddComponent<RectMask2D>();
-            var vpImg = viewport.gameObject.AddComponent<Image>();
-            vpImg.color = new Color(1, 1, 1, 0.01f);
-            _content = UIFactory.Rect("Content", viewport);
-            _content.anchorMin = new Vector2(0, 1);
-            _content.anchorMax = new Vector2(1, 1);
-            _content.pivot = new Vector2(0.5f, 1);
-            _content.sizeDelta = Vector2.zero;
-            UIFactory.VLayout(_content.gameObject, 10, new RectOffset(6, 6, 6, 6));
-            var fitter = _content.gameObject.AddComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            _scroll = _root.gameObject.AddComponent<ScrollRect>();
-            _scroll.viewport = viewport;
-            _scroll.content = _content;
-            _scroll.horizontal = false;
-            _scroll.vertical = true;
-            _scroll.movementType = ScrollRect.MovementType.Clamped;
-            _scroll.scrollSensitivity = 40f;
-
+            var area = UIFactory.Rect("Area", _root).Stretch(20, 20, 72, 20);
+            _content = UIFactory.ScrollList(area, 10);
+            _scroll = area.GetComponent<ScrollRect>();
+            ConversationLog.Changed += MarkDirty;
             _root.gameObject.SetActive(false);
         }
 
@@ -366,6 +357,7 @@ namespace UntitledGame.UI
         {
             IsOpen = true;
             _root.gameObject.SetActive(true);
+            _dirty = true;
             AudioManager.Instance?.PlaySfx("SFX/rpg_bookFlip1", 0.4f);
         }
 
@@ -377,18 +369,22 @@ namespace UntitledGame.UI
 
         public void Update()
         {
-            if (_brain == null || !IsOpen) return;
-            if (_shown > _brain.Log.Count)
+            if (!IsOpen || !_dirty) return;
+            _dirty = false;
+            var entries = ConversationLog.Entries;
+            if (_shown > entries.Count)
             {
                 foreach (Transform c in _content) Object.Destroy(c.gameObject);
                 _shown = 0;
             }
             bool added = false;
-            while (_shown < _brain.Log.Count)
+            while (_shown < entries.Count)
             {
-                var (speaker, text) = _brain.Log[_shown++];
-                bool mei = speaker == CompanionPersona.Name;
-                var line = UIFactory.Text(_content, "Line", $"<b><color=#{(mei ? "2C7F79" : "C7713A")}>{speaker}</color></b>  {text}", 23, UITheme.Ink, TextAlignmentOptions.TopLeft);
+                var e = entries[_shown++];
+                string color = e.fromPlayer ? "C7713A" : e.speaker == CompanionPersona.Name ? "2C7F79" : "B8612E";
+                string py = PinyinDisplay.For(e.text);
+                string body = $"<b><color=#{color}>{e.speaker}</color></b>  {e.text}" + (py.Length > 0 ? $"\n<size=18><i><color=#6E8C88>{py}</color></i></size>" : "");
+                var line = UIFactory.Text(_content, "Line", body, 23, UITheme.Ink, TextAlignmentOptions.TopLeft);
                 line.textWrappingMode = TextWrappingModes.Normal;
                 added = true;
             }

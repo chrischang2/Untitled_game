@@ -8,7 +8,12 @@ namespace UntitledGame.GenAI
     public static class SpeechText
     {
         private static readonly Regex StageDirections = new Regex(@"\*[^*]{1,60}\*", RegexOptions.Compiled);
-        private static readonly Regex Markdown = new Regex(@"[*_#`~>\[\]]", RegexOptions.Compiled);
+        // Square brackets are kept: tutors gloss words as 汉字 [meaning].
+        private static readonly Regex Markdown = new Regex(@"[*_#`~>]", RegexOptions.Compiled);
+        // Model-written pinyin (often wrong; the game adds its own from CC-CEDICT): runs of tone-marked syllables.
+        private const string Toned = "āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ";
+        private static readonly Regex ModelPinyin = new Regex(
+            @"\s*[\(（]?(?:[A-Za-zü]*[" + Toned + @"][A-Za-zü" + Toned + @"]*[\s,，']*)+[\)）]?", RegexOptions.Compiled);
         private static readonly Regex Spaces = new Regex(@"\s+", RegexOptions.Compiled);
         private static readonly Regex Pinyin = new Regex(@"\s*[\(（][^\)）]{1,60}[\)）]", RegexOptions.Compiled);
         private static readonly Regex GameNotes = new Regex(@"\[(game|context)[^\]]*\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -20,6 +25,8 @@ namespace UntitledGame.GenAI
             text = GameNotes.Replace(text, "");
             text = StageDirections.Replace(text, "");
             text = Markdown.Replace(text, "");
+            text = ModelPinyin.Replace(text, " ");
+            text = text.Replace("[]", "").Replace("()", "");
             text = RemoveEmoji(text);
             text = LeakedPrefix.Replace(text, "");
             return Spaces.Replace(text, " ").Trim();

@@ -106,6 +106,14 @@ namespace UntitledGame.EditorTools
             ga.teacupModel = RemappedPrefab("FoodKit/cup-tea");
             ga.driftwoodModel = RemappedPrefab("NatureKit/log");
             ga.fishMaterial = fishMat;
+            ga.itemPrefabs.Clear();
+            foreach (var item in UntitledGame.Economy.Catalog.Items)
+            {
+                if (string.IsNullOrEmpty(item.model) || item.model.StartsWith("proc:")) continue;
+                var prefab = RemappedPrefab(item.model);
+                if (prefab != null) ga.itemPrefabs.Add(new ItemPrefab { id = item.id, prefab = prefab });
+                else Debug.LogWarning($"[SceneBuilder] Missing model for item {item.id}: {item.model}");
+            }
             ga.bobberRed = bobberRed;
             ga.bobberWhite = bobberWhite;
             ga.rodMaterial = rod;
@@ -134,11 +142,22 @@ namespace UntitledGame.EditorTools
             var src = Model(kitPath);
             if (src == null) return null;
             Directory.CreateDirectory(Folder + "/Prefabs");
-            var inst = (GameObject)PrefabUtility.InstantiatePrefab(src);
-            KenneyMaterials.Remap(inst, KenneyMaterials.KitOf(kitPath));
+            var model = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            KenneyMaterials.Remap(model, KenneyMaterials.KitOf(kitPath));
+            PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            // The furniture kit pivots at a corner: re-pivot it at the bottom centre.
+            var root = new GameObject(System.IO.Path.GetFileName(kitPath));
+            var rs = model.GetComponentsInChildren<Renderer>();
+            if (rs.Length > 0 && kitPath.StartsWith("FurnitureKit/"))
+            {
+                Bounds b = rs[0].bounds;
+                foreach (var r in rs) b.Encapsulate(r.bounds);
+                model.transform.position = new Vector3(-b.center.x, -b.min.y, -b.center.z);
+            }
+            model.transform.SetParent(root.transform, true);
             string path = $"{Folder}/Prefabs/{kitPath.Replace('/', '_')}.prefab";
-            var prefab = PrefabUtility.SaveAsPrefabAsset(inst, path);
-            UnityEngine.Object.DestroyImmediate(inst);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
+            UnityEngine.Object.DestroyImmediate(root);
             return prefab;
         }
 

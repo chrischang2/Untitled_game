@@ -8,9 +8,11 @@ using UnityEngine.Rendering.Universal;
 using UntitledGame.CameraControl;
 using UntitledGame.Companion;
 using UntitledGame.Core;
+using UntitledGame.Economy;
 using UntitledGame.Environment;
 using UntitledGame.Fishing;
 using UntitledGame.GenAI;
+using UntitledGame.Home;
 using UntitledGame.Player;
 using UntitledGame.Progression;
 using UntitledGame.UI;
@@ -64,7 +66,8 @@ namespace UntitledGame.EditorTools
             var cam = BuildCamera();
             var player = BuildPlayer(cam);
             var mei = BuildMei(player, out var brain, out var voice);
-            BuildCritters(dockEnd, dockRot);
+            BuildMarket(player);
+            BuildCritters(dockEnd, dockRot, player);
             BuildPostProcessing();
             BuildSystems(systems, dayNight, player, mei, brain, voice, cam);
 
@@ -102,6 +105,7 @@ namespace UntitledGame.EditorTools
 
         private static readonly Color GrassA = C("#86BA5C"), GrassB = C("#72AB50"), GrassC = C("#A3C765"), Forest = C("#5F9A48");
         private static readonly Color Sand = C("#DDC48E"), WetSand = C("#BFA676"), Dirt = C("#BE9464"), Rock = C("#9A9181");
+        private static readonly Color Plaza = C("#CDB894");
         private static readonly Color BedShallow = C("#BFAE7C"), BedDeep = C("#56694C"), FarHill = C("#5B8C5A");
 
         private static Color TerrainColor(Vector3 p, Vector3 n)
@@ -133,6 +137,8 @@ namespace UntitledGame.EditorTools
             if (d > 0.4f && path < 1.35f + fine * 0.4f) c = Color.Lerp(Dirt, c, Mathf.InverseLerp(0.7f, 1.6f, path) * 0.5f);
             float camp = Vector2.Distance(new Vector2(p.x, p.z), WorldShape.CampCenter);
             if (camp < 4.5f) c = Color.Lerp(c, Dirt, Mathf.InverseLerp(4.5f, 2f, camp) * 0.55f);
+            float plaza = Vector2.Distance(new Vector2(p.x, p.z), WorldShape.MarketCenter);
+            if (plaza < WorldShape.MarketRadius) c = Color.Lerp(c, Plaza, Mathf.InverseLerp(WorldShape.MarketRadius, WorldShape.MarketRadius * 0.7f, plaza) * (0.75f + fine * 0.2f));
 
             float jitter = 1f + ((float)_rng.NextDouble() - 0.5f) * 0.06f;
             return c * jitter;
@@ -263,7 +269,8 @@ namespace UntitledGame.EditorTools
 
         private static GameObject Place(string kitPath, Transform parent, Vector3 pos, float yaw, float scale, bool isStatic = true, bool shadows = true)
         {
-            var prefab = ComfyAssets.Model(kitPath);
+            // The furniture kit is authored with corner pivots; use the re-pivoted prefab.
+            var prefab = kitPath.StartsWith("FurnitureKit/") ? ComfyAssets.RemappedPrefab(kitPath) : ComfyAssets.Model(kitPath);
             if (prefab == null)
             {
                 Debug.LogWarning($"[SceneBuilder] Missing model {kitPath}");
@@ -625,6 +632,174 @@ namespace UntitledGame.EditorTools
             AddLight(fx, new Vector3(0, 0.6f, 0), C("#FF9A4A"), 10f, 3.2f, 0.9f, true, 1.6f);
         }
 
+
+        // ------------------------------------------------------------------ market
+
+        private static readonly string[] StallModels = { "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red" };
+        private static readonly string[] KeeperModels =
+        {
+            "MiniCharacters/character-male-d", "MiniCharacters/character-female-a", "MiniCharacters/character-male-e", "MiniCharacters/character-female-c",
+        };
+
+        private static Bounds ModelBounds(GameObject go)
+        {
+            var rs = go.GetComponentsInChildren<Renderer>();
+            Bounds b = rs[0].bounds;
+            foreach (var r in rs) b.Encapsulate(r.bounds);
+            return b;
+        }
+
+        private static void BuildMarket(GameObject player)
+        {
+            var market = new GameObject("Market").transform;
+            market.SetParent(_env, false);
+            Vector2 c2 = WorldShape.MarketCenter;
+            Vector3 center = new Vector3(c2.x, WorldShape.MarketHeight, c2.y);
+
+            for (int i = 0; i < WorldShape.StallCount && i < Catalog.Shops.Count; i++)
+            {
+                var shop = Catalog.Shops[i];
+                Vector2 s2 = WorldShape.StallPosition(i);
+                Vector3 pos = Ground(s2.x, s2.y, 0.02f);
+                Vector3 front = center - pos;
+                front.y = 0f;
+                front.Normalize();
+                float yaw = Quaternion.LookRotation(front).eulerAngles.y;
+
+                var stallRoot = new GameObject("Stall_" + shop.id).transform;
+                stallRoot.SetParent(market, false);
+                stallRoot.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
+
+                // Stall: scale to ~3.4 m wide, open side towards the plaza.
+                const float scale = StallScale;
+                // Measure the footprint unrotated (the model's long side runs along its local Z), then turn it.
+                var stall = Place(StallModels[i], stallRoot, pos, 0f, scale);
+                Bounds local = ModelBounds(stall);
+                float depth = StallYawOffset % 180f == 0f ? local.size.z : local.size.x;
+                var col = stall.AddComponent<BoxCollider>();
+                col.center = stall.transform.InverseTransformPoint(local.center);
+                col.size = local.size / scale * 0.85f;
+                stall.transform.rotation = Quaternion.Euler(0f, yaw + StallYawOffset, 0f);
+                Bounds b = ModelBounds(stall);
+                float counterY = b.min.y + b.size.y * CounterHeightFraction;
+
+                // Shopkeeper behind the counter.
+                var keeperGo = new GameObject(shop.keeperEnglish);
+                keeperGo.transform.SetParent(stallRoot, false);
+                keeperGo.transform.position = pos - front * (depth * 0.5f + KeeperBehind);
+                keeperGo.transform.rotation = Quaternion.LookRotation(front);
+                var anim = AttachModel(keeperGo, KeeperModels[i], CharacterScale);
+                keeperGo.AddComponent<AudioSource>();
+                var voice = keeperGo.AddComponent<CharacterVoice>();
+                voice.Configure(shop.voice, "", shop.pitch);
+                var brain = keeperGo.AddComponent<ShopkeeperBrain>();
+                brain.Configure(shop.id, voice, player.transform);
+                keeperGo.AddComponent<TalkingHead>().Configure(anim, voice);
+
+                // Goods on the counter, with price tags.
+                Vector3 right = Vector3.Cross(Vector3.up, front);
+                Vector3 counterFront = pos + front * CounterForward;
+                BuildDisplay(shop, stallRoot, counterFront, right, counterY, yaw);
+
+                // A lantern beside each stall.
+                var lamp = Place("FantasyTown/lantern", stallRoot, Ground(pos.x + right.x * 2.3f + front.x * 0.8f, pos.z + right.z * 2.3f + front.z * 0.8f), 0f, 1.25f);
+                if (lamp != null) AddLight(lamp.transform, new Vector3(0, 1.38f, 0), C("#FFC477"), 8f, 2.0f, 0f, false, 0.9f);
+            }
+
+            // A bit of market clutter and a sign at the entrance.
+            Vector2 entrance = c2 - new Vector2(WorldShape.MarketRadius * 0.75f, 0f);
+            Place("NatureKit/sign", market, Ground(entrance.x, entrance.y + 2f), 90f + 180f, 2.8f);
+            Place("FantasyTown/cart", market, Ground(c2.x - 3f, c2.y - 7f), 30f, 1.4f);
+            Place("PirateKit/barrel", market, Ground(c2.x + 1f, c2.y + 7.8f), 0f, 0.55f);
+            Place("PirateKit/crate", market, Ground(c2.x - 1.5f, c2.y + 7.5f), 20f, 0.55f);
+            Place("FantasyTown/stall-bench", market, Ground(c2.x - 2.5f, c2.y + 3.5f), 90f, 1.6f);
+        }
+
+        // Tuned from preview captures of Kenney's stall models.
+        private const float StallScale = 1.6f;
+        private const float StallYawOffset = 90f;
+        private const float CounterHeightFraction = 0.345f;
+        private const float CounterForward = 0.15f;
+        private const float KeeperBehind = 0.3f;
+
+        /// <summary>Spawns a catalog item's (re-pivoted, remapped) prefab for a display.</summary>
+        private static GameObject PlaceItem(string itemId, Transform parent, Vector3 pos, float yaw, float scaleMul = 1f)
+        {
+            var def = Catalog.Get(itemId);
+            var prefab = def != null ? GameAssets.Instance.PrefabFor(itemId) : null;
+            if (prefab == null) return null;
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
+            go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
+            go.transform.localScale = Vector3.one * def.modelScale * scaleMul;
+            Tag(go, itemId);
+            return go;
+        }
+
+        private static void Tag(GameObject go, string itemId)
+        {
+            if (go == null || string.IsNullOrEmpty(itemId)) return;
+            go.AddComponent<PriceTag>().itemId = itemId;
+        }
+
+        private static void BuildDisplay(ShopDef shop, Transform parent, Vector3 counter, Vector3 right, float y, float yaw)
+        {
+            Vector3 front = Vector3.Cross(right, Vector3.up);
+            Vector3 At(float side) => new Vector3(counter.x + right.x * side, y, counter.z + right.z * side);
+            Vector3 g(float side, float fwd) => Ground(counter.x + right.x * side + front.x * fwd, counter.z + right.z * side + front.z * fwd);
+            switch (shop.id)
+            {
+                case "tackle":
+                {
+                    // Rods leaning on the counter.
+                    var rods = new GameObject("Rods");
+                    rods.transform.SetParent(parent, false);
+                    rods.transform.position = g(-0.9f, 1.25f);
+                    Color[] colors = { C("#DDBD6B"), C("#2E3440"), C("#FFC640") };
+                    string[] ids = { "rod_bamboo", "rod_carbon", "rod_gold" };
+                    for (int k = 0; k < 3; k++)
+                    {
+                        var rod = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                        Object.DestroyImmediate(rod.GetComponent<Collider>());
+                        rod.name = ids[k];
+                        rod.transform.SetParent(rods.transform, false);
+                        rod.transform.localPosition = new Vector3(k * 0.28f, 0.75f, 0f);
+                        rod.transform.localScale = new Vector3(0.035f, 0.8f, 0.035f);
+                        rod.transform.localRotation = Quaternion.Euler(0f, yaw, 12f);
+                        var mat = new Material(ComfyAssets.PlainLitMat) { name = "DisplayRod_" + ids[k] };
+                        mat.SetColor("_BaseColor", colors[k]);
+                        mat.SetFloat("_VertexColorWeight", 0f);
+                        string matPath = $"{ComfyAssets.MatFolder}/DisplayRod_{ids[k]}.mat";
+                        AssetDatabase.DeleteAsset(matPath);
+                        AssetDatabase.CreateAsset(mat, matPath);
+                        rod.GetComponent<Renderer>().sharedMaterial = mat;
+                        Tag(rod, ids[k]);
+                    }
+                    Tag(Place("SurvivalKit/box-open", parent, At(-0.4f), yaw + 10f, 0.75f), "bait_worm");
+                    Tag(Place("SurvivalKit/box", parent, At(0.05f), yaw - 5f, 0.75f), "bait_shrimp");
+                    Tag(Place("SurvivalKit/bucket", parent, At(0.55f), yaw, 1.4f), "bucket_big");
+                    break;
+                }
+                case "fish":
+                    for (int k = 0; k < 3; k++) Place("FoodKit/fish", parent, At(-0.62f + k * 0.36f) + front * 0.12f, yaw + 90f + k * 7f, 0.55f);
+                    Place("SurvivalKit/bucket", parent, At(0.7f), yaw, 1.4f);
+                    break;
+                case "furniture":
+                {
+                    PlaceItem("chair", parent, g(-1.7f, 1.9f), yaw + 200f);
+                    PlaceItem("plant", parent, g(1.8f, 1.7f), yaw);
+                    PlaceItem("floor_lamp", parent, g(-1.6f, 0.2f), yaw);
+                    PlaceItem("radio", parent, At(-0.35f), yaw);
+                    PlaceItem("teddy", parent, At(0.45f), yaw + 20f);
+                    break;
+                }
+                case "pet":
+                    Tag(Place("FurnitureKit/cardboardBoxClosed", parent, At(-0.5f), yaw + 5f, 0.1f), "cat_food");
+                    Tag(Place("FoodKit/fish-bones", parent, At(0.1f), yaw + 40f, 1.1f), "cat_treat");
+                    PlaceItem("cat_box", parent, g(1.7f, 1.6f), yaw - 8f);
+                    break;
+            }
+        }
+
         // ------------------------------------------------------------------ nature scatter
 
         private static readonly string[] Broadleaf =
@@ -652,6 +827,7 @@ namespace UntitledGame.EditorTools
             if (Vector2.Distance(new Vector2(x, z), WorldShape.CampCenter) < WorldShape.CampRadius + campPad) return true;
             if (WorldShape.DistanceToPath(x, z) < pathPad) return true;
             if (WorldShape.IsOnDock(x, z, 3f)) return true;
+            if (WorldShape.InMarket(x, z, campPad + 1f)) return true;
             if (Vector2.Distance(new Vector2(x, z), new Vector2(fire.x, fire.z)) < 3f) return true;
             return false;
         }
@@ -856,7 +1032,7 @@ namespace UntitledGame.EditorTools
             return go;
         }
 
-        private static GameObject BuildMei(GameObject player, out CompanionBrain brain, out CompanionVoice voice)
+        private static GameObject BuildMei(GameObject player, out CompanionBrain brain, out CharacterVoice voice)
         {
             var go = new GameObject("Mei");
             Vector3 p = player.transform.position + player.transform.right * 1.8f - player.transform.forward * 0.6f;
@@ -865,7 +1041,8 @@ namespace UntitledGame.EditorTools
 
             var anim = AttachModel(go, "MiniCharacters/character-female-f", CharacterScale);
             go.AddComponent<AudioSource>();
-            voice = go.AddComponent<CompanionVoice>();
+            voice = go.AddComponent<CharacterVoice>();
+            voice.Configure(SpeechEngine.VoiceMei, SpeechEngine.VoiceEnglish, 1f);
             var controller = go.AddComponent<CompanionController>();
             var unlocks = go.AddComponent<PhraseUnlockSystem>();
             brain = go.AddComponent<CompanionBrain>();
@@ -879,18 +1056,18 @@ namespace UntitledGame.EditorTools
             return go;
         }
 
-        private static void BuildCritters(Vector3 dockEnd, Quaternion dockRot)
+        private static void BuildCritters(Vector3 dockEnd, Quaternion dockRot, GameObject player)
         {
             var critters = new GameObject("Critters").transform;
             critters.SetParent(_env, false);
 
-            // Mochi the cat, napping at the end of the dock.
-            var cat = new GameObject("Mochi");
+            // Tangyuan (汤圆) the cat, napping at the end of the dock.
+            var cat = new GameObject("Tangyuan");
             cat.transform.SetParent(critters, false);
             cat.transform.position = dockEnd + dockRot * new Vector3(-0.7f, 0f, 0.3f);
             cat.transform.rotation = dockRot * Quaternion.Euler(0, -130f, 0);
             var catAnim = AttachModel(cat, "CubePets/animal-cat", 0.3f);
-            cat.AddComponent<AmbientCritter>().Configure(catAnim, "idle", "eat", "gesture-positive");
+            cat.AddComponent<PetController>().Configure(catAnim, player.transform);
 
             // A couple of shy deer and bunnies around the woods.
             var spots = new[] { (a: 40f, r: 18f, m: "CubePets/animal-deer", s: 0.55f), (a: 150f, r: 22f, m: "CubePets/animal-deer", s: 0.5f), (a: 250f, r: 9f, m: "CubePets/animal-bunny", s: 0.2f), (a: 300f, r: 12f, m: "CubePets/animal-fox", s: 0.3f) };
@@ -942,10 +1119,11 @@ namespace UntitledGame.EditorTools
         }
 
         private static void BuildSystems(Transform systems, DayNightCycle dayNight, GameObject player, GameObject mei,
-            CompanionBrain brain, CompanionVoice voice, Camera cam)
+            CompanionBrain brain, CharacterVoice voice, Camera cam)
         {
             var boot = systems.gameObject.AddComponent<GameBootstrap>();
-            systems.gameObject.AddComponent<SelfTest>();
+            // Its own root object: it survives the scene reload in its save/load checks, and must not drag other systems along.
+            new GameObject("SelfTest").AddComponent<SelfTest>();
             var bso = new SerializedObject(boot);
             bso.FindProperty("dayNight").objectReferenceValue = dayNight;
             bso.ApplyModifiedPropertiesWithoutUndo();
@@ -957,7 +1135,11 @@ namespace UntitledGame.EditorTools
             voiceGo.transform.SetParent(systems, false);
             var mic = voiceGo.AddComponent<MicRecorder>();
             var vc = voiceGo.AddComponent<VoiceChatController>();
-            vc.Configure(brain, mic);
+            vc.Configure(brain, mic, player.transform);
+
+            new GameObject("HomeItems").AddComponent<HomeItems>().transform.SetParent(systems, false);
+            new GameObject("Placement").AddComponent<PlacementController>().transform.SetParent(systems, false);
+            var interaction = player.AddComponent<InteractionController>();
 
             // Weather + rain.
             var weatherGo = new GameObject("Weather");
@@ -1011,7 +1193,7 @@ namespace UntitledGame.EditorTools
             var uiGo = new GameObject("UI");
             uiGo.transform.SetParent(systems, false);
             var ui = uiGo.AddComponent<GameUI>();
-            ui.Configure(brain, voice, mei.transform, player.transform, player.GetComponent<FishingController>(), vc);
+            ui.Configure(brain, player.transform, player.GetComponent<FishingController>(), vc, interaction);
         }
 
         private static void BuildFireflies(Transform parent, Vector3 pos)

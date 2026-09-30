@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UntitledGame.CameraControl;
 using UntitledGame.Core;
+using UntitledGame.Economy;
 using UntitledGame.Environment;
 using UntitledGame.Player;
 using Random = UnityEngine.Random;
@@ -99,7 +100,7 @@ namespace UntitledGame.Fishing
 
         private void Update()
         {
-            bool canAct = !InputGate.GameplayBlocked;
+            bool canAct = !InputGate.GameplayBlocked && !Home.PlacementController.Active;
             bool down = (canAct && Input.GetMouseButtonDown(0) && !PointerOverUI) || _simulateDown;
             bool held = (canAct && Input.GetMouseButton(0)) || SimulateHold;
             bool up = canAct && Input.GetMouseButtonUp(0);
@@ -165,7 +166,7 @@ namespace UntitledGame.Fishing
 
             if (up || !held)
             {
-                float dist = Mathf.Lerp(minCast, maxCast, Power);
+                float dist = Mathf.Lerp(minCast, Inventory.Rod.castDistance > 0f ? Inventory.Rod.castDistance : maxCast, Power);
                 Vector3 fwd = player.transform.forward;
                 fwd.y = 0f;
                 fwd.Normalize();
@@ -226,6 +227,8 @@ namespace UntitledGame.Fishing
                 depth = WorldShape.WaterDepth(b.x, b.z),
                 raining = Weather.Instance != null && Weather.Instance.IsRaining,
                 nearLilies = Physics.CheckSphere(b, 2.5f, 1 << 4, QueryTriggerInteraction.Collide), // layer 4 = Water props
+                bait = Inventory.Bait,
+                rareBonus = Inventory.Rod.rareBonus,
             };
         }
 
@@ -236,6 +239,8 @@ namespace UntitledGame.Fishing
             if (ctx.raining) t *= 0.75f;
             if (ctx.depth < 0.6f) t *= 1.3f;
             if (spooked) t += Random.Range(2.5f, 5f);
+            var bait = Inventory.Bait;
+            if (bait != null) t /= Mathf.Max(0.5f, bait.biteSpeed);
             _biteTimer = t;
             _nextNibble = t - Random.Range(0.8f, Mathf.Min(4f, t - 0.5f));
         }
@@ -277,7 +282,8 @@ namespace UntitledGame.Fishing
                 var ctx = Context();
                 _species = FishDatabase.Roll(ctx);
                 _length = FishDatabase.RollLength(_species);
-                BiteTimeLeft = biteWindow * Mathf.Lerp(1.1f, 0.8f, _species.difficulty);
+                if (ctx.bait != null) Inventory.ConsumeBait(); // the fish took the bait
+                BiteTimeLeft = biteWindow * Mathf.Lerp(1.1f, 0.8f, _species.difficulty) * (Inventory.HasAccessory("bobber_fancy") ? 1.35f : 1f);
                 var b = rod.BobberPosition;
                 var rest = new Vector3(b.x, WorldShape.WaterLevel, b.z);
                 rod.SetBobberRest(rest, 0.16f);
@@ -359,8 +365,9 @@ namespace UntitledGame.Fishing
 
             if (reel)
             {
-                Tension += Time.deltaTime * (FishPulling ? 0.5f + d * 0.55f : 0.16f);
-                FishDistance -= Time.deltaTime * (FishPulling ? 0.35f : 1.9f + (1f - d) * 0.9f);
+                var gear = Inventory.Rod;
+                Tension += Time.deltaTime * (FishPulling ? 0.5f + d * 0.55f : 0.16f) * gear.tensionRate;
+                FishDistance -= Time.deltaTime * (FishPulling ? 0.35f : 1.9f + (1f - d) * 0.9f) * gear.reelSpeed;
             }
             else
             {
@@ -375,7 +382,8 @@ namespace UntitledGame.Fishing
             if (Tension >= 0.999f)
             {
                 _overTension += Time.deltaTime;
-                if (_overTension > 0.35f)
+                float strength = Inventory.Rod.lineStrength + (Inventory.HasAccessory("line_strong") ? 0.3f : 0f);
+                if (_overTension > strength)
                 {
                     AudioManager.Instance?.PlaySfx("SFX/escape", 0.6f);
                     GameEvents.Toast("Snap! The line broke. Ease off when it pulls!");
@@ -435,6 +443,8 @@ namespace UntitledGame.Fishing
             AudioManager.Instance?.PlayAt("SFX/splash_big1", player.transform.position + player.transform.forward, 0.5f);
             SetState(FishingState.Landing);
             FishCaught?.Invoke(LastCatch);
+            if (!LastCatch.inBucket)
+                GameEvents.Toast($"Your bucket is full ({Inventory.BucketCapacity}), so it swims free. Sell fish at the market!", 4f);
         }
 
         private void UpdateLanding(bool dismiss)

@@ -21,6 +21,8 @@ namespace UntitledGame.Fishing
         private float _pitch = 35f;
         private float _pitchVel;
         private Vector3 _bobberRest;
+        private Renderer _shaft;
+        private MaterialPropertyBlock _mpb;
         private float _dip;
 
         /// <summary>Upward angle of the rod in degrees (90 = straight up, 0 = horizontal, >90 = over the shoulder).</summary>
@@ -50,6 +52,7 @@ namespace UntitledGame.Fishing
             grip.name = "Grip";
             var shaft = Prim(PrimitiveType.Cylinder, _rodPivot, new Vector3(0f, rodLength * 0.5f, 0f), new Vector3(0.028f, rodLength * 0.5f, 0.028f), ga.rodMaterial);
             shaft.name = "Shaft";
+            _shaft = shaft.GetComponent<Renderer>();
             var reel = Prim(PrimitiveType.Cylinder, _rodPivot, new Vector3(0f, 0.36f, 0.05f), new Vector3(0.09f, 0.02f, 0.09f), ga.bobberWhite);
             reel.localRotation = Quaternion.Euler(0f, 0f, 90f);
             reel.name = "Reel";
@@ -89,6 +92,28 @@ namespace UntitledGame.Fishing
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
             return go.transform;
         }
+
+        /// <summary>Tints the shaft to match the equipped rod.</summary>
+        public void ApplyRodStyle(string rodId)
+        {
+            if (_shaft == null) return;
+            Color c = rodId switch
+            {
+                "rod_bamboo" => new Color(0.86f, 0.74f, 0.42f),
+                "rod_carbon" => new Color(0.18f, 0.2f, 0.24f),
+                "rod_gold" => new Color(1f, 0.78f, 0.25f),
+                _ => new Color(0.55f, 0.36f, 0.2f),
+            };
+            _mpb ??= new MaterialPropertyBlock();
+            _mpb.SetColor("_BaseColor", c);
+            _mpb.SetColor("_EmissionColor", rodId == "rod_gold" ? new Color(0.25f, 0.18f, 0.02f) : Color.black);
+            _shaft.SetPropertyBlock(_mpb);
+        }
+
+        private void OnEnable() => Economy.Inventory.Changed += RefreshStyle;
+        private void OnDisable() => Economy.Inventory.Changed -= RefreshStyle;
+        private void Start() => RefreshStyle();
+        private void RefreshStyle() => ApplyRodStyle(Economy.Inventory.Rod.id);
 
         public void ShowBobber(Vector3 position)
         {

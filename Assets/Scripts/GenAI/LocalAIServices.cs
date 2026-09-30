@@ -1,12 +1,11 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
-using UntitledGame.Core;
 using Debug = UnityEngine.Debug;
 
 namespace UntitledGame.GenAI
@@ -14,9 +13,9 @@ namespace UntitledGame.GenAI
     public enum ServiceStatus { NotInstalled, Starting, Ready, Failed }
 
     /// <summary>
-    /// Boots and babysits the local AI stack: llama-server (chat), whisper-server (speech-to-text)
-    /// and Piper (text-to-speech). Everything runs on this machine; nothing leaves it.
-    /// Servers already listening on the configured ports are reused (handy in the editor).
+    /// Boots and babysits the local AI stack: llama-server (chat, out of process) and sherpa-onnx
+    /// (Mandarin speech recognition + voices, in process). Everything runs on this machine.
+    /// A llama-server already listening on the configured port is reused (handy in the editor).
     /// </summary>
     public class LocalAIServices : MonoBehaviour
     {
@@ -24,6 +23,7 @@ namespace UntitledGame.GenAI
 
         public string Root { get; private set; }
         public LocalAIConfig Config { get; private set; }
+        public SpeechEngine Speech { get; private set; }
 
         public ServiceStatus LlmStatus { get; private set; } = ServiceStatus.NotInstalled;
         public ServiceStatus SttStatus { get; private set; } = ServiceStatus.NotInstalled;
@@ -36,13 +36,10 @@ namespace UntitledGame.GenAI
         public string LlmModelName => string.IsNullOrEmpty(Config?.externalLlmUrl)
             ? Path.GetFileNameWithoutExtension(Config?.llmModel ?? "local")
             : Config.externalLlmModel;
-        public string WhisperBaseUrl => $"http://127.0.0.1:{Config?.whisperPort ?? 8766}";
 
         public event Action StatusChanged;
 
-        private Process _llm, _whisper;
-        private PiperTTS _ttsEnglish, _ttsChinese;
-        private string _ttsVoiceKey;
+        private Process _llm;
         private string LogDir => Root != null ? Path.Combine(Root, "logs") : Application.temporaryCachePath;
 
         private void Awake()
@@ -53,6 +50,9 @@ namespace UntitledGame.GenAI
                 return;
             }
             Instance = this;
+            // Survives scene reloads (loading a save slot), so the model and voices stay loaded.
+            transform.SetParent(null);
+            DontDestroyOnLoad(gameObject);
             Root = LocalAIConfig.FindRoot();
             Config = LocalAIConfig.Load(Root);
             if (Root == null) LastError = "LocalAI folder not found. Run Tools/setup-local-ai.ps1 to install the voice + AI stack.";
@@ -61,22 +61,15 @@ namespace UntitledGame.GenAI
         private void Start()
         {
             StartCoroutine(BringUpLlm());
-            StartCoroutine(BringUpWhisper());
-            BringUpTts();
-            SaveSystem.SettingsChanged += OnSettingsChanged;
+            BringUpSpeech();
         }
 
         private void OnDestroy()
         {
-            SaveSystem.SettingsChanged -= OnSettingsChanged;
             if (Instance == this) Instance = null;
         }
 
-        private void Update()
-        {
-            _ttsEnglish?.Pump();
-            _ttsChinese?.Pump();
-        }
+        private void Update() => Speech?.Pump();
 
         // ------------------------------------------------------------------ LLM
 
@@ -115,8 +108,9 @@ namespace UntitledGame.GenAI
                 yield break;
             }
 
+            int slots = Mathf.Max(1, Config.llmSlots);
             var args = new StringBuilder();
-            args.Append($"-m \"{model}\" --host 127.0.0.1 --port {Config.llmPort} -c {Config.contextSize} -np 1 ");
+            args.Append($"-m \"{model}\" --host 127.0.0.1 --port {Config.llmPort} -c {Config.contextSize * slots} -np {slots} ");
             args.Append("--reasoning off --no-webui --jinja ");
             if (Config.gpuLayers >= 0) args.Append($"-ngl {Config.gpuLayers} ");
             if (Config.llmThreads > 0) args.Append($"-t {Config.llmThreads} -tb {Config.llmThreads} ");
@@ -157,119 +151,49 @@ namespace UntitledGame.GenAI
             StatusChanged?.Invoke();
         }
 
-        // ------------------------------------------------------------------ Whisper
+        // ------------------------------------------------------------------ speech
 
-        private IEnumerator BringUpWhisper()
+        private void BringUpSpeech()
         {
-            string url = WhisperBaseUrl + "/";
-            bool alreadyUp = false;
-            yield return Probe(url, ok => alreadyUp = ok);
-            if (alreadyUp)
+            if (Root == null) return;
+            string sherpa = Config.Resolve(Root, Config.sherpaDir);
+            string asr = Config.Resolve(Root, Config.asrModel);
+            if (!Directory.Exists(sherpa) || !Directory.Exists(asr))
             {
-                SttStatus = ServiceStatus.Ready;
-                StatusChanged?.Invoke();
-                yield break;
-            }
-
-            string exe = Root != null ? Path.Combine(Root, "whisper", "whisper-server.exe") : null;
-            string model = Config.Resolve(Root, Config.whisperModel);
-            if (exe == null || !File.Exists(exe) || model == null || !File.Exists(model))
-            {
-                SttStatus = ServiceStatus.NotInstalled;
-                StatusChanged?.Invoke();
-                yield break;
-            }
-
-            string args = $"-m \"{model}\" --host 127.0.0.1 --port {Config.whisperPort} -t {Config.whisperThreads} -l en";
-            _whisper = Launch(exe, args, Path.Combine(LogDir, "whisper-server.log"));
-            if (_whisper == null)
-            {
-                SttStatus = ServiceStatus.Failed;
-                StatusChanged?.Invoke();
-                yield break;
-            }
-            SttStatus = ServiceStatus.Starting;
-            StatusChanged?.Invoke();
-            float deadline = Time.realtimeSinceStartup + 90f;
-            while (Time.realtimeSinceStartup < deadline)
-            {
-                if (_whisper.HasExited)
-                {
-                    SttStatus = ServiceStatus.Failed;
-                    LastError = "Speech recognition server stopped (see LocalAI/logs/whisper-server.log).";
-                    StatusChanged?.Invoke();
-                    yield break;
-                }
-                bool ok = false;
-                yield return Probe(url, r => ok = r);
-                if (ok)
-                {
-                    // Warm-up: the first inference pays one-time allocation costs; do it now, not when the player talks.
-                    var noise = new float[MicRecorder.TargetRate];
-                    var rnd = new System.Random(1);
-                    for (int i = 0; i < noise.Length; i++) noise[i] = (float)(rnd.NextDouble() - 0.5) * 0.002f;
-                    yield return WhisperClient.Transcribe(WhisperBaseUrl, WavUtility.EncodePcm16(noise, MicRecorder.TargetRate), "en", null, (_, __) => { });
-                    SttStatus = ServiceStatus.Ready;
-                    StatusChanged?.Invoke();
-                    Debug.Log("[LocalAI] whisper-server ready.");
-                    yield break;
-                }
-                yield return new WaitForSecondsRealtime(0.5f);
-            }
-            SttStatus = ServiceStatus.Failed;
-            StatusChanged?.Invoke();
-        }
-
-        // ------------------------------------------------------------------ Piper
-
-        private string VoicePath(bool chinese)
-        {
-            if (chinese) return Config.Resolve(Root, Config.voiceZh);
-            string name = SaveSystem.Settings.voiceName;
-            if (!string.IsNullOrEmpty(name) && Root != null)
-            {
-                string p = Path.Combine(Root, "voices", name + ".onnx");
-                if (File.Exists(p)) return p;
-            }
-            return Config.Resolve(Root, Config.voice);
-        }
-
-        private void BringUpTts()
-        {
-            string exe = Root != null ? Path.Combine(Root, "piper", "piper.exe") : null;
-            string voice = VoicePath(false);
-            if (exe == null || !File.Exists(exe) || voice == null || !File.Exists(voice))
-            {
-                TtsStatus = ServiceStatus.NotInstalled;
+                SttStatus = TtsStatus = ServiceStatus.NotInstalled;
                 StatusChanged?.Invoke();
                 return;
             }
-            _ttsEnglish?.Dispose();
-            _ttsEnglish = new PiperTTS(exe, voice, Path.Combine(Application.temporaryCachePath, "tts"));
-            float speed = 1f / Mathf.Clamp(SaveSystem.Settings.voiceSpeed, 0.6f, 1.6f);
-            bool ok = _ttsEnglish.Start(speed, Path.Combine(LogDir, "piper.log"));
-            _ttsVoiceKey = voice + speed.ToString(CultureInfo.InvariantCulture);
-            TtsStatus = ok ? ServiceStatus.Ready : ServiceStatus.Failed;
+
+            int th = Mathf.Max(1, Config.speechThreads);
+            var voices = new List<SpeechEngine.VoiceSpec>();
+            void Add(Func<SpeechEngine.VoiceSpec> make, string dir)
+            {
+                if (dir == null || !Directory.Exists(dir)) return;
+                try { voices.Add(make()); }
+                catch (Exception e) { Debug.LogWarning($"[LocalAI] Voice config failed for {dir}: {e.Message}"); }
+            }
+            string mei = Config.Resolve(Root, Config.voiceMei);
+            Add(() => SpeechEngine.Matcha(SpeechEngine.VoiceMei, mei, Config.Resolve(Root, Config.vocoder), th), mei);
+            string en = Config.Resolve(Root, Config.voiceEnglish);
+            Add(() => SpeechEngine.Piper(SpeechEngine.VoiceEnglish, en, th), en);
+            string male = Config.Resolve(Root, Config.voiceMale);
+            Add(() => SpeechEngine.Piper(SpeechEngine.VoiceMale, male, th), male);
+            string female = Config.Resolve(Root, Config.voiceFemale);
+            Add(() => SpeechEngine.Piper(SpeechEngine.VoiceFemale, female, th), female);
+
+            Speech = new SpeechEngine();
+            SttStatus = TtsStatus = ServiceStatus.Starting;
             StatusChanged?.Invoke();
-        }
-
-        /// <summary>English voice by default; lazily starts the Mandarin voice when first needed.</summary>
-        public PiperTTS GetTts(bool chinese)
-        {
-            if (!chinese) return _ttsEnglish != null && _ttsEnglish.IsRunning ? _ttsEnglish : null;
-            if (_ttsChinese != null && _ttsChinese.IsRunning) return _ttsChinese;
-            string exe = Root != null ? Path.Combine(Root, "piper", "piper.exe") : null;
-            string voice = VoicePath(true);
-            if (exe == null || !File.Exists(exe) || voice == null || !File.Exists(voice)) return null;
-            _ttsChinese = new PiperTTS(exe, voice, Path.Combine(Application.temporaryCachePath, "tts"));
-            return _ttsChinese.Start(1f / Mathf.Clamp(SaveSystem.Settings.voiceSpeed, 0.6f, 1.6f) * 1.05f, Path.Combine(LogDir, "piper-zh.log")) ? _ttsChinese : null;
-        }
-
-        private void OnSettingsChanged()
-        {
-            string voice = VoicePath(false);
-            float speed = 1f / Mathf.Clamp(SaveSystem.Settings.voiceSpeed, 0.6f, 1.6f);
-            if (voice + speed.ToString(CultureInfo.InvariantCulture) != _ttsVoiceKey) BringUpTts();
+            float t0 = Time.realtimeSinceStartup;
+            Speech.Load(sherpa, asr, voices, th, () =>
+            {
+                SttStatus = Speech.AsrReady ? ServiceStatus.Ready : ServiceStatus.Failed;
+                TtsStatus = Speech.TtsReady ? ServiceStatus.Ready : ServiceStatus.Failed;
+                if (Speech.Error != null) LastError = Speech.Error;
+                Debug.Log($"[LocalAI] Speech ready in {Time.realtimeSinceStartup - t0:0.0}s (ASR {SttStatus}, TTS {TtsStatus}).");
+                StatusChanged?.Invoke();
+            });
         }
 
         // ------------------------------------------------------------------ helpers
@@ -319,28 +243,51 @@ namespace UntitledGame.GenAI
 
         public void Shutdown(bool force)
         {
+            Speech?.Dispose();
+            Speech = null;
             bool keep = Application.isEditor && Config != null && Config.keepServersRunningInEditor && !force;
-            _ttsEnglish?.Dispose();
-            _ttsChinese?.Dispose();
-            _ttsEnglish = _ttsChinese = null;
             if (keep) return;
-            Kill(_llm);
-            Kill(_whisper);
-            _llm = _whisper = null;
-        }
-
-        private static void Kill(Process p)
-        {
             try
             {
-                if (p != null && !p.HasExited) p.Kill();
+                if (_llm != null && !_llm.HasExited) _llm.Kill();
             }
             catch
             {
                 // Already gone.
             }
+            _llm = null;
+        }
+    }
+
+    /// <summary>Thread-safe append-only log file for child process output.</summary>
+    public class ProcessLog
+    {
+        private readonly StreamWriter _writer;
+        private readonly object _lock = new object();
+
+        private ProcessLog(StreamWriter w) => _writer = w;
+
+        public static ProcessLog Open(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                var w = new StreamWriter(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false)) { AutoFlush = true };
+                return new ProcessLog(w);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
-        public bool AnyStarting => LlmStatus == ServiceStatus.Starting || SttStatus == ServiceStatus.Starting;
+        public void Write(string line)
+        {
+            lock (_lock)
+            {
+                try { _writer.WriteLine(line); } catch { /* ignore */ }
+            }
+        }
     }
 }

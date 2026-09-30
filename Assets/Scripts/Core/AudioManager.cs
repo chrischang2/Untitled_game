@@ -87,7 +87,7 @@ namespace UntitledGame.Core
             AudioListener.volume = master;
 
             // Music with ducking under the companion's voice.
-            _duck = Mathf.MoveTowards(_duck, VoiceActive ? 0.35f : 1f, Time.unscaledDeltaTime * 1.5f);
+            _duck = Mathf.MoveTowards(_duck, VoiceActive || Companion.CharacterVoice.AnySpeaking ? 0.35f : 1f, Time.unscaledDeltaTime * 1.5f);
             _music.volume = st.musicVolume * 0.55f * _duck;
             if (!_music.isPlaying && _playlist.Length > 0 && Time.time >= _nextTrackTime)
             {

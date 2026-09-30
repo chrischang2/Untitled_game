@@ -1,114 +1,76 @@
-using System;
-using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UntitledGame.Core;
+using UntitledGame.Economy;
 using UntitledGame.Environment;
 using UntitledGame.Fishing;
 using UntitledGame.GenAI;
+using UntitledGame.Language;
 using UntitledGame.Progression;
 using Random = UnityEngine.Random;
 
 namespace UntitledGame.Companion
 {
-    public enum CompanionState { Idle, Listening, Transcribing, Thinking, Speaking }
-
     /// <summary>
-    /// Mei's conversational brain. Player speech/text goes to the local LLM (streamed); each finished
-    /// sentence is handed straight to <see cref="CompanionVoice"/> so she starts talking before the
-    /// whole reply is written. She also reacts to catches, weather and quiet moments by herself.
+    /// Mei: best friend and Mandarin tutor. Answers the player (in Mandarin, with as much English as the
+    /// immersion level allows), teaches exactly the words needed for the market, and speaks up on her own:
+    /// greetings, catches (naming the fish in Chinese), arriving at the market, a full bucket, a hungry
+    /// Tangyuan, and praise after the player manages a purchase in Mandarin.
     /// </summary>
-    public class CompanionBrain : MonoBehaviour
+    public class CompanionBrain : DialogueAgent
     {
-        [Tooltip("Optional legacy non-streaming client (implements ILocalLLMClient), used only if the local AI services are unavailable.")]
+        [Tooltip("Kept for the old scaffold scene tools; unused.")]
         [SerializeField] private MonoBehaviour llmClientBehaviour;
         [SerializeField] private PhraseUnlockSystem phraseUnlockSystem;
         [Tooltip("Persona override. Leave empty to use the built-in Mei persona.")]
         [TextArea(3, 12)]
         [SerializeField] private string systemPrompt = "";
 
-        [SerializeField] private CompanionVoice voice;
         [SerializeField] private CompanionController body;
-        [SerializeField] private Transform player;
         [SerializeField] private FishingController fishing;
-        [SerializeField] private ChatSampling sampling = new ChatSampling();
-        [SerializeField] private int maxHistoryMessages = 30;
-        [SerializeField] private int trimHistoryTo = 16;
 
-        public CompanionState State { get; private set; } = CompanionState.Idle;
+        public override string DisplayName => CompanionPersona.Name;
+        public PhraseUnlockSystem Phrases => phraseUnlockSystem;
 
-        /// <summary>Full reply text once Mei has finished generating it.</summary>
-        public event Action<string> ReplyReceived;
-        public event Action<string> PlayerSaid;
-        public event Action<string> SentenceSpoken;
-        public event Action<CompanionState> StateChanged;
-        public event Action LogChanged;
-
-        public readonly List<(string speaker, string text)> Log = new List<(string, string)>();
-
-        private readonly List<ChatMessage> _history = new List<ChatMessage>();
-        private readonly SentenceSplitter _splitter = new SentenceSplitter();
-        private ILocalLLMClient _legacy;
-        private ChatStreamHandle _stream;
-        private string _systemPromptCache;
-        private bool _replyDone = true;
-        private ChatMessage _pendingUser;
         private bool _greeted;
         private float _lastInteraction;
         private float _lastReaction = -999f;
         private float _nextChatter;
         private DayPhase _lastPhase;
         private bool _wasRaining;
+        private bool _wasInMarket;
+        private bool _bucketHintGiven;
+        private float _lastPetHint = -999f;
 
-        public PhraseUnlockSystem Phrases => phraseUnlockSystem;
-        public bool IsBusy => State != CompanionState.Idle;
-        public float LastResponseLatency { get; private set; } = -1f;
-
-        public bool CanChat
-        {
-            get
-            {
-                var s = LocalAIServices.Instance;
-                return (s != null && s.LlmStatus == ServiceStatus.Ready) || _legacy != null;
-            }
-        }
-
-        public void Configure(CompanionVoice v, CompanionController c, Transform p, FishingController f)
+        public void Configure(CharacterVoice v, CompanionController c, Transform p, FishingController f)
         {
             voice = v;
             body = c;
             player = p;
             fishing = f;
+            llmSlot = 0;
+            sampling = new ChatSampling { temperature = 0.7f, top_p = 0.85f, top_k = 20, presence_penalty = 1.0f, max_tokens = 150 };
         }
 
-        private void Awake()
+        public static CompanionBrain Current { get; private set; }
+
+        protected override void OnEnable()
         {
-            _legacy = llmClientBehaviour as ILocalLLMClient;
-            if (voice == null) voice = GetComponent<CompanionVoice>();
+            base.OnEnable();
+            Current = this;
             if (body == null) body = GetComponent<CompanionController>();
-        }
-
-        private void OnEnable()
-        {
             FishingController.FishCaught += OnFishCaught;
             FishingController.FishEscaped += OnFishEscaped;
-            SaveSystem.SettingsChanged += OnSettingsChanged;
-            if (voice != null)
-            {
-                voice.SentenceStarted += OnSentenceStarted;
-                voice.AllFinished += OnVoiceFinished;
-            }
+            ShopkeeperBrain.TransactionDone += OnTransaction;
         }
 
-        private void OnDisable()
+        protected override void OnDisable()
         {
+            base.OnDisable();
+            if (Current == this) Current = null;
             FishingController.FishCaught -= OnFishCaught;
             FishingController.FishEscaped -= OnFishEscaped;
-            SaveSystem.SettingsChanged -= OnSettingsChanged;
-            if (voice != null)
-            {
-                voice.SentenceStarted -= OnSentenceStarted;
-                voice.AllFinished -= OnVoiceFinished;
-            }
+            ShopkeeperBrain.TransactionDone -= OnTransaction;
         }
 
         private void Start()
@@ -118,220 +80,122 @@ namespace UntitledGame.Companion
             if (DayNightCycle.Instance != null) _lastPhase = DayNightCycle.Instance.Phase;
         }
 
-        private void SetState(CompanionState s)
+        protected override string BuildSystemPrompt() => CompanionPersona.BuildSystemPrompt(systemPrompt);
+
+        protected override string OfflineLine()
         {
-            if (State == s) return;
-            State = s;
-            StateChanged?.Invoke(s);
+            var s = LocalAIServices.Instance;
+            return s != null && s.LlmStatus == ServiceStatus.Starting ? "等一下哦 [wait a moment], I'm still waking up!" : "我的脑子还没装好 [my brain isn't installed yet]. Run the setup script!";
         }
 
-        private float DistanceToPlayer => player == null ? 0f : Vector3.Distance(player.position, transform.position);
+        protected override string ErrorLine() => "嗯？ [Hm?] Could you say that again?";
 
-        // ------------------------------------------------------------------ public API
+        protected override void OnReplyFinished(string text) => VocabNotebook.ObserveTutorLine(text);
 
-        /// <summary>Player pressed push-to-talk: stop talking and listen.</summary>
-        public void BeginListening()
+        // ------------------------------------------------------------------ talking
+
+        /// <summary>Kept for compatibility with older callers.</summary>
+        public void SendPlayerMessage(string playerText) => HandlePlayerUtterance(playerText);
+
+        public override void HandlePlayerUtterance(string text)
         {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            text = text.Trim();
             Interrupt();
-            SetState(CompanionState.Listening);
-        }
-
-        public void BeginTranscribing() => SetState(CompanionState.Transcribing);
-
-        public void CancelListening()
-        {
-            if (State == CompanionState.Listening || State == CompanionState.Transcribing) SetState(CompanionState.Idle);
-        }
-
-        /// <summary>Send something the player said (transcribed) or typed.</summary>
-        public void SendPlayerMessage(string playerText)
-        {
-            if (string.IsNullOrWhiteSpace(playerText)) return;
-            playerText = playerText.Trim();
-            Interrupt();
-            AddLog("You", playerText);
-            PlayerSaid?.Invoke(playerText);
+            RecordPlayerLine(text);
             _lastInteraction = Time.time;
             _nextChatter = Time.time + Random.Range(150f, 260f);
             body?.FacePlayerFor(6f);
-
-            string situation = CompanionPersona.Situation(fishing != null ? fishing.ActivityDescription : "", DistanceToPlayer);
-            Ask(situation + "\n" + playerText);
+            string notes = SpokenAction(text) + HeardHint(text);
+            // Only the player's words are remembered: the situation notes are re-sent fresh every turn.
+            Ask(BuildSituation() + OverheardShopTalk() + notes + "\n" + text + "\n" + CompanionPersona.LevelReminder(SaveSystem.Settings.immersion),
+                rememberAs: notes.Trim().Length > 0 ? notes.Trim() + "\n" + text : text);
         }
 
         /// <summary>Let Mei react to something that happened. Returns false if she's busy.</summary>
-        public bool SendGameEvent(string description, string instruction = "React naturally in one short sentence.")
+        public bool SendGameEvent(string description, string instruction = "React naturally in one or two short sentences.", bool evenWhileShopping = false)
         {
             if (!CanChat || IsBusy) return false;
+            // Don't talk over a shopkeeper or butt into a purchase.
+            if (ShopkeeperBrain.AnyBusy || (!evenWhileShopping && Time.time - ShopkeeperBrain.LastCustomerActivity < 15f)) return false;
             _lastReaction = Time.time;
-            Ask($"[Game: {description}] ({instruction})");
+            Ask($"{BuildSituation()}\n[Game: {description}] ({instruction}) {CompanionPersona.LevelReminder(SaveSystem.Settings.immersion)}",
+                rememberAs: $"[Game: {description}]");
             return true;
         }
 
-        /// <summary>Stop the current reply (player barged in).</summary>
-        public void Interrupt()
+        public override void ClearConversation()
         {
-            if (_stream != null && !_stream.Done)
+            base.ClearConversation();
+            ConversationLog.Clear();
+        }
+
+        /// <summary>
+        /// Saying 喂汤圆 (feed Tangyuan) really feeds her when she's close. Mei used to tell the player to say it,
+        /// but nothing happened, so she kept repeating the advice while the cat stayed hungry.
+        /// </summary>
+        private string SpokenAction(string text)
+        {
+            if (!PhraseMatcher.SoundsLikeFeedingTheCat(text)) return "";
+            var cat = UntitledGame.Home.PetController.Instance;
+            if (cat == null) return "";
+            var result = cat.Feed(maxDistance: 8f);
+            ChatAudit.Write(MemoryKey, $"spoken command: feed Tangyuan -> {result}");
+            return result switch
             {
-                string partial = SpeechText.CleanForDisplay(_stream.FullText);
-                _stream.Cancel();
-                if (partial.Length > 0)
-                {
-                    _history.Add(new ChatMessage("assistant", partial + "..."));
-                    AddLog(CompanionPersona.Name, partial + "...");
-                }
-                else DropPendingUser();
-            }
-            _pendingUser = null;
-            _stream = null;
-            _replyDone = true;
-            voice?.StopAll();
-            SetState(CompanionState.Idle);
+                UntitledGame.Home.PetController.FeedResult.FedFood => $"\n[Game: The player said it and fed {CompanionPersona.PetName} some cat food. She's eating happily. Praise them: saying it worked!]",
+                UntitledGame.Home.PetController.FeedResult.FedTreat => $"\n[Game: The player said it and gave {CompanionPersona.PetName} a dried-fish treat. Praise them: saying it worked!]",
+                UntitledGame.Home.PetController.FeedResult.NoFood => $"\n[Game: The player tried to feed {CompanionPersona.PetName}, but they have no cat food or treats. Teach 猫粮 [cat food] and suggest 小林's pet shop.]",
+                UntitledGame.Home.PetController.FeedResult.NotHungry => $"\n[Game: The player tried to feed {CompanionPersona.PetName}, but she isn't hungry right now.]",
+                _ => $"\n[Game: The player tried to feed {CompanionPersona.PetName}, but she's too far away ({cat.DistanceToPlayer:0} m). They need to walk over to her first.]",
+            };
         }
 
-        public void ClearConversation()
+        /// <summary>When the recogniser's text sounds like a phrase the player has learned, tell Mei what they probably meant.</summary>
+        private static string HeardHint(string text)
         {
-            Interrupt();
-            _history.Clear();
-            Log.Clear();
-            LogChanged?.Invoke();
+            var meant = PhraseMatcher.ProbablyMeant(text);
+            if (meant == null) return "";
+            ChatAudit.Write("Mei", $"sounds like the notebook phrase {meant.hanzi} [{meant.meaning}]");
+            return $"\n[Game: Speech recognition heard \"{text}\", which sounds like {meant.hanzi} [{meant.meaning}], a phrase they learned. They were probably saying that; treat it as correct and don't comment on the odd characters.]";
         }
 
-        // ------------------------------------------------------------------ core
-
-        private void Ask(string userContent)
+        private string BuildSituation()
         {
-            if (!CanChat)
-            {
-                voice?.Say(OfflineLine());
-                return;
-            }
-
-            string sp = CompanionPersona.BuildSystemPrompt(systemPrompt);
-            if (sp != _systemPromptCache) _systemPromptCache = sp;
-
-            _pendingUser = new ChatMessage("user", userContent);
-            _history.Add(_pendingUser);
-            if (_history.Count > maxHistoryMessages)
-            {
-                int remove = _history.Count - trimHistoryTo;
-                // Keep pairs aligned: always start the kept history on a user turn.
-                while (remove < _history.Count && _history[remove].role != "user") remove++;
-                _history.RemoveRange(0, Mathf.Min(remove, _history.Count - 1));
-            }
-
-            var messages = new List<ChatMessage>(_history.Count + 1) { new ChatMessage("system", _systemPromptCache) };
-            messages.AddRange(_history);
-
-            _splitter.Reset();
-            _replyDone = false;
-            SetState(CompanionState.Thinking);
-
-            var services = LocalAIServices.Instance;
-            if (services != null && services.LlmStatus == ServiceStatus.Ready)
-            {
-                _stream = OpenAIStreamingClient.Stream(this, services.LlmBaseUrl, services.LlmModelName, messages, sampling, OnDelta, OnStreamComplete);
-            }
-            else if (_legacy != null)
-            {
-                StartCoroutine(_legacy.SendChat(new ChatRequest { messages = messages }, r =>
-                {
-                    if (r.Success) OnDelta(r.ReplyText + " ");
-                    FinishReply(r.Success ? r.ReplyText : null, r.Error);
-                }));
-            }
+            string where = player != null ? WorldLocations.Describe(player.position) : "by the lake";
+            return CompanionPersona.Situation(fishing != null ? fishing.ActivityDescription : "", DistanceToPlayer, where);
         }
 
-        private void OnDelta(string delta)
+        /// <summary>If the player just talked with a shopkeeper, Mei "overheard" it and can help.</summary>
+        private static string OverheardShopTalk()
         {
-            foreach (var sentence in _splitter.Feed(delta)) voice?.Say(sentence);
-        }
-
-        private void OnStreamComplete(ChatStreamHandle h)
-        {
-            if (h != _stream || h.Cancelled) return;
-            if (h.FirstTokenAt > 0f) LastResponseLatency = h.FirstTokenAt - h.StartedAt;
-            FinishReply(h.FullText, h.Error);
-        }
-
-        private void FinishReply(string fullText, string error)
-        {
-            _stream = null;
-            string rest = _splitter.Flush();
-            if (!string.IsNullOrWhiteSpace(rest)) voice?.Say(rest);
-
-            if (!string.IsNullOrEmpty(error))
-            {
-                Debug.LogWarning($"[Mei] LLM error: {error}");
-                if (string.IsNullOrWhiteSpace(fullText)) voice?.Say("Hmm, sorry, my head's a bit foggy. Could you say that again?");
-            }
-
-            string clean = SpeechText.CleanForDisplay(fullText ?? "");
-            if (clean.Length == 0) DropPendingUser();
-            _pendingUser = null;
-            if (clean.Length > 0)
-            {
-                _history.Add(new ChatMessage("assistant", clean));
-                AddLog(CompanionPersona.Name, clean);
-                ReplyReceived?.Invoke(clean);
-            }
-            _replyDone = true;
-            if (voice == null || !voice.IsSpeaking) SetState(CompanionState.Idle);
-        }
-
-        /// <summary>Removes an unanswered user turn so the history never has two user messages in a row.</summary>
-        private void DropPendingUser()
-        {
-            if (_pendingUser != null && _history.Count > 0 && _history[_history.Count - 1] == _pendingUser)
-                _history.RemoveAt(_history.Count - 1);
-        }
-
-        private void OnSentenceStarted(string s)
-        {
-            SetState(CompanionState.Speaking);
-            SentenceSpoken?.Invoke(s);
-        }
-
-        private void OnVoiceFinished()
-        {
-            if (_replyDone && (State == CompanionState.Speaking || State == CompanionState.Thinking)) SetState(CompanionState.Idle);
-        }
-
-        private void AddLog(string speaker, string text)
-        {
-            Log.Add((speaker, text));
-            if (Log.Count > 200) Log.RemoveAt(0);
-            LogChanged?.Invoke();
-        }
-
-        private string OfflineLine()
-        {
-            var s = LocalAIServices.Instance;
-            if (s != null && s.LlmStatus == ServiceStatus.Starting)
-                return "Mm, give me a moment, I'm still waking up...";
-            return "I'd love to chat, but my thinking cap isn't installed yet. Run the setup script and I'll be all ears!";
-        }
-
-        private void OnSettingsChanged()
-        {
-            string sp = CompanionPersona.BuildSystemPrompt(systemPrompt);
-            if (sp != _systemPromptCache) _systemPromptCache = sp;
+            var recent = ConversationLog.Entries.Skip(System.Math.Max(0, ConversationLog.Entries.Count - 4))
+                .Where(e => e.speaker != CompanionPersona.Name).ToList();
+            if (!recent.Any(e => !e.fromPlayer)) return "";
+            return "\n[Game: You just overheard at the shop: " + string.Join(" / ", recent.Select(e => $"{(e.fromPlayer ? "Player" : e.speaker)}: {e.text}")) + "]";
         }
 
         // ------------------------------------------------------------------ autonomous behaviour
 
-        private void Update()
+        protected override void Update()
         {
-            if (State == CompanionState.Thinking && voice != null && voice.IsSpeaking) SetState(CompanionState.Speaking);
-            if (State == CompanionState.Speaking && _replyDone && voice != null && !voice.IsSpeaking) SetState(CompanionState.Idle);
-
+            base.Update();
             if (!CanChat) return;
+            float dist = DistanceToPlayer;
 
             if (!_greeted && Time.timeSinceLevelLoad > 1.5f)
             {
                 string phase = DayNightCycle.Instance != null ? DayNightCycle.Instance.PhaseDescription : "day";
-                if (SendGameEvent($"Your friend just arrived at the lake this {phase}. You're happy to see them.",
-                        "Greet them warmly in one or two short sentences, maybe mention the weather or the fish."))
+                bool returning = HasMemory || VocabNotebook.Entries.Count > 0;
+                var review = VocabNotebook.Entries.OrderBy(v => v.said).ThenBy(_ => Random.value).FirstOrDefault();
+                bool sent = returning
+                    ? SendGameEvent($"Your friend is back at the lake this {phase} after some time away.",
+                        review != null
+                            ? $"Welcome them back warmly, then quickly review one word they learned before: {review.hanzi} [{review.meaning}]. Invite them to say it. Keep it short."
+                            : "Welcome them back warmly and suggest what to do today. Keep it short.")
+                    : SendGameEvent($"Your friend just arrived at the lake this {phase}.",
+                        "Greet them warmly and suggest a plan for today, e.g. catch some fish and sell them at the market. Keep it short and simple.");
+                if (sent)
                 {
                     _greeted = true;
                     _lastInteraction = Time.time;
@@ -339,16 +203,46 @@ namespace UntitledGame.Companion
                 return;
             }
 
+            // Arriving at the market: teach how to greet a shopkeeper / what to say.
+            bool inMarket = player != null && WorldShape.InMarket(player.position.x, player.position.z, 2f);
+            if (inMarket && !_wasInMarket && !IsBusy && dist < 12f)
+            {
+                bool first = !SaveSystem.Data.visitedMarket;
+                SaveSystem.Data.visitedMarket = true;
+                SendGameEvent(first ? "You and the player just arrived at the market for the first time. The shopkeepers only speak Mandarin."
+                                    : "You and the player are back at the market.",
+                    first ? "Teach them one useful phrase to greet a shopkeeper and one to buy or sell something. Keep it short."
+                          : "Briefly suggest what they could do here, with one useful phrase.");
+            }
+            _wasInMarket = inMarket;
+
+            // Full bucket: teach how to sell.
+            if (Inventory.BucketFull && !_bucketHintGiven && !IsBusy && dist < 15f)
+            {
+                _bucketHintGiven = true;
+                SendGameEvent("The player's fish bucket is full.", "Suggest selling the fish to 陈阿姨 at the fish shop and teach them how to say they want to sell fish.");
+            }
+            if (!Inventory.BucketFull) _bucketHintGiven = false;
+
+            // Hungry cat.
+            if (SaveSystem.Data.pet.hunger > 0.75f && Time.time - _lastPetHint > 240f && !IsBusy && dist < 15f)
+            {
+                _lastPetHint = Time.time;
+                bool hasFood = Inventory.Count("cat_food") > 0 || Inventory.Count("cat_treat") > 0;
+                SendGameEvent($"{CompanionPersona.PetName} the cat looks hungry.",
+                    hasFood ? "Remind them to feed her: walk up to her and press F, or say 喂汤圆 [feed Tangyuan] when she's close." : "Teach them how to buy cat food at 小林's pet shop: 我要猫粮 [I want cat food].");
+            }
+
             var dn = DayNightCycle.Instance;
             if (dn != null && dn.Phase != _lastPhase)
             {
                 var from = _lastPhase;
                 _lastPhase = dn.Phase;
-                if (!IsBusy && Random.value < 0.6f && DistanceToPlayer < 20f)
+                if (!IsBusy && Random.value < 0.6f && dist < 20f)
                 {
-                    if (dn.Phase == DayPhase.Evening) SendGameEvent("The sun is starting to set and the sky is turning orange.");
-                    else if (dn.Phase == DayPhase.Night && from == DayPhase.Dusk) SendGameEvent("It's getting dark; the stars are coming out and the fireflies are appearing.");
-                    else if (dn.Phase == DayPhase.Dawn) SendGameEvent("The sun is just coming up over the hills. You both stayed up all night fishing.");
+                    if (dn.Phase == DayPhase.Evening) SendGameEvent("The sun is starting to set and the sky is turning orange.", "Teach a word about the evening or the sunset.");
+                    else if (dn.Phase == DayPhase.Night && from == DayPhase.Dusk) SendGameEvent("It's getting dark; stars and fireflies are coming out.", "Teach a word about the night.");
+                    else if (dn.Phase == DayPhase.Dawn) SendGameEvent("The sun is just coming up. You both stayed up all night fishing.", "Teach how to say good morning.");
                 }
             }
 
@@ -356,18 +250,16 @@ namespace UntitledGame.Companion
             if (raining != _wasRaining)
             {
                 _wasRaining = raining;
-                if (!IsBusy && DistanceToPlayer < 20f)
-                    SendGameEvent(raining ? "It just started raining softly on the lake." : "The rain has stopped and everything smells fresh.");
+                if (!IsBusy && dist < 20f)
+                    SendGameEvent(raining ? "It just started raining softly." : "The rain has stopped.", raining ? "Teach how to say it's raining." : "React briefly.");
             }
 
-            if (SaveSystem.Settings.companionChatter && !IsBusy && Time.time > _nextChatter && DistanceToPlayer < 14f)
+            if (SaveSystem.Settings.companionChatter && !IsBusy && Time.time > _nextChatter && dist < 14f)
             {
                 _nextChatter = Time.time + Random.Range(170f, 300f);
                 if (Time.time - _lastInteraction > 90f)
-                {
                     SendGameEvent("It's been quiet for a little while.",
-                        "Say one small cozy observation about the lake, the weather or the time of day, or ask the player a light, friendly question. One or two short sentences.");
-                }
+                        "Start a tiny lesson: point out something around you (the lake, a fish, Tangyuan, the weather) and teach its word, then invite the player to say it.");
             }
         }
 
@@ -376,23 +268,37 @@ namespace UntitledGame.Companion
             body?.Celebrate();
             if (!CanChat || IsBusy) return;
             bool special = r.isNewSpecies || r.species.rarity >= Rarity.Rare || r.isRecord || !r.species.IsFish;
-            if (!special && (Time.time - _lastReaction < 25f || Random.value > 0.55f)) return;
-
+            if (!special && (Time.time - _lastReaction < 25f || Random.value > 0.6f)) return;
             string what = r.species.IsFish
                 ? $"The player just caught a {r.species.name} ({r.species.hanzi}), {r.length:0} cm, {FishDatabase.RarityLabel(r.species.rarity).ToLower()}."
-                : $"The player just fished up a {r.species.name} ({r.species.hanzi}): {r.species.blurb}";
-            if (r.isNewSpecies) what += " It's their first one ever, a new journal entry!";
-            if (r.isRecord) what += " That's their biggest one yet!";
-            SendGameEvent(what, "React with genuine excitement in one or two short sentences. Maybe share a tiny fun fact.");
+                : $"The player just fished up a {r.species.name} ({r.species.hanzi}).";
+            if (r.isNewSpecies) what += " It's their first one ever!";
+            if (r.isRecord) what += " Their biggest one yet!";
+            if (!Inventory.BucketFull) what += " It went into their bucket.";
+            SendGameEvent(what, $"React with excitement and teach its Chinese name as {r.species.hanzi} [{r.species.name.ToLower()}].");
         }
 
         private void OnFishEscaped(string reason)
         {
             if (!CanChat || IsBusy || Time.time - _lastReaction < 20f) return;
             if (reason == "snapped" && Random.value < 0.5f)
-                SendGameEvent("The player's line just snapped and a fish got away.", "Comfort or gently tease them in one short sentence.");
-            else if (reason == "escaped" && Random.value < 0.3f)
-                SendGameEvent("A fish just slipped off the player's hook and swam away.", "Say something encouraging in one short sentence.");
+                SendGameEvent("The player's line just snapped and a fish got away.", "Comfort them; maybe teach 没关系 [it's okay].");
+        }
+
+        private void OnTransaction(ShopkeeperBrain keeper, string english, string chinese)
+        {
+            if (!CanChat || DistanceToPlayer > 16f || Random.value > 0.7f) return;
+            // Let the shopkeeper finish first; Mei chimes in afterwards.
+            StartCoroutine(PraiseLater(keeper, english));
+        }
+
+        private System.Collections.IEnumerator PraiseLater(ShopkeeperBrain keeper, string english)
+        {
+            float t = Time.time;
+            yield return new WaitForSeconds(0.5f);
+            while ((keeper.IsBusy || IsBusy) && Time.time - t < 20f) yield return null;
+            while (ShopkeeperBrain.AnyBusy && Time.time - t < 25f) yield return null;
+            SendGameEvent($"The player just did this in Mandarin with {keeper.DisplayName}: {english}.", "Praise them briefly and warmly.", evenWhileShopping: true);
         }
     }
 }

@@ -52,6 +52,12 @@ namespace UntitledGame.CameraControl
             Snap();
         }
 
+        public void SetYaw(float degrees)
+        {
+            yaw = degrees;
+            Snap();
+        }
+
         public void Snap()
         {
             if (target == null) return;

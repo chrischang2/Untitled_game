@@ -27,6 +27,7 @@ namespace UntitledGame.Fishing
             var data = SaveSystem.Data;
             var rec = Get(species.id);
             var result = new CatchResult { species = species, length = length, position = position };
+            result.inBucket = Economy.Inventory.AddToBucket(species, length);
             if (rec == null)
             {
                 rec = new CaughtRecord

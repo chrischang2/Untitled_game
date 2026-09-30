@@ -7,13 +7,18 @@ using UntitledGame.GenAI;
 namespace UntitledGame.Companion
 {
     /// <summary>
-    /// Speaks sentences in order as they stream in: each is synthesised by Piper in the background,
-    /// then played back-to-back. Falls back to timed subtitles when TTS is off or unavailable.
-    /// Mixed English/Mandarin sentences are split by script and voiced by the matching Piper voice.
+    /// Speaks a character's lines in order as they stream in. Each sentence is split by script:
+    /// Chinese runs go to the character's Mandarin voice, English runs (Mei's explanations and the
+    /// [meaning] glosses) to the English voice - shopkeepers have no English voice and simply don't
+    /// speak it. Falls back to timed subtitles when speech isn't available.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
-    public class CompanionVoice : MonoBehaviour
+    public class CharacterVoice : MonoBehaviour
     {
+        [SerializeField] private string chineseVoice = SpeechEngine.VoiceMei;
+        [SerializeField] private string englishVoice = SpeechEngine.VoiceEnglish;
+        [SerializeField] private float pitch = 1f;
+
         private class Utterance
         {
             public string display;
@@ -27,8 +32,13 @@ namespace UntitledGame.Companion
         private readonly Queue<Utterance> _queue = new Queue<Utterance>();
         private Utterance _current;
         private float _currentEnd;
-        private int _generation;
+        private SpeechTicket _ticket = new SpeechTicket();
         private readonly float[] _ampBuf = new float[256];
+
+        private static readonly List<CharacterVoice> All = new List<CharacterVoice>();
+
+        /// <summary>True while any character is talking (music ducks).</summary>
+        public static bool AnySpeaking => All.Exists(v => v.IsSpeaking);
 
         public event Action<string> SentenceStarted;
         public event Action AllFinished;
@@ -36,6 +46,16 @@ namespace UntitledGame.Companion
         public bool IsSpeaking => _current != null || _queue.Count > 0;
         public float Amplitude { get; private set; }
         public string CurrentSentence => _current?.display;
+
+        public void Configure(string zhVoice, string enVoice, float voicePitch)
+        {
+            chineseVoice = zhVoice;
+            englishVoice = enVoice;
+            pitch = voicePitch;
+        }
+
+        private void OnEnable() => All.Add(this);
+        private void OnDisable() => All.Remove(this);
 
         private void Awake()
         {
@@ -55,17 +75,22 @@ namespace UntitledGame.Companion
             var u = new Utterance { display = display, created = Time.time };
             _queue.Enqueue(u);
 
-            var services = LocalAIServices.Instance;
-            if (!SaveSystem.Settings.speakReplies || services == null || services.TtsStatus != ServiceStatus.Ready)
+            var speech = LocalAIServices.Instance != null ? LocalAIServices.Instance.Speech : null;
+            if (!SaveSystem.Settings.speakReplies || speech == null || !speech.TtsReady)
             {
                 u.ready = true;
                 u.duration = ReadTime(display);
                 return;
             }
 
-            bool mandarin = SaveSystem.Settings.language == LanguageMode.MandarinPractice || SpeechText.ContainsCjk(display);
-            string spoken = SpeechText.CleanForSpeech(display, dropParentheses: mandarin);
-            var runs = mandarin ? SpeechText.SplitByScript(spoken) : new List<(string, bool)> { (spoken, false) };
+            // Glosses "鱼竿 [fishing rod]" are read aloud as "鱼竿, fishing rod".
+            string spoken = SpeechText.CleanForSpeech(display, dropParentheses: true).Replace('[', ',').Replace(']', ',').Replace('【', ',').Replace('】', ',');
+            var runs = new List<(string text, string voice)>();
+            foreach (var (text, chinese) in SpeechText.SplitByScript(spoken))
+            {
+                string voice = chinese ? chineseVoice : englishVoice;
+                if (!string.IsNullOrEmpty(voice) && speech.HasVoice(voice)) runs.Add((text, voice));
+            }
             if (runs.Count == 0)
             {
                 u.ready = true;
@@ -73,41 +98,28 @@ namespace UntitledGame.Companion
                 return;
             }
 
-            int gen = _generation;
+            var ticket = _ticket;
             var parts = new WavUtility.PcmData?[runs.Count];
             int remaining = runs.Count;
-            bool finished = false;
-
-            void Finish()
-            {
-                if (finished || gen != _generation) return;
-                finished = true;
-                u.clip = Concat(parts, display);
-                u.duration = u.clip != null ? u.clip.length : ReadTime(display);
-                u.ready = true;
-            }
-
+            float speed = Mathf.Clamp(SaveSystem.Settings.voiceSpeed, 0.6f, 1.4f);
             for (int i = 0; i < runs.Count; i++)
             {
                 int idx = i;
-                var tts = services.GetTts(runs[i].Item2);
-                if (tts == null)
-                {
-                    remaining--;
-                    continue;
-                }
-                tts.Synthesize(runs[i].Item1, pcm =>
+                speech.Synthesize(runs[i].voice, runs[i].text, speed, ticket, pcm =>
                 {
                     parts[idx] = pcm;
-                    if (--remaining == 0) Finish();
+                    if (--remaining > 0 || ticket.Cancelled) return;
+                    u.clip = Concat(parts, display);
+                    u.duration = u.clip != null ? u.clip.length / pitch : ReadTime(display);
+                    u.ready = true;
                 });
             }
-            if (remaining == 0) Finish();
         }
 
         public void StopAll()
         {
-            _generation++;
+            _ticket.Cancelled = true;
+            _ticket = new SpeechTicket();
             _queue.Clear();
             _current = null;
             if (_source != null) _source.Stop();
@@ -115,29 +127,23 @@ namespace UntitledGame.Companion
 
         private static float ReadTime(string text)
         {
-            int words = text.Split(' ').Length + (SpeechText.ContainsCjk(text) ? text.Length / 3 : 0);
-            return Mathf.Clamp(0.6f + words * 0.3f, 1.2f, 9f);
+            int units = text.Split(' ').Length + (SpeechText.ContainsCjk(text) ? text.Length / 3 : 0);
+            return Mathf.Clamp(0.6f + units * 0.3f, 1.2f, 9f);
         }
 
         private static AudioClip Concat(WavUtility.PcmData?[] parts, string name)
         {
             int rate = 0;
+            foreach (var p in parts) if (p.HasValue) rate = Mathf.Max(rate, p.Value.sampleRate);
+            if (rate == 0) return null;
             var chunks = new List<float[]>();
             foreach (var p in parts)
             {
                 if (!p.HasValue || p.Value.samples == null || p.Value.samples.Length == 0) continue;
-                var data = p.Value;
-                if (rate == 0) rate = data.sampleRate;
-                var mono = data.samples;
-                if (data.channels > 1)
-                {
-                    mono = new float[data.samples.Length / data.channels];
-                    for (int i = 0; i < mono.Length; i++) mono[i] = data.samples[i * data.channels];
-                }
-                chunks.Add(WavUtility.Resample(mono, data.sampleRate, rate));
+                chunks.Add(WavUtility.Resample(p.Value.samples, p.Value.sampleRate, rate));
             }
             if (chunks.Count == 0) return null;
-            int gap = Mathf.RoundToInt(rate * 0.08f);
+            int gap = Mathf.RoundToInt(rate * 0.1f);
             int total = 0;
             foreach (var c in chunks) total += c.Length + gap;
             var all = new float[total];
@@ -147,12 +153,13 @@ namespace UntitledGame.Companion
                 Array.Copy(c, 0, all, o, c.Length);
                 o += c.Length + gap;
             }
-            return WavUtility.ToClip(new WavUtility.PcmData { samples = all, sampleRate = rate, channels = 1 }, "mei_" + name.GetHashCode());
+            return WavUtility.ToClip(new WavUtility.PcmData { samples = all, sampleRate = rate, channels = 1 }, "voice_" + name.GetHashCode());
         }
 
         private void Update()
         {
             _source.volume = SaveSystem.Settings.voiceVolume;
+            _source.pitch = pitch;
 
             if (_current == null && _queue.Count > 0)
             {
@@ -169,7 +176,7 @@ namespace UntitledGame.Companion
                     {
                         _source.clip = _current.clip;
                         _source.Play();
-                        _currentEnd = Time.time + _current.clip.length + 0.12f;
+                        _currentEnd = Time.time + _current.duration + 0.15f;
                     }
                     else _currentEnd = Time.time + _current.duration;
                     SentenceStarted?.Invoke(_current.display);
@@ -191,10 +198,8 @@ namespace UntitledGame.Companion
                 foreach (float s in _ampBuf) sum += s * s;
                 amp = Mathf.Clamp01(Mathf.Sqrt(sum / _ampBuf.Length) * 6f);
             }
-            else if (_current != null) amp = 0.35f + 0.25f * Mathf.Sin(Time.time * 11f); // subtitle-only "talking"
+            else if (_current != null) amp = 0.35f + 0.25f * Mathf.Sin(Time.time * 11f);
             Amplitude = Mathf.Lerp(Amplitude, amp, 1f - Mathf.Exp(-18f * Time.deltaTime));
-
-            if (AudioManager.Instance != null) AudioManager.Instance.VoiceActive = IsSpeaking;
         }
     }
 }

@@ -11,19 +11,25 @@ namespace UntitledGame.GenAI
     [Serializable]
     public class LocalAIConfig
     {
-        public string llmModel = "models/Qwen3.5-2B-Q4_K_M.gguf";
-        public string whisperModel = "models/ggml-base.bin";
-        public string voice = "voices/en_US-kristin-medium.onnx";
-        public string voiceZh = "voices/zh_CN-huayan-medium.onnx";
+        public string llmModel = "models/Qwen3.5-4B-Q4_K_M.gguf";
         public int llmPort = 8765;
-        public int whisperPort = 8766;
-        public int contextSize = 4096;
+        public int contextSize = 4096;       // per conversation slot
+        public int llmSlots = 3;             // Mei / shopkeepers / intent classifier each keep a warm prompt cache
         public int gpuLayers = -1;           // -1 = let llama.cpp fit automatically
-        public int whisperThreads = 6;       // the LLM is idle while you talk, so Whisper can have more cores
-        public int llmThreads = 4;           // leave CPU cores for the game + whisper (llama.cpp degrades badly when oversubscribed)
+        public int llmThreads = 4;           // leave CPU cores for the game + speech (llama.cpp degrades badly when oversubscribed)
         public string extraLlmArgs = "";     // appended verbatim to the llama-server command line
         public string externalLlmUrl = "";   // e.g. "http://localhost:11434/v1" to use Ollama / LM Studio instead
         public string externalLlmModel = ""; // model name for the external server
+
+        // Speech (sherpa-onnx, in-process).
+        public string sherpaDir = "sherpa";
+        public string asrModel = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09";
+        public string voiceMei = "models/matcha-icefall-zh-en";
+        public string vocoder = "models/vocos-16khz-univ.onnx";
+        public string voiceEnglish = "models/vits-piper-en_US-kristin-medium";
+        public string voiceMale = "models/vits-piper-zh_CN-chaowen-medium";
+        public string voiceFemale = "models/vits-piper-zh_CN-xiao_ya-medium";
+        public int speechThreads = 4;
         public bool keepServersRunningInEditor = true;
 
         public const string FolderName = "LocalAI";

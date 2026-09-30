@@ -2,19 +2,23 @@ using System.Collections;
 using UnityEngine;
 using UntitledGame.Core;
 using UntitledGame.GenAI;
+using UntitledGame.Language;
 
 namespace UntitledGame.Companion
 {
     /// <summary>
-    /// Push-to-talk glue: hold V, speak, release. Audio -> whisper.cpp -> text -> Mei's brain.
+    /// Voice input: hold V to talk to whoever you're facing (a shopkeeper at their counter, otherwise Mei),
+    /// hold B to always talk to Mei. Audio -> SenseVoice (pinned to Mandarin, in-process) -> text -> character.
+    /// Optional hands-free mode uses simple voice activity detection instead of a key.
     /// </summary>
     public class VoiceChatController : MonoBehaviour
     {
-        [SerializeField] private CompanionBrain brain;
+        [SerializeField] private CompanionBrain mei;
         [SerializeField] private MicRecorder mic;
-        [SerializeField] private KeyCode pushToTalk = KeyCode.V;
+        [SerializeField] private Transform player;
+        [SerializeField] private KeyCode talkKey = KeyCode.V;
+        [SerializeField] private KeyCode meiKey = KeyCode.B;
         [SerializeField] private float maxRecordSeconds = 25f;
-        [SerializeField] private string recognitionHint = "Mei, Mochi, Willow Lake, fishing, bobber, bait, dock, campfire, trout, carp, perch, catfish, koi, pike.";
 
         [Header("Hands-free (voice activity detection)")]
         [SerializeField] private float vadMinThreshold = 0.018f;
@@ -26,23 +30,44 @@ namespace UntitledGame.Companion
         private float _noiseFloor = 0.005f;
         private float _aboveTime, _belowTime;
         private bool _vadRecording;
-        private float _meiQuietSince;
+        private float _quietSince;
+        private KeyCode _heldKey;
+        private DialogueAgent _recordingFor;
 
-        public KeyCode PushToTalkKey => pushToTalk;
         public bool HandsFree => SaveSystem.Settings.handsFree;
         public MicRecorder Mic => mic;
         public bool IsTranscribing { get; private set; }
         public float LastTranscriptionSeconds { get; private set; } = -1f;
+        public string LastTranscript { get; private set; } = "";
+        public CompanionBrain Mei => mei;
 
-        public void Configure(CompanionBrain b, MicRecorder m)
+        /// <summary>Who V (or hands-free speech) is addressed to right now.</summary>
+        public DialogueAgent CurrentTarget
         {
-            brain = b;
+            get
+            {
+                if (player != null)
+                {
+                    var keeper = ShopkeeperBrain.Facing(player);
+                    if (keeper != null) return keeper;
+                }
+                return mei;
+            }
+        }
+
+        /// <summary>Who the in-progress recording will be sent to.</summary>
+        public DialogueAgent RecordingTarget => _recordingFor;
+
+        public void Configure(CompanionBrain b, MicRecorder m, Transform p)
+        {
+            mei = b;
             mic = m;
+            player = p;
         }
 
         private void Update()
         {
-            if (mic == null || brain == null) return;
+            if (mic == null || mei == null) return;
 
             mic.KeepOpen = HandsFree;
             if (HandsFree)
@@ -53,56 +78,70 @@ namespace UntitledGame.Companion
 
             if (mic.IsRecording && !mic.IsFinishing)
             {
-                bool released = !Input.GetKey(pushToTalk) || InputGate.GameplayBlocked;
+                bool released = !Input.GetKey(_heldKey) || InputGate.GameplayBlocked;
                 if (released || mic.RecordingSeconds > maxRecordSeconds) StopAndSend();
                 return;
             }
 
             if (InputGate.GameplayBlocked) return;
-            if (Input.GetKeyDown(pushToTalk)) TryBegin();
+            if (Input.GetKeyDown(talkKey)) TryBegin(talkKey, CurrentTarget);
+            else if (Input.GetKeyDown(meiKey)) TryBegin(meiKey, mei);
         }
 
-        public void TryBegin()
+        private bool SpeechReady(bool toast)
         {
-            if (IsTranscribing) return;
             if (!mic.HasMicrophone)
             {
-                GameEvents.Toast("No microphone found. Press T to type to Mei instead.", 3.5f);
-                return;
+                if (toast) GameEvents.Toast("No microphone found. Press T to type instead.", 3.5f);
+                return false;
             }
             var s = LocalAIServices.Instance;
             if (s == null || s.SttStatus != ServiceStatus.Ready)
             {
-                GameEvents.Toast(s != null && s.SttStatus == ServiceStatus.Starting
-                    ? "Mei's ears are still waking up... one sec!"
-                    : "Speech recognition isn't installed yet. Press T to type instead.", 3.5f);
-                return;
+                if (toast)
+                    GameEvents.Toast(s != null && s.SttStatus == ServiceStatus.Starting
+                        ? "Speech recognition is still loading... one sec!"
+                        : "Speech recognition isn't installed yet. Press T to type instead.", 3.5f);
+                return false;
             }
+            return true;
+        }
+
+        /// <summary>Mei stops mid-remark when the player turns to talk to someone else.</summary>
+        private void HushMei(DialogueAgent target)
+        {
+            if (mei != null && target != mei && mei.IsBusy) mei.Interrupt();
+        }
+
+        private void TryBegin(KeyCode key, DialogueAgent target)
+        {
+            if (IsTranscribing || target == null || !SpeechReady(true)) return;
             if (!mic.Begin()) return;
-            brain.BeginListening();
+            _heldKey = key;
+            _recordingFor = target;
+            HushMei(target);
+            target.BeginListening();
             AudioManager.Instance?.PlaySfx("SFX/ui_pluck_001", 0.35f, 0f);
         }
 
         private void UpdateHandsFree()
         {
-            var s = LocalAIServices.Instance;
-            bool sttReady = s != null && s.SttStatus == ServiceStatus.Ready;
-            if (!mic.HasMicrophone || !sttReady || InputGate.GameplayBlocked)
+            if (!SpeechReady(false) || InputGate.GameplayBlocked)
             {
                 if (_vadRecording)
                 {
                     _vadRecording = false;
                     mic.CancelRecording();
-                    brain.CancelListening();
+                    _recordingFor?.CancelListening();
                 }
                 return;
             }
             if (!mic.IsOpen) mic.Open();
 
-            // Don't listen to Mei through the speakers: pause detection while she talks (+ a short tail).
-            bool meiTalking = brain.State == CompanionState.Speaking || brain.State == CompanionState.Thinking;
-            if (meiTalking) _meiQuietSince = Time.unscaledTime;
-            bool deaf = meiTalking || Time.unscaledTime - _meiQuietSince < 0.6f || IsTranscribing || mic.IsFinishing;
+            // Don't listen to the characters through the speakers: pause while anyone talks (+ a short tail).
+            bool someoneTalking = CharacterVoice.AnySpeaking || mei.State == CompanionState.Thinking;
+            if (someoneTalking) _quietSince = Time.unscaledTime;
+            bool deaf = someoneTalking || Time.unscaledTime - _quietSince < 0.6f || IsTranscribing || mic.IsFinishing;
 
             float rms = mic.RawRms;
             float threshold = Mathf.Max(vadMinThreshold, _noiseFloor * vadNoiseMultiplier);
@@ -127,7 +166,9 @@ namespace UntitledGame.Companion
                 {
                     _vadRecording = true;
                     _belowTime = 0f;
-                    brain.BeginListening();
+                    _recordingFor = CurrentTarget;
+                    HushMei(_recordingFor);
+                    _recordingFor.BeginListening();
                 }
                 return;
             }
@@ -137,55 +178,94 @@ namespace UntitledGame.Companion
             {
                 _vadRecording = false;
                 _aboveTime = 0f;
-                brain.BeginTranscribing();
-                mic.End(samples => StartCoroutine(Process(samples)));
+                var target = _recordingFor;
+                target.BeginTranscribing();
+                mic.End(samples => StartCoroutine(Process(samples, target)));
             }
         }
 
         private void StopAndSend()
         {
-            brain.BeginTranscribing();
+            var target = _recordingFor ?? mei;
+            target.BeginTranscribing();
             AudioManager.Instance?.PlaySfx("SFX/ui_pluck_002", 0.3f, 0f);
-            mic.End(samples => StartCoroutine(Process(samples)));
+            mic.End(samples => StartCoroutine(Process(samples, target)));
         }
 
-        /// <summary>Transcribe pre-recorded 16 kHz mono samples (also used by the automated self-test).</summary>
-        public IEnumerator Process(float[] samples)
+        /// <summary>Transcribe 16 kHz mono samples and hand the text to a character (also used by the self-test).</summary>
+        public IEnumerator Process(float[] samples, DialogueAgent target)
         {
+            target ??= mei;
             float seconds = samples.Length / (float)MicRecorder.TargetRate;
-            if (seconds < 0.35f || MicRecorder.PeakRms(samples) < 0.01f)
+            float peak = MicRecorder.PeakRms(samples);
+            string who = "MIC→" + target.MemoryKey;
+            string wav = ChatAudit.SaveAudio(samples, MicRecorder.TargetRate, "to-" + target.MemoryKey);
+            string clip = $"{seconds:0.0} s audio, peak level {peak:0.000}" + (wav != null ? $", {wav}" : "");
+            if (seconds < 0.35f || peak < 0.01f)
             {
-                brain.CancelListening();
-                GameEvents.Toast("I didn't catch that. Hold V while you speak.");
+                ChatAudit.Write(who, "ignored: too short or too quiet (" + clip + ")");
+                target.CancelListening();
+                _recordingFor = null;
+                GameEvents.Toast(HandsFree ? "I didn't catch that." : "I didn't catch that. Hold V while you speak.");
                 yield break;
             }
 
             IsTranscribing = true;
-            byte[] wav = WavUtility.EncodePcm16(samples, MicRecorder.TargetRate);
-            string lang = SaveSystem.Settings.language == LanguageMode.MandarinPractice ? "auto" : "en";
             string text = null, error = null;
+            bool done = false;
             float t0 = Time.realtimeSinceStartup;
-            yield return WhisperClient.Transcribe(LocalAIServices.Instance.WhisperBaseUrl, wav, lang, recognitionHint, (t, e) =>
+            LocalAIServices.Instance.Speech.Transcribe(samples, (t, e) =>
             {
                 text = t;
                 error = e;
+                done = true;
             });
+            while (!done) yield return null;
             LastTranscriptionSeconds = Time.realtimeSinceStartup - t0;
             IsTranscribing = false;
+            _recordingFor = null;
 
             if (error != null)
             {
-                brain.CancelListening();
+                ChatAudit.Write(who, $"recognition ERROR {error} ({clip})");
+                target.CancelListening();
                 GameEvents.Toast("Couldn't hear you properly: " + error, 3.5f);
                 yield break;
             }
+            string rawText = text;
+            text = Normalize(text);
+            LastTranscript = text ?? "";
+            ChatAudit.Write(who, $"heard \"{text}\" (recognised in {ChatAudit.Seconds(LastTranscriptionSeconds)}; {clip})",
+                rawText != text ? $"recogniser raw: \"{rawText}\"" : null);
             if (string.IsNullOrWhiteSpace(text) || SpeechText.LooksLikeHallucination(text))
             {
-                brain.CancelListening();
+                ChatAudit.Write(who, "dropped: no words / looks like a recognition hallucination");
+                target.CancelListening();
                 GameEvents.Toast("Hmm, I didn't catch any words. Try again?");
                 yield break;
             }
-            brain.SendPlayerMessage(text);
+            target.HandlePlayerUtterance(text);
+        }
+
+        /// <summary>Simplified characters; SenseVoice's SHOUTED English turned into normal sentence case.</summary>
+        public static string Normalize(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            text = Pinyin.ToSimplified(text.Trim());
+            bool hasLower = false, hasUpper = false;
+            foreach (char c in text)
+            {
+                if (char.IsLower(c)) hasLower = true;
+                if (c >= 'A' && c <= 'Z') hasUpper = true;
+            }
+            if (hasUpper && !hasLower)
+            {
+                text = text.ToLowerInvariant();
+                text = System.Text.RegularExpressions.Regex.Replace(text, @"\bi\b", "I");
+                int first = text.IndexOfAny("abcdefghijklmnopqrstuvwxyz".ToCharArray());
+                if (first >= 0) text = text.Substring(0, first) + char.ToUpperInvariant(text[first]) + text.Substring(first + 1);
+            }
+            return text;
         }
     }
 }

@@ -51,6 +51,8 @@ namespace UntitledGame.Fishing
         public float depth;
         public bool raining;
         public bool nearLilies;
+        public Economy.ItemDef bait;   // null = plain hook
+        public float rareBonus;        // from the rod
     }
 
     public static class FishDatabase
@@ -154,6 +156,22 @@ namespace UntitledGame.Fishing
                 if (ctx.raining && f.likesRain) w *= 2.2f;
                 if (ctx.nearLilies && (f.id == "bass" || f.id == "koi" || f.id == "bluegill")) w *= 1.8f;
                 if (f.minDepth > 1.5f) w *= Mathf.Lerp(0.6f, 1.4f, Mathf.InverseLerp(f.minDepth, f.minDepth + 2f, ctx.depth));
+                if (f.rarity == Rarity.Rare) w *= 1f + ctx.rareBonus;
+                if (f.rarity == Rarity.Legendary) w *= 1f + ctx.rareBonus * 2f;
+                var b = ctx.bait;
+                if (b != null && (!b.nightOnly || WindowFor(ctx.hour) == TimeWindow.Night))
+                {
+                    w *= f.rarity switch
+                    {
+                        Rarity.Common => b.commonMult,
+                        Rarity.Uncommon => b.uncommonMult,
+                        Rarity.Rare => b.rareMult,
+                        Rarity.Legendary => b.legendaryMult,
+                        _ => 1f,
+                    };
+                    if (b.favouredFish != null && System.Array.IndexOf(b.favouredFish, f.id) >= 0) w *= 2.4f;
+                    if (f.rarity == Rarity.Junk) w *= 0.6f;
+                }
                 return w;
             }
             float total = options.Sum(Weight);
@@ -222,6 +240,7 @@ namespace UntitledGame.Fishing
         public float length;
         public bool isNewSpecies;
         public bool isRecord;
+        public bool inBucket;
         public Vector3 position;
     }
 }

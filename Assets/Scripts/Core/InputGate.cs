@@ -22,6 +22,9 @@ namespace UntitledGame.Core
         public static void BlockMovement(object who) => MovementBlockers.Add(who);
         public static void UnblockMovement(object who) => MovementBlockers.Remove(who);
 
+        /// <summary>Called when the scene is reloaded (loading a save): old menus can't unblock themselves.</summary>
+        public static void ClearAll() => Reset();
+
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Reset()
         {

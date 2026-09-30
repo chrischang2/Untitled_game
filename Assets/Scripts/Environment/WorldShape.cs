@@ -32,6 +32,24 @@ namespace UntitledGame.Environment
         public const float CampRadius = 10f;
         public const float CampHeight = 0.9f;
 
+        /// <summary>The little market with the four shops, east of the camp.</summary>
+        public static Vector2 MarketCenter => CampCenter + new Vector2(24f, 3f);
+        public const float MarketRadius = 11f;
+        public const float MarketHeight = 1.0f;
+        public const float StallRing = 7.4f;
+        private static readonly float[] StallAngles = { -62f, -21f, 21f, 62f };
+        public static int StallCount => StallAngles.Length;
+
+        /// <summary>Stall i sits on the east side of the plaza, facing its centre.</summary>
+        public static Vector2 StallPosition(int i)
+        {
+            float a = StallAngles[i] * Mathf.Deg2Rad;
+            return MarketCenter + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * StallRing;
+        }
+
+        /// <summary>Where a player stands to talk to shop i (in front of the counter).</summary>
+        public static Vector2 CustomerSpot(int i) => Vector2.Lerp(StallPosition(i), MarketCenter, 0.38f);
+
         public static float LakeRadiusAt(float angle)
         {
             float r = LakeBaseRadius
@@ -91,18 +109,39 @@ namespace UntitledGame.Environment
             float campDist = Vector2.Distance(new Vector2(x, z), CampCenter);
             h = Mathf.Lerp(CampHeight, h, Smooth(CampRadius * 0.6f, CampRadius * 1.25f, campDist));
 
+            // Flatten the market plaza.
+            float marketDist = Vector2.Distance(new Vector2(x, z), MarketCenter);
+            h = Mathf.Lerp(MarketHeight, h, Smooth(MarketRadius * 0.75f, MarketRadius * 1.35f, marketDist));
+
             // Flatten a path from camp to the dock.
-            float pathDist = DistanceToPath(x, z);
+            float pathDist = DistanceToDockPath(x, z);
             if (d > 0f)
             {
                 float target = Mathf.Lerp(0.35f, CampHeight, Mathf.Clamp01(d / 13f));
                 h = Mathf.Lerp(target, h, Smooth(1.5f, 4f, pathDist));
             }
+
+            // ...and from the camp to the market.
+            float marketPath = DistanceToMarketPath(x, z);
+            if (d > 0f) h = Mathf.Lerp((CampHeight + MarketHeight) * 0.5f, h, Smooth(1.5f, 4f, marketPath));
             return h;
         }
 
-        /// <summary>Distance from the camp-to-dock footpath (a gently curving line).</summary>
-        public static float DistanceToPath(float x, float z)
+        /// <summary>Distance to the nearest footpath (camp-dock or camp-market).</summary>
+        public static float DistanceToPath(float x, float z) => Mathf.Min(DistanceToDockPath(x, z), DistanceToMarketPath(x, z));
+
+        public static float DistanceToMarketPath(float x, float z)
+        {
+            Vector2 a = CampCenter + new Vector2(4.5f, 1f);
+            Vector2 b = MarketCenter - new Vector2(MarketRadius * 0.55f, 0f);
+            return DistanceToSegment(new Vector2(x, z), a, b);
+        }
+
+        public static bool InMarket(float x, float z, float margin = 0f) =>
+            Vector2.Distance(new Vector2(x, z), MarketCenter) < MarketRadius + margin;
+
+        /// <summary>Distance from the camp-to-dock footpath.</summary>
+        public static float DistanceToDockPath(float x, float z)
         {
             Vector2 a = DockShorePoint + DockDirection * 1.0f;
             Vector2 b = CampCenter - DockDirection * 1.5f + new Vector2(1.5f, 0f);

@@ -220,6 +220,30 @@ namespace UntitledGame.UI
             return field;
         }
 
+        /// <summary>A vertical, mouse-wheel scrollable list; returns the content transform to add rows to.</summary>
+        public static RectTransform ScrollList(RectTransform area, float spacing = 10f)
+        {
+            var viewport = Rect("Viewport", area).Stretch();
+            viewport.gameObject.AddComponent<RectMask2D>();
+            var hit = viewport.gameObject.AddComponent<Image>();
+            hit.color = new Color(1, 1, 1, 0.01f);
+            var content = Rect("Content", viewport);
+            content.anchorMin = new Vector2(0, 1);
+            content.anchorMax = new Vector2(1, 1);
+            content.pivot = new Vector2(0.5f, 1);
+            content.sizeDelta = Vector2.zero;
+            VLayout(content.gameObject, spacing, new RectOffset(4, 16, 4, 4));
+            content.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            var scroll = area.gameObject.AddComponent<ScrollRect>();
+            scroll.viewport = viewport;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 40f;
+            return content;
+        }
+
         public static void SetLayout(this RectTransform rt, float preferredHeight, float preferredWidth = -1)
         {
             var le = rt.GetComponent<LayoutElement>() ?? rt.gameObject.AddComponent<LayoutElement>();

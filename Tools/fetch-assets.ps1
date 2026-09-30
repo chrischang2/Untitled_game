@@ -72,7 +72,9 @@ Copy-Kit "pirate-kit" "PirateKit" @("boat-row-*", "structure-platform-dock*", "s
 Copy-Kit "holiday-kit" "HolidayKit" @("cabin-*", "lantern*", "bench*", "floor-wood", "rocks-*")
 Copy-Kit "mini-characters" "MiniCharacters" @("character-*")
 Copy-Kit "cube-pets" "CubePets" @("animal-cat", "animal-dog", "animal-fish", "animal-chick", "animal-bunny", "animal-crab", "animal-fox", "animal-deer", "animal-parrot", "animal-beaver")
-Copy-Kit "fantasy-town-kit" "FantasyTown" @("lantern", "stall-bench", "stall-stool", "cart", "fence*", "hedge", "hedge-curved", "rock-*", "tree*", "poles*", "banner-*", "watermill*", "wheel")
+Copy-Kit "fantasy-town-kit" "FantasyTown" @("lantern", "stall", "stall-green", "stall-red", "stall-bench", "stall-stool", "cart", "fence*", "hedge", "hedge-curved", "rock-*", "tree*", "poles*", "banner-*", "watermill*", "wheel")
+Copy-Kit "furniture-kit" "FurnitureKit" @("chairCushion", "tableRound", "loungeSofa", "lampRoundFloor", "pottedPlant", "rugRound", "bookcaseOpen",
+    "radio", "bear", "cardboardBoxOpen", "cardboardBoxClosed", "books", "plantSmall1")
 Copy-Kit "food-kit" "FoodKit" @("fish", "fish-bones", "cup-tea", "mug", "pot-stew", "pot-stew-lid", "bowl-soup", "loaf", "apple", "skewer", "mussel*")
 
 # ---------------------------------------------------------------- Audio
@@ -81,7 +83,7 @@ foreach ($d in "Music", "Ambience", "SFX") { New-Item -ItemType Directory -Force
 
 Write-Host "Kenney audio"
 $ui = Get-KenneyZip "interface-sounds"
-foreach ($n in "click_002", "confirmation_002", "open_002", "close_002", "pluck_001", "pluck_002", "drop_002", "select_001", "toggle_001", "maximize_006", "minimize_006", "error_004") {
+foreach ($n in "glass_002", "click_002", "confirmation_002", "open_002", "close_002", "pluck_001", "pluck_002", "drop_002", "select_001", "toggle_001", "maximize_006", "minimize_006", "error_004") {
     Copy-Item (Join-Path $ui "Audio/$n.ogg") (Join-Path $audio "SFX/ui_$n.ogg")
 }
 Copy-Item (Join-Path $ui "License.txt") (Join-Path $audio "SFX/License_KenneyInterfaceSounds.txt")
@@ -140,6 +142,17 @@ Copy-Item (Get-File "$gf/varelaround/VarelaRound-Regular.ttf" (Join-Path $cache 
 Copy-Item (Get-File "$gf/varelaround/OFL.txt" (Join-Path $cache "VarelaRound-OFL.txt")) (Join-Path $fonts "VarelaRound-OFL.txt")
 Copy-Item (Get-File "$gf/lilitaone/LilitaOne-Regular.ttf" (Join-Path $cache "LilitaOne-Regular.ttf")) (Join-Path $fonts "Resources/")
 Copy-Item (Get-File "$gf/lilitaone/OFL.txt" (Join-Path $cache "LilitaOne-OFL.txt")) (Join-Path $fonts "LilitaOne-OFL.txt")
+
+# ---------------------------------------------------------------- Chinese dictionary (pinyin)
+Write-Host "CC-CEDICT (CC BY-SA 4.0) for pinyin"
+$streaming = Join-Path $project "Assets/StreamingAssets"
+New-Item -ItemType Directory -Force -Path $streaming | Out-Null
+$gz = Get-File "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz" (Join-Path $cache "cedict.txt.gz")
+$in = [System.IO.File]::OpenRead($gz)
+$out = [System.IO.File]::Create((Join-Path $streaming "cedict_ts.u8"))
+$unzip = New-Object System.IO.Compression.GZipStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+$unzip.CopyTo($out)
+$unzip.Dispose(); $out.Dispose(); $in.Dispose()
 
 $count = (Get-ChildItem -Recurse -File -Path $dest | Where-Object { $_.Extension -ne ".meta" }).Count
 Write-Host "`nDone: $count files in Assets/ThirdParty"

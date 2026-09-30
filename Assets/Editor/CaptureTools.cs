@@ -39,6 +39,9 @@ namespace UntitledGame.EditorTools
                 new View { name = "overview", pos = pp - fwd * 30f + Vector3.up * 26f + Vector3.right * 8f, lookAt = pp + fwd * 14f, fov = 50 },
                 new View { name = "lake", pos = new Vector3(2f, 3.2f, -8f), lookAt = pp + fwd * 2f + Vector3.up * 1f, fov = 50 },
                 new View { name = "closeup", pos = pp + fwd * 3.2f + Vector3.up * 1.6f + Vector3.right * 0.6f, lookAt = (pp + mei.transform.position) * 0.5f + Vector3.up * 0.8f, fov = 45 },
+                new View { name = "market", pos = MarketPoint(-11f, 6f, -3f), lookAt = MarketPoint(2f, 0.5f, 0f), fov = 55 },
+                new View { name = "stall", pos = MarketPoint(0.5f, 2.2f, -5.2f), lookAt = MarketPoint(5.5f, 1f, -5f), fov = 55 },
+                KeeperView(1),
                 new View { name = "camp", pos = pp - fwd * 4f + Vector3.up * 3f + Vector3.right * 6f, lookAt = pp - fwd * 12f, fov = 55 },
             };
 
@@ -55,13 +58,29 @@ namespace UntitledGame.EditorTools
                 if (only != null && only != v.name) continue;
                 foreach (float t in times)
                 {
-                    if (v.name != "gameplay" && v.name != "overview" && t != 7.5f && t != 19.2f) continue;
+                    if (v.name != "gameplay" && v.name != "overview" && t != 13f && t != 19.2f) continue;
                     dn.TimeOfDay = t;
                     dn.Apply();
                     Render(cam, v, $"Captures/{v.name}_{t:00.0}.png");
                 }
             }
             Debug.Log("[Capture] Done.");
+        }
+
+        /// <summary>What a customer standing at stall i sees.</summary>
+        private static View KeeperView(int i)
+        {
+            Vector2 c = WorldShape.CustomerSpot(i), st = WorldShape.StallPosition(i);
+            Vector2 back = (c - st).normalized;
+            Vector2 eye = c + back * 1.2f;
+            float y = WorldShape.TerrainHeight(eye.x, eye.y);
+            return new View { name = "keeper", pos = new Vector3(eye.x, y + 1.7f, eye.y), lookAt = new Vector3(st.x, y + 0.9f, st.y), fov = 50 };
+        }
+
+        private static Vector3 MarketPoint(float x, float y, float z)
+        {
+            var c = WorldShape.MarketCenter;
+            return new Vector3(c.x + x, WorldShape.MarketHeight + y, c.y + z);
         }
 
         private static void PoseCharacters()

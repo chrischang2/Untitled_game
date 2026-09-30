@@ -55,8 +55,19 @@ namespace UntitledGame.GenAI
             public float presence_penalty;
             public int max_tokens;
             public bool cache_prompt = true;
+            public int id_slot = -1;
             public TemplateKwargs chat_template_kwargs = new TemplateKwargs();
         }
+
+        [Serializable]
+        private class MessagesWrapper
+        {
+            public List<ChatMessage> messages;
+        }
+
+        [Serializable] private class FullResponse { public FullChoice[] choices; }
+        [Serializable] private class FullChoice { public FullMessage message; }
+        [Serializable] private class FullMessage { public string content; }
 
         [Serializable]
         private class TemplateKwargs
@@ -70,15 +81,50 @@ namespace UntitledGame.GenAI
 
         public static ChatStreamHandle Stream(
             MonoBehaviour host, string baseUrl, string model, List<ChatMessage> messages, ChatSampling sampling,
-            Action<string> onDelta, Action<ChatStreamHandle> onComplete)
+            Action<string> onDelta, Action<ChatStreamHandle> onComplete, int slot = -1)
         {
             var handle = new ChatStreamHandle { StartedAt = Time.realtimeSinceStartup };
-            host.StartCoroutine(Run(baseUrl, model, messages, sampling, handle, onDelta, onComplete));
+            host.StartCoroutine(Run(baseUrl, model, messages, sampling, handle, onDelta, onComplete, slot));
             return handle;
         }
 
+        /// <summary>
+        /// Non-streamed completion constrained to a JSON schema (llama.cpp turns the schema into a grammar,
+        /// so even a small model always returns valid JSON). Callback gets (json, error).
+        /// </summary>
+        public static IEnumerator CompleteJson(string baseUrl, string model, List<ChatMessage> messages, string jsonSchema,
+            int maxTokens, int slot, Action<string, string> onDone)
+        {
+            string msgs = JsonUtility.ToJson(new MessagesWrapper { messages = messages });
+            msgs = msgs.Substring(msgs.IndexOf('['), msgs.LastIndexOf(']') - msgs.IndexOf('[') + 1);
+            string body = "{\"model\":\"" + (string.IsNullOrEmpty(model) ? "local" : model) + "\",\"messages\":" + msgs +
+                          ",\"temperature\":0.1,\"top_p\":0.9,\"max_tokens\":" + maxTokens + ",\"cache_prompt\":true,\"id_slot\":" + slot +
+                          ",\"chat_template_kwargs\":{\"enable_thinking\":false}" +
+                          ",\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"result\",\"schema\":" + jsonSchema + "}}}";
+            using var req = new UnityWebRequest(baseUrl.TrimEnd('/') + "/chat/completions", "POST");
+            req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.timeout = 60;
+            yield return req.SendWebRequest();
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                onDone?.Invoke(null, $"{req.result}: {req.error}");
+                yield break;
+            }
+            try
+            {
+                var r = JsonUtility.FromJson<FullResponse>(req.downloadHandler.text);
+                onDone?.Invoke(r?.choices?[0]?.message?.content, null);
+            }
+            catch (Exception e)
+            {
+                onDone?.Invoke(null, e.Message);
+            }
+        }
+
         private static IEnumerator Run(string baseUrl, string model, List<ChatMessage> messages, ChatSampling s,
-            ChatStreamHandle handle, Action<string> onDelta, Action<ChatStreamHandle> onComplete)
+            ChatStreamHandle handle, Action<string> onDelta, Action<ChatStreamHandle> onComplete, int slot)
         {
             var body = new Request
             {
@@ -89,6 +135,7 @@ namespace UntitledGame.GenAI
                 top_k = s.top_k,
                 presence_penalty = s.presence_penalty,
                 max_tokens = s.max_tokens,
+                id_slot = slot,
             };
             byte[] payload = Encoding.UTF8.GetBytes(JsonUtility.ToJson(body));
 

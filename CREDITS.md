@@ -4,7 +4,7 @@ Everything in Willow Lake is free to use. The art and sound live in `Assets/Thir
 
 ## 3D models: Kenney (CC0 1.0)
 By [Kenney](https://kenney.nl) (public domain, credit appreciated):
-Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, Fantasy Town Kit 2.0, Food Kit.
+Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, Fantasy Town Kit 2.0, Food Kit, Furniture Kit.
 
 ## Sound effects
 | File(s) in `Assets/ThirdParty/Audio/Resources/` | Source | Author | License |
@@ -24,6 +24,9 @@ Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, F
 - [Catmint](https://opengameart.org/content/catmint) and [Daisy](https://opengameart.org/content/daisy), by Kistol
 - [Cozy Puzzle – In Game 1](https://opengameart.org/content/cozy-puzzle-in-game-1), by MintoDog
 
+## Dictionary
+- [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cedict) (CC BY-SA 4.0), by MDBG and contributors. It is used for pinyin and for traditional→simplified conversion, and is downloaded to `Assets/StreamingAssets/cedict_ts.u8`. If you share a build, keep this credit and the license with it.
+
 ## Fonts (SIL Open Font License 1.1)
 - Varela Round, by Joe Prince (Google Fonts)
 - Lilita One, by Juan Montoreano (Google Fonts)
@@ -31,12 +34,16 @@ Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, F
 
 ## Local AI runtime
 `Tools/setup-local-ai.ps1` downloads these into `LocalAI/`. They are gitignored and not part of the repo.
+
 | Component | Purpose | License |
 |---|---|---|
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` (Vulkan build) | runs the chat model | MIT |
-| [Qwen3.5-2B / 4B Instruct](https://huggingface.co/Qwen) (GGUF by Unsloth) | Mei's brain | Apache 2.0 |
-| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-server` + `ggml-base` model | speech to text | MIT |
-| [Piper](https://github.com/rhasspy/piper) 2023.11.14-2 | text to speech | MIT |
-| Piper voice `en_US-kristin-medium` | Mei's default voice | trained on LibriVox recordings (public domain) |
-| Piper voice `en_US-ljspeech-medium` | alternative voice | trained on the LJ Speech dataset (public domain) |
-| Piper voice `zh_CN-huayan-medium` | Mandarin voice (beta) | the dataset license is listed as "unknown". It's only used by the Mandarin practice mode, so check it before sharing a build |
+| [Qwen3.5-4B / 2B Instruct](https://huggingface.co/Qwen) (GGUF by Unsloth) | Mei's and the shopkeepers' brains | Apache 2.0 |
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 1.13.8 (native DLLs + C# bindings in `Assets/Plugins/SherpaOnnx`) | in-process speech recognition and synthesis | Apache 2.0 |
+| SenseVoice-Small, int8, 2025-09-09 (from [ASLP-lab/WSYue-ASR](https://huggingface.co/ASLP-lab/WSYue-ASR), based on FunAudioLLM SenseVoice) | speech to text (pinned to Mandarin) | see the model pages; the SenseVoice model license allows commercial use with attribution |
+| [Matcha-TTS zh-en](https://modelscope.cn/models/dengcunqin/matcha_tts_zh_en_20251010) by dengcunqin + `vocos-16khz-univ` vocoder | Mei's voice (Mandarin + English) | no license stated by the author; fine for personal use, but check before sharing a build |
+| Piper voice `zh_CN-chaowen-medium` | male shopkeepers (老王, 李师傅) | dataset CC0 |
+| Piper voice `zh_CN-xiao_ya-medium` | female shopkeepers (陈阿姨, 小林) | trained on the Data Baker BZNSYP corpus: **non-commercial use only** |
+| Piper voice `en_US-kristin-medium` | Mei's English | trained on LibriVox recordings (public domain) |
+
+This is fine for a personal learning game. For anything commercial, swap the xiao_ya voice (set `voiceFemale` in `LocalAI/localai.json`) and check the Matcha model's terms.

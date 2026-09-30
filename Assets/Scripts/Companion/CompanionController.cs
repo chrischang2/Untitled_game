@@ -18,7 +18,7 @@ namespace UntitledGame.Companion
         [SerializeField] private float moveSpeed = 3.8f;
         [SerializeField] private float turnSpeed = 400f;
         [SerializeField] private CharacterAnimator animator;
-        [SerializeField] private CompanionVoice voice;
+        [SerializeField] private CharacterVoice voice;
         [SerializeField] private FishingController playerFishing;
 
         private readonly List<Vector3> _crumbs = new List<Vector3>();
@@ -38,7 +38,7 @@ namespace UntitledGame.Companion
 
         public void SetTarget(Transform newTarget) => target = newTarget;
 
-        public void Configure(Transform player, CharacterAnimator anim, CompanionVoice v, FishingController fishing)
+        public void Configure(Transform player, CharacterAnimator anim, CharacterVoice v, FishingController fishing)
         {
             target = player;
             animator = anim;
@@ -49,7 +49,7 @@ namespace UntitledGame.Companion
         private void Start()
         {
             if (animator == null) animator = GetComponentInChildren<CharacterAnimator>();
-            if (voice == null) voice = GetComponent<CompanionVoice>();
+            if (voice == null) voice = GetComponent<CharacterVoice>();
             if (animator != null) _head = animator.FindBone("head");
             if (target != null) _lastCrumb = target.position;
         }
@@ -206,6 +206,22 @@ namespace UntitledGame.Companion
             float y = WorldShape.IsOnDock(p.x, p.z) ? WorldShape.DockDeckHeight : Mathf.Max(WorldShape.TerrainHeight(p.x, p.z), WorldShape.WaterLevel - 0.3f);
             p.y = Mathf.Lerp(p.y, y, 1f - Mathf.Exp(-20f * Time.deltaTime));
             transform.position = p;
+        }
+
+        /// <summary>Puts Mei right next to the player (used when a save puts the player somewhere else).</summary>
+        public void Warp()
+        {
+            if (target == null) return;
+            _sitting = false;
+            _sitSpot = null;
+            _moving = false;
+            TeleportNearPlayer();
+            Vector3 p = transform.position;
+            p.y = WorldShape.IsOnDock(p.x, p.z) ? WorldShape.DockDeckHeight : Mathf.Max(WorldShape.TerrainHeight(p.x, p.z), WorldShape.WaterLevel - 0.3f);
+            transform.position = p;
+            Vector3 face = target.position - p;
+            face.y = 0f;
+            if (face.sqrMagnitude > 0.01f) transform.rotation = Quaternion.LookRotation(face.normalized);
         }
 
         private void TeleportNearPlayer()

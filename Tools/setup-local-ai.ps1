@@ -1,28 +1,31 @@
 <#
 .SYNOPSIS
-  Downloads the local AI stack the game talks to into ./LocalAI (gitignored):
-    - llama.cpp server (Vulkan build)   -> chat LLM (OpenAI-compatible API)
-    - Qwen3.5 GGUF model                -> strong at English + Mandarin
-    - whisper.cpp server (CPU build)    -> speech-to-text
-    - Whisper multilingual model        -> English now, Chinese later
-    - Piper TTS + voices                -> text-to-speech (English + Mandarin voices)
+  Downloads the local AI stack into ./LocalAI (gitignored):
+    - llama.cpp server (Vulkan build)           -> runs the chat LLM (OpenAI-compatible API)
+    - Qwen3.5 GGUF model                        -> Mei + the shopkeepers (strong Mandarin)
+    - sherpa-onnx runtime (in-process via C#)   -> speech recognition + speech synthesis
+    - SenseVoice                                -> fast, accurate Mandarin speech recognition
+    - Matcha zh-en + vocos vocoder              -> Mei's Mandarin voice
+    - Piper voices (chaowen / xiao_ya / kristin)-> shopkeeper voices + Mei's English voice
 
   Re-running is safe: finished files are skipped.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File Tools/setup-local-ai.ps1
-  powershell -ExecutionPolicy Bypass -File Tools/setup-local-ai.ps1 -ModelSize 2B -WhisperModel small-q5_1
+  powershell -ExecutionPolicy Bypass -File Tools/setup-local-ai.ps1 -ModelSize 2B    # faster, weaker Mandarin
 #>
 param(
-    [ValidateSet("2B", "4B", "9B")] [string]$ModelSize = "2B",
-    [ValidateSet("base", "small-q5_1", "small", "large-v3-turbo-q5_0")] [string]$WhisperModel = "base"
+    [ValidateSet("2B", "4B", "9B")] [string]$ModelSize = "4B"
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+$SherpaVersion = "1.13.8"
 $root = Join-Path (Split-Path -Parent $PSScriptRoot) "LocalAI"
-New-Item -ItemType Directory -Force -Path $root | Out-Null
+$dl = Join-Path $root "downloads"
+$models = Join-Path $root "models"
+New-Item -ItemType Directory -Force -Path $root, $dl, $models | Out-Null
 Write-Host "Installing local AI stack into $root"
 
 function Get-File([string]$url, [string]$dest) {
@@ -48,8 +51,13 @@ function Expand-Into([string]$zip, [string]$dir, [string]$probe) {
     Write-Host "  [unzip] $(Split-Path -Leaf $zip)"
     $staging = "$dir.staging"
     if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
-    Expand-Archive -Force -Path $zip -DestinationPath $staging
-    # Flatten: find the folder that actually contains the probe exe.
+    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+    if ($zip.EndsWith(".zip")) { Expand-Archive -Force -Path $zip -DestinationPath $staging }
+    else {
+        # Windows' bsdtar handles .tar.bz2 natively (Git Bash's tar would not).
+        & (Join-Path $env:SystemRoot "System32\tar.exe") -xjf $zip -C $staging
+        if ($LASTEXITCODE -ne 0) { throw "tar failed on $zip" }
+    }
     $hit = Get-ChildItem -Recurse -Path $staging -Filter $probe | Select-Object -First 1
     if (-not $hit) { throw "$probe not found in $zip" }
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -57,56 +65,44 @@ function Expand-Into([string]$zip, [string]$dir, [string]$probe) {
     Remove-Item -Recurse -Force $staging
 }
 
-$dl = Join-Path $root "downloads"
-New-Item -ItemType Directory -Force -Path $dl | Out-Null
+# Model archive from the sherpa-onnx release pages, extracted to models/<name>.
+function Get-SherpaModel([string]$tag, [string]$name, [string]$probe) {
+    $archive = Join-Path $dl "$name.tar.bz2"
+    Get-File "https://github.com/k2-fsa/sherpa-onnx/releases/download/$tag/$name.tar.bz2" $archive
+    Expand-Into $archive (Join-Path $models $name) $probe
+}
 
-# --- llama.cpp server -------------------------------------------------------
-Write-Host "`n[1/5] llama.cpp server (Vulkan)"
-$llamaUrl = Get-LatestAsset "ggml-org/llama.cpp" "^llama-b\d+-bin-win-vulkan-x64\.zip$"
-$llamaZip = Join-Path $dl (Split-Path -Leaf $llamaUrl)
-Get-File $llamaUrl $llamaZip
-Expand-Into $llamaZip (Join-Path $root "llama") "llama-server.exe"
-
-# --- LLM model --------------------------------------------------------------
-Write-Host "`n[2/5] Qwen3.5-$ModelSize model"
-$models = Join-Path $root "models"
-New-Item -ItemType Directory -Force -Path $models | Out-Null
+# --- LLM ---------------------------------------------------------------------
+Write-Host "`n[1/4] llama.cpp server (Vulkan) + Qwen3.5-$ModelSize"
+if (Test-Path (Join-Path $root "llama/llama-server.exe")) { Write-Host "  [skip] llama.cpp already installed" }
+else {
+    $llamaUrl = Get-LatestAsset "ggml-org/llama.cpp" "^llama-b\d+-bin-win-vulkan-x64\.zip$"
+    $llamaZip = Join-Path $dl (Split-Path -Leaf $llamaUrl)
+    Get-File $llamaUrl $llamaZip
+    Expand-Into $llamaZip (Join-Path $root "llama") "llama-server.exe"
+}
 $ggufName = "Qwen3.5-$ModelSize-Q4_K_M.gguf"
 Get-File "https://huggingface.co/unsloth/Qwen3.5-$ModelSize-GGUF/resolve/main/$ggufName" (Join-Path $models $ggufName)
 
-# --- whisper.cpp server -----------------------------------------------------
-Write-Host "`n[3/5] whisper.cpp server"
-$whisperUrl = Get-LatestAsset "ggml-org/whisper.cpp" "^whisper-bin-x64\.zip$"
-$whisperZip = Join-Path $dl "whisper-bin-x64.zip"
-Get-File $whisperUrl $whisperZip
-Expand-Into $whisperZip (Join-Path $root "whisper") "whisper-server.exe"
+# --- sherpa-onnx native runtime -------------------------------------------
+Write-Host "`n[2/4] sherpa-onnx $SherpaVersion runtime"
+$sherpaArchive = Join-Path $dl "sherpa-onnx-v$SherpaVersion-win-x64-shared-MD-Release.tar.bz2"
+Get-File "https://github.com/k2-fsa/sherpa-onnx/releases/download/v$SherpaVersion/sherpa-onnx-v$SherpaVersion-win-x64-shared-MD-Release.tar.bz2" $sherpaArchive
+Expand-Into $sherpaArchive (Join-Path $root "sherpa") "sherpa-onnx-c-api.dll"
 
-Write-Host "`n[4/5] Whisper model ($WhisperModel)"
-Get-File "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$WhisperModel.bin" (Join-Path $models "ggml-$WhisperModel.bin")
+# --- Speech recognition -------------------------------------------------------
+Write-Host "`n[3/4] SenseVoice speech recognition"
+Get-SherpaModel "asr-models" "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09" "model.int8.onnx"
 
-# --- Piper TTS --------------------------------------------------------------
-Write-Host "`n[5/5] Piper TTS + voices"
-$piperZip = Join-Path $dl "piper_windows_amd64.zip"
-Get-File "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip" $piperZip
-Expand-Into $piperZip (Join-Path $root "piper") "piper.exe"
+# --- Voices -------------------------------------------------------------------
+Write-Host "`n[4/4] Voices"
+Get-SherpaModel "tts-models" "matcha-icefall-zh-en" "model-steps-3.onnx"
+Get-File "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-16khz-univ.onnx" (Join-Path $models "vocos-16khz-univ.onnx")
+Get-SherpaModel "tts-models" "vits-piper-zh_CN-chaowen-medium" "zh_CN-chaowen-medium.onnx"
+Get-SherpaModel "tts-models" "vits-piper-zh_CN-xiao_ya-medium" "zh_CN-xiao_ya-medium.onnx"
+Get-SherpaModel "tts-models" "vits-piper-en_US-kristin-medium" "en_US-kristin-medium.onnx"
 
-$voices = Join-Path $root "voices"
-New-Item -ItemType Directory -Force -Path $voices | Out-Null
-$voiceBase = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
-foreach ($v in @(
-        # Public-domain training data (LibriVox / LJ Speech) so the voices are free to use.
-        @{ path = "en/en_US/kristin/medium"; name = "en_US-kristin-medium" },
-        @{ path = "en/en_US/ljspeech/medium"; name = "en_US-ljspeech-medium" },
-        @{ path = "zh/zh_CN/huayan/medium"; name = "zh_CN-huayan-medium" })) {
-    Get-File "$voiceBase/$($v.path)/$($v.name).onnx" (Join-Path $voices "$($v.name).onnx")
-    Get-File "$voiceBase/$($v.path)/$($v.name).onnx.json" (Join-Path $voices "$($v.name).onnx.json")
-}
-
-# Record which model files were chosen so the game can find them.
-@{
-    llmModel     = "models/$ggufName"
-    whisperModel = "models/ggml-$WhisperModel.bin"
-    voice        = "voices/en_US-kristin-medium.onnx"
-} | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $root "localai.json")
+# Record the chosen LLM so the game can find it (other paths use the defaults in LocalAIConfig.cs).
+@{ llmModel = "models/$ggufName" } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $root "localai.json")
 
 Write-Host "`nDone. Local AI stack is ready in $root"

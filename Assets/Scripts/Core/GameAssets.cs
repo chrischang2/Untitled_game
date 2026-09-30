@@ -36,6 +36,11 @@ namespace UntitledGame.Core
         public Material rainMaterial;
         public Material sparkleMaterial;
 
+        [Header("Shop items (Kenney models, remapped materials)")]
+        public System.Collections.Generic.List<ItemPrefab> itemPrefabs = new System.Collections.Generic.List<ItemPrefab>();
+
+        public GameObject PrefabFor(string id) => itemPrefabs.Find(p => p.id == id)?.prefab;
+
         [Header("UI")]
         public Sprite roundedRect;
         public Sprite roundedRectSmall;
@@ -43,5 +48,12 @@ namespace UntitledGame.Core
         public Sprite circle;
         public Sprite fishIcon;
         public Sprite ring;
+    }
+
+    [System.Serializable]
+    public class ItemPrefab
+    {
+        public string id;
+        public GameObject prefab;
     }
 }

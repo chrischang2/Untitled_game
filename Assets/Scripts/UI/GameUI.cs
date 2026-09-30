@@ -5,100 +5,107 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UntitledGame.Companion;
 using UntitledGame.Core;
+using UntitledGame.Economy;
 using UntitledGame.Environment;
 using UntitledGame.Fishing;
 using UntitledGame.GenAI;
+using UntitledGame.Home;
+using UntitledGame.Language;
 
 namespace UntitledGame.UI
 {
     /// <summary>
-    /// Builds and runs the whole HUD from code: clock, AI status, control hints, Mei's speech bubble,
-    /// push-to-talk meter, fishing meters, catch card, toasts, and the journal / chat / settings panels.
+    /// Builds and runs the whole HUD from code: clock + money, AI status, control hints, speech bubbles
+    /// for every character (with dictionary pinyin), push-to-talk meter, fishing meters, shop offer card,
+    /// interaction prompt, world labels, toasts and the menus (journal, bag, word notebook, chat log, settings).
+    /// Menus are in English; everything characters say is Mandarin.
     /// </summary>
     public class GameUI : MonoBehaviour
     {
-        [SerializeField] private CompanionBrain brain;
-        [SerializeField] private CompanionVoice voice;
-        [SerializeField] private Transform meiAnchor;
+        [SerializeField] private CompanionBrain mei;
         [SerializeField] private Transform playerAnchor;
         [SerializeField] private FishingController fishing;
         [SerializeField] private VoiceChatController voiceChat;
+        [SerializeField] private InteractionController interaction;
 
         private RectTransform _root;
         private RectTransform _hud;
         private Camera _cam;
 
-        // HUD
-        private TextMeshProUGUI _clock, _clockSub;
+        private TextMeshProUGUI _clock, _clockSub, _money, _bucket;
         private Image _sunIcon;
         private TextMeshProUGUI _aiText;
         private Image[] _aiDots;
         private TextMeshProUGUI _hint;
+        private RectTransform _hintPanel;
 
-        // Speech bubbles
-        private RectTransform _bubble;
-        private CanvasGroup _bubbleGroup;
-        private TextMeshProUGUI _bubbleText, _bubbleName;
-        private string _bubbleFull = "";
-        private float _bubbleReveal;
-        private float _bubbleHideAt;
+        private readonly List<SpeechBubble> _bubbles = new List<SpeechBubble>();
+        private WorldLabels _labels;
         private RectTransform _playerBubble;
         private CanvasGroup _playerBubbleGroup;
         private TextMeshProUGUI _playerBubbleText;
         private float _playerBubbleHideAt;
 
-        // Mic
         private RectTransform _mic;
         private Image _micLevel, _micDot;
         private TextMeshProUGUI _micText;
 
-        // Fishing
-        private RectTransform _power;
-        private Image _powerFill;
-        private RectTransform _bite;
-        private RectTransform _tension;
-        private Image _tensionFill, _tensionFish;
+        private RectTransform _power, _bite, _tension;
+        private Image _powerFill, _tensionFill, _tensionFish;
         private TextMeshProUGUI _tensionLabel, _tensionDistance;
 
-        // Typing
+        private RectTransform _prompt;
+        private TextMeshProUGUI _promptText;
+
+        private RectTransform _offer;
+        private TextMeshProUGUI _offerText;
+        private ShopkeeperBrain _offerKeeper;
+
         private RectTransform _typeBar;
         private TMP_InputField _typeField;
-
-        // Toasts
-        private RectTransform _toastRoot;
-        private readonly List<(CanvasGroup group, float until)> _toasts = new List<(CanvasGroup, float)>();
-
+        private TextMeshProUGUI _typeLabel;
+        private DialogueAgent _typeTarget;
         private int _typingClosedFrame = -1;
         private float _typingOpenedAt;
 
-        // Intro
+        private RectTransform _toastRoot;
+        private readonly List<(CanvasGroup group, float until)> _toasts = new List<(CanvasGroup, float)>();
+
         private CanvasGroup _intro;
         private float _introUntil;
 
         private CatchCard _card;
         private JournalPanel _journal;
         private SettingsPanel _settings;
+        private SavesPanel _saves;
         private ChatPanel _chat;
+        private InventoryPanel _bag;
+        private NotebookPanel _notebook;
 
         public bool HudHidden { get; private set; }
+        public Vector2 RootSize => _root.rect.size;
 
         public void ToggleJournal() => _journal.Toggle();
         public void ToggleSettings() => _settings.Toggle();
+        public void OpenSaves() => _saves.Open();
+        public void CloseSaves() => _saves.Close();
         public void ToggleChatLog() => _chat.Toggle();
+        public void ToggleBag() => _bag.Toggle();
+        public void ToggleNotebook() => _notebook.Toggle();
 
-        public void Configure(CompanionBrain b, CompanionVoice v, Transform mei, Transform player, FishingController f, VoiceChatController vc)
+        public void Configure(CompanionBrain b, Transform player, FishingController f, VoiceChatController vc, InteractionController ic)
         {
-            brain = b;
-            voice = v;
-            meiAnchor = mei;
+            mei = b;
             playerAnchor = player;
             fishing = f;
             voiceChat = vc;
+            interaction = ic;
         }
 
         private void Start()
         {
             _cam = Camera.main;
+            Pinyin.Init();
             if (FindFirstObjectByType<EventSystem>() == null)
             {
                 var es = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
@@ -107,25 +114,26 @@ namespace UntitledGame.UI
             Build();
 
             GameEvents.ToastRequested += ShowToast;
-            if (brain != null)
-            {
-                brain.SentenceSpoken += OnMeiSentence;
-                brain.PlayerSaid += OnPlayerSaid;
-                brain.StateChanged += OnBrainState;
-            }
             FishingController.FishCaught += OnFishCaught;
+            ShopkeeperBrain.TransactionDone += OnTransaction;
+            VocabNotebook.WordLearned += OnWordLearned;
+            VocabNotebook.WordUsed += OnWordUsed;
+            if (mei != null) mei.PlayerSaid += OnPlayerSaid;
+            foreach (var k in ShopkeeperBrain.Keepers) k.PlayerSaid += OnPlayerSaid;
         }
 
         private void OnDestroy()
         {
             GameEvents.ToastRequested -= ShowToast;
-            if (brain != null)
-            {
-                brain.SentenceSpoken -= OnMeiSentence;
-                brain.PlayerSaid -= OnPlayerSaid;
-                brain.StateChanged -= OnBrainState;
-            }
             FishingController.FishCaught -= OnFishCaught;
+            ShopkeeperBrain.TransactionDone -= OnTransaction;
+            VocabNotebook.WordLearned -= OnWordLearned;
+            VocabNotebook.WordUsed -= OnWordUsed;
+            if (mei != null) mei.PlayerSaid -= OnPlayerSaid;
+            foreach (var b in _bubbles) b.Dispose();
+            _bag?.Dispose();
+            _notebook?.Dispose();
+            _chat?.Dispose();
         }
 
         // ------------------------------------------------------------------ build
@@ -144,12 +152,14 @@ namespace UntitledGame.UI
             _root = (RectTransform)canvasGo.transform;
 
             _hud = UIFactory.Rect("HUD", _root).Stretch();
+            _labels = new WorldLabels(UIFactory.Rect("WorldLabels", _hud).Stretch());
             BuildClock();
             BuildAiStatus();
             BuildHint();
             BuildBubbles();
             BuildMic();
             BuildFishing();
+            BuildPromptAndOffer();
             BuildTypeBar();
             _toastRoot = UIFactory.Rect("Toasts", _hud).Anchor(new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0, -40), new Vector2(900, 400));
             var tl = UIFactory.VLayout(_toastRoot.gameObject, 10, new RectOffset(0, 0, 0, 0));
@@ -158,8 +168,11 @@ namespace UntitledGame.UI
 
             _card = new CatchCard(_root);
             _journal = new JournalPanel(_root);
-            _settings = new SettingsPanel(_root, brain);
-            _chat = new ChatPanel(_root, brain);
+            _bag = new InventoryPanel(_root);
+            _notebook = new NotebookPanel(_root);
+            _saves = new SavesPanel(_root);
+            _settings = new SettingsPanel(_root, mei, () => _saves.Open());
+            _chat = new ChatPanel(_root);
             BuildIntro();
         }
 
@@ -173,6 +186,13 @@ namespace UntitledGame.UI
             _clock.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(84, -8), new Vector2(210, 44));
             _clockSub = UIFactory.Text(panel.transform, "Sub", "Day 1 · clear", 21, UITheme.InkSoft);
             _clockSub.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(86, -50), new Vector2(210, 30));
+
+            var wallet = UIFactory.Panel(_hud, "Wallet", small: true);
+            wallet.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(34, -134), new Vector2(300, 56));
+            _money = UIFactory.Text(wallet.transform, "Money", "¥50", 28, UITheme.Ink, TextAlignmentOptions.MidlineLeft, title: true);
+            _money.rectTransform.Stretch(22, 150, 4, 4);
+            _bucket = UIFactory.Text(wallet.transform, "Bucket", "Bucket 0/8", 21, UITheme.InkSoft, TextAlignmentOptions.MidlineRight);
+            _bucket.rectTransform.Stretch(120, 20, 4, 4);
         }
 
         private void BuildAiStatus()
@@ -198,34 +218,18 @@ namespace UntitledGame.UI
         private void BuildHint()
         {
             var panel = UIFactory.Panel(_hud, "Hint", UITheme.Ink.WithAlpha(0.72f), shadow: false, small: true);
-            panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 28), new Vector2(1100, 54));
+            _hintPanel = panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 28), new Vector2(1500, 52));
             panel.raycastTarget = false;
-            _hint = UIFactory.Text(panel.transform, "Text", "", 23, UITheme.Cream, TextAlignmentOptions.Center);
+            _hint = UIFactory.Text(panel.transform, "Text", "", 21, UITheme.Cream, TextAlignmentOptions.Center);
             _hint.rectTransform.Stretch(16, 16, 4, 4);
         }
 
         private void BuildBubbles()
         {
-            var bubble = UIFactory.Panel(_hud, "MeiBubble");
-            _bubble = bubble.rectTransform;
-            _bubble.anchorMin = _bubble.anchorMax = new Vector2(0.5f, 0.5f);
-            _bubble.pivot = new Vector2(0.5f, 0f);
-            _bubble.sizeDelta = new Vector2(560, 120);
-            bubble.raycastTarget = false;
-            _bubbleGroup = bubble.gameObject.AddComponent<CanvasGroup>();
-            _bubbleGroup.alpha = 0f;
-            _bubbleGroup.blocksRaycasts = false;
-            var tail = UIFactory.Image(bubble.transform, "Tail", UITheme.Cream.WithAlpha(0.96f), GameAssets.Instance.roundedRectSmall);
-            tail.rectTransform.Anchor(new Vector2(0.5f, 0f), new Vector2(0.5f, 0.5f), new Vector2(0, 2), new Vector2(26, 26));
-            tail.rectTransform.localRotation = Quaternion.Euler(0, 0, 45);
-            var name = UIFactory.Panel(bubble.transform, "NameTag", UITheme.Teal, shadow: false, small: true);
-            name.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 0.5f), new Vector2(26, 0), new Vector2(92, 38));
-            _bubbleName = UIFactory.Text(name.transform, "Name", "Mei", 24, Color.white, TextAlignmentOptions.Center, title: true);
-            _bubbleName.rectTransform.Stretch();
-            _bubbleText = UIFactory.Text(bubble.transform, "Text", "", 27, UITheme.Ink, TextAlignmentOptions.TopLeft);
-            _bubbleText.rectTransform.Stretch(26, 26, 26, 18);
+            var layer = UIFactory.Rect("Bubbles", _hud).Stretch();
+            if (mei != null) _bubbles.Add(new SpeechBubble(layer, mei, UITheme.Teal));
+            foreach (var k in ShopkeeperBrain.Keepers) _bubbles.Add(new SpeechBubble(layer, k, UITheme.Orange));
 
-            // What the player said: a subtitle above the hint bar (never covers Mei's bubble).
             var pb = UIFactory.Panel(_hud, "PlayerBubble", UITheme.Teal.WithAlpha(0.95f), small: true);
             _playerBubble = pb.rectTransform;
             _playerBubble.anchorMin = _playerBubble.anchorMax = new Vector2(0.5f, 0f);
@@ -235,20 +239,20 @@ namespace UntitledGame.UI
             _playerBubbleGroup = pb.gameObject.AddComponent<CanvasGroup>();
             _playerBubbleGroup.alpha = 0f;
             _playerBubbleGroup.blocksRaycasts = false;
-            _playerBubbleText = UIFactory.Text(pb.transform, "Text", "", 24, Color.white, TextAlignmentOptions.Center);
+            _playerBubbleText = UIFactory.Text(pb.transform, "Text", "", 25, Color.white, TextAlignmentOptions.Center);
             _playerBubbleText.rectTransform.Stretch(18, 18, 10, 10);
         }
 
         private void BuildMic()
         {
             var panel = UIFactory.Panel(_hud, "Mic", small: true);
-            _mic = panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 104), new Vector2(460, 78));
+            _mic = panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 100), new Vector2(520, 78));
             _micDot = UIFactory.Image(panel.transform, "Dot", UITheme.Red, GameAssets.Instance.circle, sliced: false);
             _micDot.rectTransform.Anchor(new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(22, 0), new Vector2(34, 34));
-            _micText = UIFactory.Text(panel.transform, "Text", "Listening... release V to send", 22, UITheme.Ink);
-            _micText.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(72, -8), new Vector2(370, 34));
+            _micText = UIFactory.Text(panel.transform, "Text", "Listening...", 22, UITheme.Ink);
+            _micText.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(72, -8), new Vector2(430, 34));
             var track = UIFactory.Image(panel.transform, "Track", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
-            track.rectTransform.Anchor(new Vector2(0, 0), new Vector2(0, 0), new Vector2(72, 14), new Vector2(360, 16));
+            track.rectTransform.Anchor(new Vector2(0, 0), new Vector2(0, 0), new Vector2(72, 14), new Vector2(420, 16));
             _micLevel = UIFactory.Image(track.transform, "Level", UITheme.Teal, GameAssets.Instance.roundedRectSmall);
             _micLevel.rectTransform.anchorMin = Vector2.zero;
             _micLevel.rectTransform.anchorMax = new Vector2(0, 1);
@@ -259,7 +263,6 @@ namespace UntitledGame.UI
 
         private void BuildFishing()
         {
-            // Cast power (follows player on screen).
             var p = UIFactory.Panel(_hud, "Power", small: true);
             _power = p.rectTransform;
             _power.anchorMin = _power.anchorMax = new Vector2(0.5f, 0.5f);
@@ -274,7 +277,6 @@ namespace UntitledGame.UI
             _powerFill.rectTransform.offsetMin = _powerFill.rectTransform.offsetMax = Vector2.zero;
             _power.gameObject.SetActive(false);
 
-            // Bite alert.
             var b = UIFactory.Panel(_hud, "Bite", UITheme.Orange, small: true);
             _bite = b.rectTransform;
             _bite.anchorMin = _bite.anchorMax = new Vector2(0.5f, 0.5f);
@@ -284,7 +286,6 @@ namespace UntitledGame.UI
             bt.rectTransform.Stretch();
             _bite.gameObject.SetActive(false);
 
-            // Tension meter.
             var t = UIFactory.Panel(_hud, "Tension");
             _tension = t.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 110), new Vector2(720, 120));
             _tensionLabel = UIFactory.Text(t.transform, "Label", "Reel!", 32, UITheme.Ink, TextAlignmentOptions.Left, title: true);
@@ -307,14 +308,33 @@ namespace UntitledGame.UI
             _tension.gameObject.SetActive(false);
         }
 
+        private void BuildPromptAndOffer()
+        {
+            var prompt = UIFactory.Panel(_hud, "Prompt", UITheme.Cream.WithAlpha(0.95f), small: true);
+            _prompt = prompt.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 96), new Vector2(520, 50));
+            _promptText = UIFactory.Text(prompt.transform, "Text", "", 23, UITheme.Ink, TextAlignmentOptions.Center);
+            _promptText.rectTransform.Stretch(14, 14, 4, 4);
+            _prompt.gameObject.SetActive(false);
+
+            var offer = UIFactory.Panel(_hud, "Offer");
+            _offer = offer.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 170), new Vector2(760, 96));
+            _offerText = UIFactory.Text(offer.transform, "Text", "", 25, UITheme.Ink, TextAlignmentOptions.MidlineLeft);
+            _offerText.rectTransform.Stretch(26, 330, 8, 8);
+            var yes = UIFactory.Button(offer.transform, "Accept [Y]", () => AnswerOffer(true), UITheme.Teal, 22);
+            yes.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-170, 0), new Vector2(150, 56));
+            var no = UIFactory.Button(offer.transform, "No [X]", () => AnswerOffer(false), UITheme.InkSoft, 22);
+            no.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-18, 0), new Vector2(140, 56));
+            _offer.gameObject.SetActive(false);
+        }
+
         private void BuildTypeBar()
         {
             var panel = UIFactory.Panel(_hud, "TypeBar", small: true);
-            _typeBar = panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 100), new Vector2(820, 76));
-            var label = UIFactory.Text(panel.transform, "Label", "Say:", 26, UITheme.Ink, TextAlignmentOptions.MidlineLeft, title: true);
-            label.rectTransform.Anchor(new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(22, 0), new Vector2(70, 50));
-            _typeField = UIFactory.InputField(panel.transform, "Type to Mei and press Enter (Esc to cancel)");
-            _typeField.GetComponent<RectTransform>().Stretch(96, 14, 12, 12);
+            _typeBar = panel.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 100), new Vector2(900, 76));
+            _typeLabel = UIFactory.Text(panel.transform, "Label", "To Mei:", 24, UITheme.Ink, TextAlignmentOptions.MidlineLeft, title: true);
+            _typeLabel.rectTransform.Anchor(new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(22, 0), new Vector2(150, 50));
+            _typeField = UIFactory.InputField(panel.transform, "Type (Chinese or English), Enter to send · Tab: switch to Mei · Esc: cancel");
+            _typeField.GetComponent<RectTransform>().Stretch(170, 14, 12, 12);
             _typeField.onSubmit.AddListener(SubmitTyped);
             _typeBar.gameObject.SetActive(false);
         }
@@ -325,45 +345,42 @@ namespace UntitledGame.UI
             bg.rectTransform.Stretch();
             _intro = bg.gameObject.AddComponent<CanvasGroup>();
             _intro.blocksRaycasts = false;
-            var title = UIFactory.Text(bg.transform, "Title", "Willow Lake", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
+            var title = UIFactory.Text(bg.transform, "Title", "Willow Lake  <size=70>柳湖</size>", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
             title.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 70), new Vector2(1400, 160));
-            var sub = UIFactory.Text(bg.transform, "Sub", "a cozy fishing trip with Mei\n<size=26><color=#E8D8C0>hold <b>V</b> to talk · hold the mouse to cast</color></size>", 38, UITheme.Cream, TextAlignmentOptions.Center);
+            var sub = UIFactory.Text(bg.transform, "Sub", "fish, learn Mandarin with Mei, and make friends at the market\n<size=26><color=#E8D8C0>hold <b>V</b> to talk · <b>B</b> to ask Mei · hold the mouse to cast</color></size>", 36, UITheme.Cream, TextAlignmentOptions.Center);
             sub.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -40), new Vector2(1400, 120));
             _introUntil = Time.time + 4.5f;
         }
 
         // ------------------------------------------------------------------ events
 
-        private void OnMeiSentence(string sentence)
-        {
-            _bubbleFull = sentence;
-            _bubbleReveal = 0f;
-            _bubbleText.text = sentence;
-            _bubbleText.maxVisibleCharacters = 0;
-            _bubbleHideAt = float.MaxValue;
-        }
-
         private void OnPlayerSaid(string text)
         {
-            _playerBubbleText.text = "<b>You:</b> “" + text + "”";
-            _playerBubbleHideAt = Time.time + Mathf.Clamp(2.5f + text.Length * 0.05f, 3f, 7f);
-            Vector2 pref = _playerBubbleText.GetPreferredValues(_playerBubbleText.text, 840, 400);
-            _playerBubble.sizeDelta = new Vector2(Mathf.Clamp(pref.x + 50, 220, 900), Mathf.Clamp(pref.y + 26, 60, 160));
-        }
-
-        private void OnBrainState(CompanionState s)
-        {
-            if (s == CompanionState.Idle && _bubbleFull.Length > 0) _bubbleHideAt = Time.time + 4f;
+            string py = PinyinDisplay.For(text);
+            _playerBubbleText.text = "<b>You:</b> “" + text + "”" + (py.Length > 0 ? $"\n<size=20><i>{py}</i></size>" : "");
+            _playerBubbleHideAt = Time.time + Mathf.Clamp(2.5f + text.Length * 0.08f, 3.5f, 8f);
+            Vector2 pref = _playerBubbleText.GetPreferredValues(_playerBubbleText.text, 900, 400);
+            _playerBubble.sizeDelta = new Vector2(Mathf.Clamp(pref.x + 50, 220, 960), Mathf.Clamp(pref.y + 26, 60, 200));
         }
 
         private void OnFishCaught(CatchResult r) => _card.Show(r);
+
+        private void OnTransaction(ShopkeeperBrain k, string english, string chinese) => ShowToast(english, 3.5f);
+
+        private void OnWordLearned(VocabEntry v) => ShowToast($"New word in your notebook [N]: <b>{v.hanzi}</b> {v.pinyin} — {v.meaning}", 4.5f);
+
+        private void OnWordUsed(VocabEntry v)
+        {
+            ShowToast($"Nice! You used <b>{v.hanzi}</b> ({v.pinyin})!", 3f);
+            AudioManager.Instance?.PlaySfx("SFX/ui_confirmation_002", 0.4f, 0f);
+        }
 
         public void ShowToast(string message, float seconds)
         {
             var panel = UIFactory.Panel(_toastRoot, "Toast", UITheme.Ink.WithAlpha(0.85f), shadow: false, small: true);
             var t = UIFactory.Text(panel.transform, "Text", message, 24, UITheme.Cream, TextAlignmentOptions.Center);
             t.rectTransform.Stretch(22, 22, 10, 10);
-            float width = Mathf.Clamp(t.GetPreferredValues(message, 1200, 40).x + 50, 260, 880);
+            float width = Mathf.Clamp(t.GetPreferredValues(message, 1200, 40).x + 50, 260, 1000);
             panel.rectTransform.SetLayout(54, width);
             var g = panel.gameObject.AddComponent<CanvasGroup>();
             _toasts.Add((g, Time.time + seconds));
@@ -374,15 +391,27 @@ namespace UntitledGame.UI
             }
         }
 
+        private void AnswerOffer(bool yes)
+        {
+            if (_offerKeeper == null) return;
+            _offerKeeper.AnswerOffer(yes);
+            AudioManager.Instance?.PlaySfx(yes ? "SFX/ui_confirmation_002" : "SFX/ui_close_002", 0.4f);
+        }
+
+        // ------------------------------------------------------------------ typing
+
         private void SubmitTyped(string text)
         {
+            var target = _typeTarget;
             CloseTyping();
-            if (!string.IsNullOrWhiteSpace(text) && brain != null) brain.SendPlayerMessage(text);
+            if (!string.IsNullOrWhiteSpace(text) && target != null) target.HandlePlayerUtterance(text);
         }
 
         private void OpenTyping()
         {
             if (Time.frameCount == _typingClosedFrame) return; // the Enter that just sent a message
+            _typeTarget = voiceChat != null ? voiceChat.CurrentTarget : mei;
+            UpdateTypeLabel();
             _typeBar.gameObject.SetActive(true);
             _typeField.text = "";
             InputGate.TextEntryActive = true;
@@ -390,9 +419,10 @@ namespace UntitledGame.UI
             StartCoroutine(FocusTypingNextFrame());
         }
 
+        private void UpdateTypeLabel() => _typeLabel.text = $"To {(_typeTarget != null ? _typeTarget.DisplayName : "Mei")}:";
+
         private System.Collections.IEnumerator FocusTypingNextFrame()
         {
-            // Wait a frame so the T/Enter key that opened the bar isn't typed into it.
             yield return null;
             _typeField.text = "";
             _typeField.ActivateInputField();
@@ -417,9 +447,14 @@ namespace UntitledGame.UI
             UpdateClock();
             UpdateAiStatus();
             UpdateHint();
-            UpdateBubbles();
+            foreach (var b in _bubbles) b.Update(this);
+            SpeechBubble.Separate(_bubbles, this);
+            foreach (var b in _bubbles) b.Apply();
+            UpdatePlayerBubble();
+            _labels.Update(this, playerAnchor);
             UpdateMic();
             UpdateFishing();
+            UpdatePromptAndOffer();
             UpdateToasts();
             _card.Update(fishing != null && fishing.State == FishingState.Landing);
             _chat.Update();
@@ -440,26 +475,50 @@ namespace UntitledGame.UI
         {
             if (_typeBar.gameObject.activeSelf)
             {
+                if (Input.GetKeyDown(KeyCode.Tab) && mei != null)
+                {
+                    _typeTarget = _typeTarget == (DialogueAgent)mei ? voiceChat.CurrentTarget : mei;
+                    UpdateTypeLabel();
+                    _typeField.ActivateInputField();
+                }
                 bool lostFocus = !_typeField.isFocused && Time.unscaledTime - _typingOpenedAt > 0.4f;
                 if (Input.GetKeyDown(KeyCode.Escape) || lostFocus) CloseTyping();
                 return;
             }
-            if (Time.frameCount == _typingClosedFrame) return;
+            if (Time.frameCount == _typingClosedFrame || PlacementController.Active) return;
 
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                if (_journal.IsOpen) _journal.Close();
+                if (_saves.IsOpen) { _saves.Close(); _settings.Open(); }
+                else if (_journal.IsOpen) _journal.Close();
+                else if (_bag.IsOpen) _bag.Close();
+                else if (_notebook.IsOpen) _notebook.Close();
                 else if (_chat.IsOpen) _chat.Close();
                 else _settings.Toggle();
                 return;
             }
-            if (_settings.IsOpen) return;
+            if (_settings.IsOpen || _saves.IsOpen) return;
 
-            if (Input.GetKeyDown(KeyCode.J) || Input.GetKeyDown(KeyCode.Tab)) _journal.Toggle();
-            if (_journal.IsOpen) return;
+            if (Input.GetKeyDown(KeyCode.F5))
+            {
+                SaveSystem.Save();
+                ChatAudit.Write("SAVE", $"quick save (F5) to slot {SaveSystem.ActiveSlot}");
+                ShowToast($"Saved (slot {SaveSystem.ActiveSlot}).", 2f);
+            }
+
+            if (Input.GetKeyDown(KeyCode.J)) { _bag.Close(); _notebook.Close(); _journal.Toggle(); }
+            if (Input.GetKeyDown(KeyCode.I)) { _journal.Close(); _notebook.Close(); _bag.Toggle(); }
+            if (Input.GetKeyDown(KeyCode.N)) { _journal.Close(); _bag.Close(); _notebook.Toggle(); }
+            if (_journal.IsOpen || _bag.IsOpen || _notebook.IsOpen) return;
+
             if (Input.GetKeyDown(KeyCode.C)) _chat.Toggle();
             if (Input.GetKeyDown(KeyCode.T) || Input.GetKeyDown(KeyCode.Return)) OpenTyping();
             if (Input.GetKeyDown(KeyCode.H)) HudHidden = !HudHidden;
+            if (_offer.gameObject.activeSelf)
+            {
+                if (Input.GetKeyDown(KeyCode.Y)) AnswerOffer(true);
+                if (Input.GetKeyDown(KeyCode.X)) AnswerOffer(false);
+            }
             _hud.gameObject.SetActive(!HudHidden);
         }
 
@@ -469,9 +528,11 @@ namespace UntitledGame.UI
             if (dn == null) return;
             _clock.text = dn.ClockText;
             string weather = Weather.Instance != null && Weather.Instance.IsRaining ? "rainy" : dn.PhaseDescription;
-            int today = CatchJournal.Session.Count;
-            _clockSub.text = today > 0 ? $"Day {dn.Day} · {weather} · {today} caught" : $"Day {dn.Day} · {weather}";
+            _clockSub.text = $"Day {dn.Day} · {weather}";
             _sunIcon.color = dn.Darkness > 0.5f ? UITheme.Hex("#BFD3F2") : (dn.Phase == DayPhase.Evening || dn.Phase == DayPhase.Dawn ? UITheme.Orange : UITheme.Yellow);
+            _money.text = $"¥{Inventory.Money}";
+            _bucket.text = $"Bucket {Inventory.BucketCount}/{Inventory.BucketCapacity}";
+            _bucket.color = Inventory.BucketFull ? UITheme.Red : UITheme.InkSoft;
         }
 
         private static Color StatusColor(ServiceStatus s) => s switch
@@ -499,27 +560,36 @@ namespace UntitledGame.UI
             else if (s.LlmStatus == ServiceStatus.Starting) text = "waking up...";
             else if (s.LlmStatus == ServiceStatus.Failed) text = "sleepy (see LocalAI/logs)";
             else if (s.LlmStatus == ServiceStatus.NotInstalled) text = "no model installed";
-            else if (brain == null) text = "";
-            else text = brain.State switch
+            else if (mei == null) text = "";
+            else text = mei.State switch
             {
                 CompanionState.Listening => "listening...",
                 CompanionState.Transcribing => "hmm?",
                 CompanionState.Thinking => "thinking...",
                 CompanionState.Speaking => "talking",
-                _ => s.SttStatus != ServiceStatus.Ready ? "press T to type" : SaveSystem.Settings.handsFree ? "listening for you" : "hold V to talk",
+                _ => s.SttStatus != ServiceStatus.Ready ? "press T to type" : SaveSystem.Settings.handsFree ? "listening for you" : "hold B to ask me",
             };
             _aiText.text = text;
         }
 
         private void UpdateHint()
         {
-            string ptt = SaveSystem.Settings.handsFree ? "Just talk   <b>[T]</b> Type" : "<b>[V]</b> Talk   <b>[T]</b> Type";
-            string text = fishing == null ? ptt : fishing.State switch
+            if (PlacementController.Active)
             {
-                FishingState.Idle => $"<b>[Hold LMB]</b> Cast   {ptt}   <b>[J]</b> Journal   <b>[C]</b> Chat log   <b>[Esc]</b> Menu",
+                _hint.text = $"Placing <b>{PlacementController.Instance.ItemEnglish}</b>:  <b>[LMB]</b> Place   <b>[R / scroll]</b> Rotate   <b>[RMB / Esc]</b> Cancel";
+                return;
+            }
+            var target = voiceChat != null ? voiceChat.CurrentTarget : mei;
+            string who = target != null && target != (DialogueAgent)mei ? target.DisplayName : "Mei";
+            string talk = SaveSystem.Settings.handsFree
+                ? $"Just talk (to {who})   <b>[T]</b> Type"
+                : who == "Mei" ? "<b>[V]</b> Talk to Mei   <b>[T]</b> Type" : $"<b>[V]</b> Talk to {who}   <b>[B]</b> Ask Mei   <b>[T]</b> Type";
+            string text = fishing == null ? talk : fishing.State switch
+            {
+                FishingState.Idle => $"<b>[Hold LMB]</b> Cast   {talk}   <b>[I]</b> Bag   <b>[N]</b> Words   <b>[J]</b> Journal   <b>[Esc]</b> Menu",
                 FishingState.Charging => "Release to cast! Aim with the camera (hold <b>RMB</b> to look around)",
                 FishingState.Casting => "Wheee...",
-                FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> Reel in   {ptt}",
+                FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> Reel in   {talk}",
                 FishingState.Bite => "<b>CLICK NOW!</b>",
                 FishingState.Reeling => "Hold <b>LMB</b> to reel · let go when the fish pulls!",
                 FishingState.Landing => "Nice catch! Click to put it in your bucket",
@@ -528,7 +598,7 @@ namespace UntitledGame.UI
             _hint.text = text;
         }
 
-        private bool ToCanvas(Vector3 world, out Vector2 local, out bool behind)
+        public bool ToCanvas(Vector3 world, out Vector2 local, out bool behind)
         {
             local = Vector2.zero;
             behind = false;
@@ -539,7 +609,7 @@ namespace UntitledGame.UI
             return true;
         }
 
-        private Vector2 ClampToScreen(Vector2 local, Vector2 size, Vector2 pivot)
+        public Vector2 ClampToScreen(Vector2 local, Vector2 size, Vector2 pivot)
         {
             Vector2 half = _root.rect.size * 0.5f;
             float minX = -half.x + size.x * pivot.x + 20, maxX = half.x - size.x * (1 - pivot.x) - 20;
@@ -547,47 +617,11 @@ namespace UntitledGame.UI
             return new Vector2(Mathf.Clamp(local.x, minX, maxX), Mathf.Clamp(local.y, minY, maxY));
         }
 
-        private void UpdateBubbles()
+        private void UpdatePlayerBubble()
         {
-            // Mei.
-            bool thinking = brain != null && (brain.State == CompanionState.Thinking || brain.State == CompanionState.Transcribing);
-            bool listening = brain != null && brain.State == CompanionState.Listening;
-            bool speaking = voice != null && voice.IsSpeaking && _bubbleFull.Length > 0;
-            bool show = speaking || thinking || listening || Time.time < _bubbleHideAt;
-
-            if (thinking && !speaking)
-            {
-                int dots = 1 + (int)(Time.time * 3f) % 3;
-                _bubbleText.text = "<color=#8A7563>" + new string('.', dots) + "</color>";
-                _bubbleText.maxVisibleCharacters = 99;
-                _bubble.sizeDelta = new Vector2(180, 90);
-            }
-            else if (listening && !speaking)
-            {
-                _bubbleText.text = "<i><color=#8A7563>listening...</color></i>";
-                _bubbleText.maxVisibleCharacters = 99;
-                _bubble.sizeDelta = new Vector2(250, 90);
-            }
-            else if (_bubbleFull.Length > 0)
-            {
-                _bubbleReveal += Time.deltaTime * 28f;
-                _bubbleText.text = _bubbleFull;
-                _bubbleText.maxVisibleCharacters = Mathf.FloorToInt(_bubbleReveal);
-                Vector2 pref = _bubbleText.GetPreferredValues(_bubbleFull, 520, 1000);
-                _bubble.sizeDelta = new Vector2(Mathf.Clamp(pref.x + 60, 220, 580), Mathf.Clamp(pref.y + 50, 90, 320));
-            }
-
-            _bubbleGroup.alpha = Mathf.MoveTowards(_bubbleGroup.alpha, show ? 1f : 0f, Time.deltaTime * 4f);
-            if (meiAnchor != null && ToCanvas(meiAnchor.position + Vector3.up * 1.55f, out var mp, out bool behind))
-            {
-                if (behind) mp = new Vector2(0, -_root.rect.height * 0.5f + 240);
-                _bubble.anchoredPosition = Vector2.Lerp(_bubble.anchoredPosition, ClampToScreen(mp, _bubble.sizeDelta, _bubble.pivot), 1f - Mathf.Exp(-14f * Time.deltaTime));
-            }
-
-            // Player.
-            bool pshow = Time.time < _playerBubbleHideAt;
-            _playerBubbleGroup.alpha = Mathf.MoveTowards(_playerBubbleGroup.alpha, pshow ? 1f : 0f, Time.deltaTime * 4f);
-            float baseY = _tension.gameObject.activeSelf ? 250f : _mic.gameObject.activeSelf ? 196f : 100f;
+            bool show = Time.time < _playerBubbleHideAt;
+            _playerBubbleGroup.alpha = Mathf.MoveTowards(_playerBubbleGroup.alpha, show ? 1f : 0f, Time.deltaTime * 4f);
+            float baseY = _tension.gameObject.activeSelf ? 250f : _offer.gameObject.activeSelf ? 280f : _mic.gameObject.activeSelf || _prompt.gameObject.activeSelf ? 190f : 100f;
             _playerBubble.anchoredPosition = new Vector2(0f, baseY);
         }
 
@@ -597,15 +631,17 @@ namespace UntitledGame.UI
             bool on = mic != null && (mic.IsRecording || voiceChat.IsTranscribing);
             _mic.gameObject.SetActive(on && !_tension.gameObject.activeSelf);
             if (!on) return;
+            var target = voiceChat.RecordingTarget;
+            string who = target != null ? target.DisplayName : "Mei";
             if (mic.IsRecording)
             {
-                _micText.text = SaveSystem.Settings.handsFree ? "Listening..." : "Listening... release <b>V</b> to send";
+                _micText.text = SaveSystem.Settings.handsFree ? $"Listening... (to {who})" : $"Talking to {who}... release to send";
                 _micDot.color = UITheme.Red.WithAlpha(0.6f + 0.4f * Mathf.Sin(Time.time * 8f));
                 _micLevel.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(mic.Level), 1);
             }
             else
             {
-                _micText.text = "Mei is working out what you said...";
+                _micText.text = "Working out what you said...";
                 _micDot.color = UITheme.Yellow;
                 _micLevel.rectTransform.anchorMax = new Vector2(0.5f + 0.5f * Mathf.Sin(Time.time * 4f), 1);
             }
@@ -643,6 +679,39 @@ namespace UntitledGame.UI
                 _tensionLabel.text = fishing.FishPulling ? "<color=#E0604E>It's pulling! Ease off!</color>" : "Reel it in!";
                 _tensionDistance.text = $"{fishing.FishDistance:0.0} m";
                 _tension.localScale = Vector3.one * (fishing.FishPulling ? 1f + 0.01f * Mathf.Sin(Time.time * 40f) : 1f);
+            }
+        }
+
+        private void UpdatePromptAndOffer()
+        {
+            // Shop offer waiting for the player's answer.
+            _offerKeeper = null;
+            if (playerAnchor != null)
+            {
+                foreach (var k in ShopkeeperBrain.Keepers)
+                {
+                    if (k.PendingOffer != null && k.DistanceToPlayer < k.ServiceRadius * 1.6f)
+                    {
+                        _offerKeeper = k;
+                        break;
+                    }
+                }
+            }
+            bool offer = _offerKeeper != null && (fishing == null || fishing.State == FishingState.Idle);
+            _offer.gameObject.SetActive(offer);
+            if (offer)
+            {
+                var o = _offerKeeper.PendingOffer;
+                _offerText.text = $"<b>{_offerKeeper.DisplayName}</b> <size=20><color=#8A7563>({_offerKeeper.DisplayNameEnglish})</color></size>\n{o.english}  <size=20><color=#8A7563>· you have ¥{Inventory.Money}</color></size>";
+            }
+
+            var cur = interaction != null ? interaction.Current : null;
+            bool prompt = cur != null && !offer && (fishing == null || fishing.State == FishingState.Idle);
+            _prompt.gameObject.SetActive(prompt);
+            if (prompt)
+            {
+                _promptText.text = cur.Prompt;
+                _prompt.sizeDelta = new Vector2(Mathf.Clamp(_promptText.GetPreferredValues(cur.Prompt, 900, 40).x + 50, 260, 900), 50);
             }
         }
 
