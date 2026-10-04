@@ -17,6 +17,7 @@ namespace UntitledGame.Language
     {
         private static Dictionary<string, string> _words;       // simplified word -> "yu2 gan1"
         private static Dictionary<char, char> _tradToSimp;
+        private static Dictionary<char, HashSet<string>> _allReadings; // every toneless reading of each character
         private static int _maxWord = 1;
         private static volatile bool _ready;
         private static bool _started;
@@ -54,6 +55,14 @@ namespace UntitledGame.Language
             var usedAsSimplified = new HashSet<char>();
             // How often each character is read each way inside multi-character words.
             var readings = new Dictionary<char, Dictionary<string, int>>(12000);
+            var all = new Dictionary<char, HashSet<string>>(12000);
+            void AddReading(char c, string numbered)
+            {
+                string plain = Toneless(numbered);
+                if (plain.Length == 0) return;
+                if (!all.TryGetValue(c, out var set)) all[c] = set = new HashSet<string>();
+                set.Add(plain);
+            }
             int max = 1;
             try
             {
@@ -78,6 +87,7 @@ namespace UntitledGame.Language
                         words[simp] = py;
                     if (simp.Length > max) max = Math.Min(simp.Length, 8);
                     foreach (char c in simp) usedAsSimplified.Add(c);
+                    if (simp.Length == 1 && !proper) AddReading(simp[0], py);
                     if (simp.Length > 1 && !proper)
                     {
                         string[] syl = py.Split(' ');
@@ -88,6 +98,7 @@ namespace UntitledGame.Language
                                 if (!readings.TryGetValue(simp[i], out var counts)) readings[simp[i]] = counts = new Dictionary<string, int>();
                                 string r = syl[i].ToLowerInvariant();
                                 counts[r] = counts.TryGetValue(r, out int n) ? n + 1 : 1;
+                                AddReading(simp[i], r);
                             }
                         }
                     }
@@ -115,6 +126,7 @@ namespace UntitledGame.Language
                 }
                 _words = words;
                 _tradToSimp = t2s;
+                _allReadings = all;
                 _maxWord = max;
                 _ready = true;
             }
@@ -246,6 +258,31 @@ namespace UntitledGame.Language
             int vowel = "aeiouü".IndexOf(body[idx]);
             char marked = Marks[tone - 1][vowel];
             return body.Substring(0, idx) + marked + body.Substring(idx + 1);
+        }
+
+        /// <summary>"lu:4" / "Lv3" -> "lv"; "hao3" -> "hao".</summary>
+        private static string Toneless(string numbered)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in numbered.ToLowerInvariant().Replace("u:", "v"))
+                if (c >= 'a' && c <= 'z') sb.Append(c);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Every toneless reading CC-CEDICT gives a character (还 -> hai, huan). Includes the common one even if the
+        /// dictionary isn't loaded yet. Used to grade spoken answers without caring about tones.
+        /// </summary>
+        public static IReadOnlyCollection<string> PlainReadings(char c)
+        {
+            if (_ready && _allReadings != null && _allReadings.TryGetValue(c, out var set))
+            {
+                string main = Plain(c.ToString());
+                if (main.Length > 0 && !set.Contains(main)) set.Add(main);
+                return set;
+            }
+            string only = _ready ? Plain(c.ToString()) : "";
+            return only.Length > 0 ? new[] { only } : Array.Empty<string>();
         }
 
         /// <summary>Toneless, space-free pinyin for fuzzy matching ("鱼竿" -> "yugan").</summary>

@@ -11,6 +11,7 @@ using UntitledGame.Fishing;
 using UntitledGame.GenAI;
 using UntitledGame.Home;
 using UntitledGame.Language;
+using UntitledGame.Progression;
 
 namespace UntitledGame.UI
 {
@@ -40,6 +41,8 @@ namespace UntitledGame.UI
         private RectTransform _hintPanel;
 
         private readonly List<SpeechBubble> _bubbles = new List<SpeechBubble>();
+        private ShopPanel _shop;
+        public ShopPanel Shop => _shop;
         private WorldLabels _labels;
         private RectTransform _playerBubble;
         private CanvasGroup _playerBubbleGroup;
@@ -53,6 +56,8 @@ namespace UntitledGame.UI
         private RectTransform _power, _bite, _tension;
         private Image _powerFill, _tensionFill, _tensionFish;
         private TextMeshProUGUI _tensionLabel, _tensionDistance;
+        private RectTransform _reelTrack;
+        private Image _reelMeter;
 
         private RectTransform _prompt;
         private TextMeshProUGUI _promptText;
@@ -85,7 +90,17 @@ namespace UntitledGame.UI
         public bool HudHidden { get; private set; }
         public Vector2 RootSize => _root.rect.size;
 
-        public void ToggleJournal() => _journal.Toggle();
+        public void ToggleJournal(bool people = false)
+        {
+            _journal.ShowPeople(people);
+            _journal.Toggle();
+        }
+        public void OpenPhrasebook()
+        {
+            _journal.ShowPhrasebook();
+            if (!_journal.IsOpen) _journal.Toggle();
+        }
+        public void CloseJournal() => _journal.Close();
         public void ToggleSettings() => _settings.Toggle();
         public void OpenSaves() => _saves.Open();
         public void CloseSaves() => _saves.Close();
@@ -114,6 +129,7 @@ namespace UntitledGame.UI
             Build();
 
             GameEvents.ToastRequested += ShowToast;
+            GameEvents.BannerRequested += ShowBanner;
             FishingController.FishCaught += OnFishCaught;
             ShopkeeperBrain.TransactionDone += OnTransaction;
             VocabNotebook.WordLearned += OnWordLearned;
@@ -125,6 +141,7 @@ namespace UntitledGame.UI
         private void OnDestroy()
         {
             GameEvents.ToastRequested -= ShowToast;
+            GameEvents.BannerRequested -= ShowBanner;
             FishingController.FishCaught -= OnFishCaught;
             ShopkeeperBrain.TransactionDone -= OnTransaction;
             VocabNotebook.WordLearned -= OnWordLearned;
@@ -132,6 +149,7 @@ namespace UntitledGame.UI
             if (mei != null) mei.PlayerSaid -= OnPlayerSaid;
             foreach (var b in _bubbles) b.Dispose();
             _bag?.Dispose();
+            _shop?.Dispose();
             _notebook?.Dispose();
             _chat?.Dispose();
         }
@@ -165,6 +183,7 @@ namespace UntitledGame.UI
             var tl = UIFactory.VLayout(_toastRoot.gameObject, 10, new RectOffset(0, 0, 0, 0));
             tl.childAlignment = TextAnchor.UpperCenter;
             tl.childForceExpandWidth = false;
+            BuildBanner();
 
             _card = new CatchCard(_root);
             _journal = new JournalPanel(_root);
@@ -191,9 +210,24 @@ namespace UntitledGame.UI
             wallet.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(34, -134), new Vector2(300, 56));
             _money = UIFactory.Text(wallet.transform, "Money", "¥50", 28, UITheme.Ink, TextAlignmentOptions.MidlineLeft, title: true);
             _money.rectTransform.Stretch(22, 150, 4, 4);
-            _bucket = UIFactory.Text(wallet.transform, "Bucket", "Bucket 0/8", 21, UITheme.InkSoft, TextAlignmentOptions.MidlineRight);
+            _bucket = UIFactory.Text(wallet.transform, "Bucket", "Bag 0/4", 21, UITheme.InkSoft, TextAlignmentOptions.MidlineRight);
             _bucket.rectTransform.Stretch(120, 20, 4, 4);
+
+            // Energy: fishing uses it; at zero you pass out.
+            var energy = UIFactory.Panel(_hud, "Energy", small: true);
+            energy.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(34, -196), new Vector2(300, 46));
+            var track = UIFactory.Image(energy.transform, "Track", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
+            track.rectTransform.Stretch(16, 16, 12, 12);
+            _energyFill = UIFactory.Image(track.transform, "Fill", UITheme.Green, GameAssets.Instance.roundedRectSmall);
+            _energyFill.rectTransform.anchorMin = Vector2.zero;
+            _energyFill.rectTransform.anchorMax = Vector2.one;
+            _energyFill.rectTransform.offsetMin = _energyFill.rectTransform.offsetMax = Vector2.zero;
+            _energyText = UIFactory.Text(energy.transform, "Text", "Energy", 19, UITheme.Ink, TextAlignmentOptions.Center);
+            _energyText.rectTransform.Stretch(16, 16, 4, 4);
         }
+
+        private Image _energyFill;
+        private TextMeshProUGUI _energyText;
 
         private void BuildAiStatus()
         {
@@ -227,7 +261,8 @@ namespace UntitledGame.UI
         private void BuildBubbles()
         {
             var layer = UIFactory.Rect("Bubbles", _hud).Stretch();
-            if (mei != null) _bubbles.Add(new SpeechBubble(layer, mei, UITheme.Teal));
+            if (mei != null) _bubbles.Add(new SpeechBubble(layer, mei, UITheme.Teal, docked: true));
+            _shop = new ShopPanel(_hud);
             foreach (var k in ShopkeeperBrain.Keepers) _bubbles.Add(new SpeechBubble(layer, k, UITheme.Orange));
 
             var pb = UIFactory.Panel(_hud, "PlayerBubble", UITheme.Teal.WithAlpha(0.95f), small: true);
@@ -286,25 +321,30 @@ namespace UntitledGame.UI
             bt.rectTransform.Stretch();
             _bite.gameObject.SetActive(false);
 
-            var t = UIFactory.Panel(_hud, "Tension");
-            _tension = t.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 110), new Vector2(720, 120));
-            _tensionLabel = UIFactory.Text(t.transform, "Label", "Reel!", 32, UITheme.Ink, TextAlignmentOptions.Left, title: true);
-            _tensionLabel.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(26, -10), new Vector2(420, 44));
-            _tensionDistance = UIFactory.Text(t.transform, "Distance", "10.0 m", 26, UITheme.InkSoft, TextAlignmentOptions.Right);
-            _tensionDistance.rectTransform.Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-26, -14), new Vector2(240, 40));
-            var tt = UIFactory.Image(t.transform, "Track", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
-            tt.rectTransform.Anchor(new Vector2(0, 0), new Vector2(0, 0), new Vector2(26, 22), new Vector2(668, 34));
-            var danger = UIFactory.Image(tt.transform, "Danger", UITheme.Red.WithAlpha(0.25f), GameAssets.Instance.roundedRectSmall);
-            danger.rectTransform.anchorMin = new Vector2(0.8f, 0);
-            danger.rectTransform.anchorMax = Vector2.one;
-            danger.rectTransform.offsetMin = danger.rectTransform.offsetMax = Vector2.zero;
-            _tensionFill = UIFactory.Image(tt.transform, "Fill", UITheme.Green, GameAssets.Instance.roundedRectSmall);
-            _tensionFill.rectTransform.anchorMin = Vector2.zero;
-            _tensionFill.rectTransform.anchorMax = new Vector2(0, 1);
-            _tensionFill.rectTransform.pivot = new Vector2(0, 0.5f);
-            _tensionFill.rectTransform.offsetMin = _tensionFill.rectTransform.offsetMax = Vector2.zero;
+            // Reeling minigame (Stardew-style): a vertical track with the green bar, the fish, and the catch meter beside it.
+            var t = UIFactory.Panel(_hud, "Reel");
+            _tension = t.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(330, 10), new Vector2(170, 600));
+            _tensionLabel = UIFactory.Text(t.transform, "Label", "Reel!", 28, UITheme.Ink, TextAlignmentOptions.Center, title: true);
+            _tensionLabel.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -10), new Vector2(160, 40));
+            _tensionDistance = UIFactory.Text(t.transform, "Hint", "hold LMB", 18, UITheme.InkSoft, TextAlignmentOptions.Center);
+            _tensionDistance.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 8), new Vector2(160, 28));
+            var tt = UIFactory.Image(t.transform, "Track", UITheme.Hex("#5B8DB0"), GameAssets.Instance.roundedRectSmall);
+            tt.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-18, 0), new Vector2(72, 480));
+            _reelTrack = tt.rectTransform;
+            _tensionFill = UIFactory.Image(tt.transform, "Bar", UITheme.Green.WithAlpha(0.85f), GameAssets.Instance.roundedRectSmall);
+            _tensionFill.rectTransform.anchorMin = new Vector2(0, 0);
+            _tensionFill.rectTransform.anchorMax = new Vector2(1, 0.3f);
+            _tensionFill.rectTransform.offsetMin = new Vector2(4, 0);
+            _tensionFill.rectTransform.offsetMax = new Vector2(-4, 0);
             _tensionFish = UIFactory.Image(tt.transform, "Fish", UITheme.Ink, GameAssets.Instance.fishIcon, sliced: false);
-            _tensionFish.rectTransform.Anchor(new Vector2(0, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(56, 56));
+            _tensionFish.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(46, 46));
+            var meter = UIFactory.Image(t.transform, "Meter", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
+            meter.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(42, 0), new Vector2(20, 480));
+            _reelMeter = UIFactory.Image(meter.transform, "Fill", UITheme.Green, GameAssets.Instance.roundedRectSmall);
+            _reelMeter.rectTransform.anchorMin = Vector2.zero;
+            _reelMeter.rectTransform.anchorMax = new Vector2(1, 0.3f);
+            _reelMeter.rectTransform.offsetMin = new Vector2(3, 3);
+            _reelMeter.rectTransform.offsetMax = new Vector2(-3, -3);
             _tension.gameObject.SetActive(false);
         }
 
@@ -319,11 +359,8 @@ namespace UntitledGame.UI
             var offer = UIFactory.Panel(_hud, "Offer");
             _offer = offer.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 170), new Vector2(760, 96));
             _offerText = UIFactory.Text(offer.transform, "Text", "", 25, UITheme.Ink, TextAlignmentOptions.MidlineLeft);
-            _offerText.rectTransform.Stretch(26, 330, 8, 8);
-            var yes = UIFactory.Button(offer.transform, "Accept [Y]", () => AnswerOffer(true), UITheme.Teal, 22);
-            yes.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-170, 0), new Vector2(150, 56));
-            var no = UIFactory.Button(offer.transform, "No [X]", () => AnswerOffer(false), UITheme.InkSoft, 22);
-            no.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-18, 0), new Vector2(140, 56));
+            _offerText.rectTransform.Stretch(26, 26, 8, 8);
+            // No buttons: every deal with a shopkeeper is made by speaking (要 / 不要).
             _offer.gameObject.SetActive(false);
         }
 
@@ -345,7 +382,7 @@ namespace UntitledGame.UI
             bg.rectTransform.Stretch();
             _intro = bg.gameObject.AddComponent<CanvasGroup>();
             _intro.blocksRaycasts = false;
-            var title = UIFactory.Text(bg.transform, "Title", "Willow Lake  <size=70>柳湖</size>", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
+            var title = UIFactory.Text(bg.transform, "Title", "Willow Bay  <size=70>柳湾</size>", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
             title.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 70), new Vector2(1400, 160));
             var sub = UIFactory.Text(bg.transform, "Sub", "fish, learn Mandarin with Mei, and make friends at the market\n<size=26><color=#E8D8C0>hold <b>V</b> to talk · <b>B</b> to ask Mei · hold the mouse to cast</color></size>", 36, UITheme.Cream, TextAlignmentOptions.Center);
             sub.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -40), new Vector2(1400, 120));
@@ -375,13 +412,55 @@ namespace UntitledGame.UI
             AudioManager.Instance?.PlaySfx("SFX/ui_confirmation_002", 0.4f, 0f);
         }
 
+        // ------------------------------------------------------------------ banner (big results, e.g. "HSK 1 PASSED!")
+
+        private Image _banner;
+        private TextMeshProUGUI _bannerTitle, _bannerText;
+        private CanvasGroup _bannerGroup;
+        private float _bannerUntil;
+
+        private void BuildBanner()
+        {
+            _banner = UIFactory.Panel(_hud, "Banner", UITheme.Cream.WithAlpha(0.97f));
+            _banner.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-180, 120), new Vector2(980, 300));
+            _bannerGroup = _banner.gameObject.AddComponent<CanvasGroup>();
+            _bannerGroup.blocksRaycasts = false;
+            _bannerTitle = UIFactory.Text(_banner.transform, "Title", "", 60, UITheme.Ink, TextAlignmentOptions.Center, title: true);
+            _bannerTitle.rectTransform.Anchor(new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0, -24), new Vector2(920, 80));
+            _bannerText = UIFactory.Text(_banner.transform, "Text", "", 24, UITheme.Ink, TextAlignmentOptions.Top);
+            _bannerText.rectTransform.Stretch(30, 30, 110, 20);
+            _banner.gameObject.SetActive(false);
+        }
+
+        /// <summary>A big message in the middle of the screen for a few seconds (click or any key... it just fades).</summary>
+        public void ShowBanner(string title, string details, bool good)
+        {
+            _bannerTitle.text = title;
+            _bannerTitle.color = good ? UITheme.TealDark : UITheme.Red;
+            _bannerText.text = details;
+            float h = 130f + _bannerText.GetPreferredValues(details, 920, 0).y + 30f;
+            _banner.rectTransform.sizeDelta = new Vector2(980, Mathf.Max(220, h));
+            _banner.gameObject.SetActive(true);
+            _bannerGroup.alpha = 1f;
+            _bannerUntil = Time.time + 8f;
+            AudioManager.Instance?.PlaySfx(good ? "SFX/rpg_handleCoins" : "SFX/ui_error_004", 0.6f);
+        }
+
+        private void UpdateBanner()
+        {
+            if (_banner == null || !_banner.gameObject.activeSelf) return;
+            if (Time.time > _bannerUntil) _bannerGroup.alpha = Mathf.MoveTowards(_bannerGroup.alpha, 0f, Time.deltaTime * 1.5f);
+            if (_bannerGroup.alpha <= 0f) _banner.gameObject.SetActive(false);
+        }
+
         public void ShowToast(string message, float seconds)
         {
             var panel = UIFactory.Panel(_toastRoot, "Toast", UITheme.Ink.WithAlpha(0.85f), shadow: false, small: true);
             var t = UIFactory.Text(panel.transform, "Text", message, 24, UITheme.Cream, TextAlignmentOptions.Center);
             t.rectTransform.Stretch(22, 22, 10, 10);
             float width = Mathf.Clamp(t.GetPreferredValues(message, 1200, 40).x + 50, 260, 1000);
-            panel.rectTransform.SetLayout(54, width);
+            float height = Mathf.Max(54f, t.GetPreferredValues(message, width - 44f, 0f).y + 22f);
+            panel.rectTransform.SetLayout(height, width);
             var g = panel.gameObject.AddComponent<CanvasGroup>();
             _toasts.Add((g, Time.time + seconds));
             while (_toasts.Count > 3)
@@ -389,13 +468,6 @@ namespace UntitledGame.UI
                 Destroy(_toasts[0].group.gameObject);
                 _toasts.RemoveAt(0);
             }
-        }
-
-        private void AnswerOffer(bool yes)
-        {
-            if (_offerKeeper == null) return;
-            _offerKeeper.AnswerOffer(yes);
-            AudioManager.Instance?.PlaySfx(yes ? "SFX/ui_confirmation_002" : "SFX/ui_close_002", 0.4f);
         }
 
         // ------------------------------------------------------------------ typing
@@ -410,7 +482,7 @@ namespace UntitledGame.UI
         private void OpenTyping()
         {
             if (Time.frameCount == _typingClosedFrame) return; // the Enter that just sent a message
-            _typeTarget = voiceChat != null ? voiceChat.CurrentTarget : mei;
+            _typeTarget = mei; // shopkeepers are only ever spoken to; typing is for Mei
             UpdateTypeLabel();
             _typeBar.gameObject.SetActive(true);
             _typeField.text = "";
@@ -444,6 +516,7 @@ namespace UntitledGame.UI
         {
             if (_cam == null) _cam = Camera.main;
             HandleHotkeys();
+            UpdateBanner();
             UpdateClock();
             UpdateAiStatus();
             UpdateHint();
@@ -455,6 +528,7 @@ namespace UntitledGame.UI
             UpdateMic();
             UpdateFishing();
             UpdatePromptAndOffer();
+            _shop?.Update(ShopConversation.Active, HudHidden);
             UpdateToasts();
             _card.Update(fishing != null && fishing.State == FishingState.Landing);
             _chat.Update();
@@ -475,12 +549,6 @@ namespace UntitledGame.UI
         {
             if (_typeBar.gameObject.activeSelf)
             {
-                if (Input.GetKeyDown(KeyCode.Tab) && mei != null)
-                {
-                    _typeTarget = _typeTarget == (DialogueAgent)mei ? voiceChat.CurrentTarget : mei;
-                    UpdateTypeLabel();
-                    _typeField.ActivateInputField();
-                }
                 bool lostFocus = !_typeField.isFocused && Time.unscaledTime - _typingOpenedAt > 0.4f;
                 if (Input.GetKeyDown(KeyCode.Escape) || lostFocus) CloseTyping();
                 return;
@@ -506,6 +574,12 @@ namespace UntitledGame.UI
                 ShowToast($"Saved (slot {SaveSystem.ActiveSlot}).", 2f);
             }
 
+            // HSK test: confirm (Y) or throw away (N) what was heard before it's graded.
+            if (HskSchool.Current?.pending != null)
+            {
+                if (Input.GetKeyDown(KeyCode.Y)) { HskSchool.SubmitPending(); return; }
+                if (Input.GetKeyDown(KeyCode.N)) { HskSchool.DiscardPending(); return; }
+            }
             if (Input.GetKeyDown(KeyCode.J)) { _bag.Close(); _notebook.Close(); _journal.Toggle(); }
             if (Input.GetKeyDown(KeyCode.I)) { _journal.Close(); _notebook.Close(); _bag.Toggle(); }
             if (Input.GetKeyDown(KeyCode.N)) { _journal.Close(); _bag.Close(); _notebook.Toggle(); }
@@ -514,11 +588,6 @@ namespace UntitledGame.UI
             if (Input.GetKeyDown(KeyCode.C)) _chat.Toggle();
             if (Input.GetKeyDown(KeyCode.T) || Input.GetKeyDown(KeyCode.Return)) OpenTyping();
             if (Input.GetKeyDown(KeyCode.H)) HudHidden = !HudHidden;
-            if (_offer.gameObject.activeSelf)
-            {
-                if (Input.GetKeyDown(KeyCode.Y)) AnswerOffer(true);
-                if (Input.GetKeyDown(KeyCode.X)) AnswerOffer(false);
-            }
             _hud.gameObject.SetActive(!HudHidden);
         }
 
@@ -526,14 +595,29 @@ namespace UntitledGame.UI
         {
             var dn = DayNightCycle.Instance;
             if (dn == null) return;
-            _clock.text = dn.ClockText;
-            string weather = Weather.Instance != null && Weather.Instance.IsRaining ? "rainy" : dn.PhaseDescription;
-            _clockSub.text = $"Day {dn.Day} · {weather}";
+            // The HUD turns Chinese as HSK tests are passed (UiText).
+            int hsk = Progression.Hsk.Level;
+            _clock.text = hsk >= 1 ? UiText.ChineseClock(dn.TimeOfDay) : dn.ClockText;
+            bool raining = Weather.Instance != null && Weather.Instance.IsRaining;
+            string weather = raining ? UiText.Plain("rainy", "下雨", 0) : UiText.Plain(dn.PhaseDescription, PhaseHanzi(dn.Phase), 0);
+            _clockSub.text = $"{UiText.Plain($"Day {dn.Day}", $"第{dn.Day}天", 0)} · {weather}";
             _sunIcon.color = dn.Darkness > 0.5f ? UITheme.Hex("#BFD3F2") : (dn.Phase == DayPhase.Evening || dn.Phase == DayPhase.Dawn ? UITheme.Orange : UITheme.Yellow);
-            _money.text = $"¥{Inventory.Money}";
-            _bucket.text = $"Bucket {Inventory.BucketCount}/{Inventory.BucketCapacity}";
+            _money.text = hsk >= 1 ? $"{Inventory.Money}块" : $"¥{Inventory.Money}";
+            _bucket.text = $"{UiText.Plain("Bag", "鱼", 0)} {Inventory.SlotsUsed}/{Inventory.SlotCapacity}";
             _bucket.color = Inventory.BucketFull ? UITheme.Red : UITheme.InkSoft;
+            float ef = Progression.Energy.Fraction;
+            _energyFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(ef), 1);
+            _energyFill.color = ef > 0.4f ? UITheme.Green : ef > 0.15f ? UITheme.Yellow : UITheme.Red;
+            _energyText.text = $"Energy {Progression.Energy.Current:0} / {Progression.Energy.Max:0}";
         }
+
+        private static string PhaseHanzi(DayPhase p) => p switch
+        {
+            DayPhase.Dawn => "早上",
+            DayPhase.Morning => "上午",
+            DayPhase.Day => "下午",
+            _ => "晚上",
+        };
 
         private static Color StatusColor(ServiceStatus s) => s switch
         {
@@ -579,20 +663,26 @@ namespace UntitledGame.UI
                 _hint.text = $"Placing <b>{PlacementController.Instance.ItemEnglish}</b>:  <b>[LMB]</b> Place   <b>[R / scroll]</b> Rotate   <b>[RMB / Esc]</b> Cancel";
                 return;
             }
-            var target = voiceChat != null ? voiceChat.CurrentTarget : mei;
-            string who = target != null && target != (DialogueAgent)mei ? target.DisplayName : "Mei";
-            string talk = SaveSystem.Settings.handsFree
-                ? $"Just talk (to {who})   <b>[T]</b> Type"
-                : who == "Mei" ? "<b>[V]</b> Talk to Mei   <b>[T]</b> Type" : $"<b>[V]</b> Talk to {who}   <b>[B]</b> Ask Mei   <b>[T]</b> Type";
+            var shopping = ShopConversation.Active;
+            if (shopping != null)
+            {
+                string speak = SaveSystem.Settings.handsFree
+                    ? UiText.T($"Just talk (to {shopping.DisplayName})", $"和{shopping.DisplayName}说话", 2)
+                    : "<b>[Hold V]</b> " + UiText.T($"Speak to {shopping.DisplayName}", $"和{shopping.DisplayName}说话", 2);
+                _hint.text = $"{speak}   <b>[Hold B]</b> {UiText.T("Ask Mei quietly", "问美", 2)}   <b>[T]</b> {UiText.T("Type to Mei", "给美写", 2)}   <b>[E]</b> {UiText.T("Leave", "再见", 1)}";
+                return;
+            }
+            string toMei = UiText.T("Talk to Mei", "和美说话", 2), type = UiText.T("Type", "写", 2);
+            string talk = SaveSystem.Settings.handsFree ? $"{UiText.T("Just talk (to Mei)", "和美说话", 2)}   <b>[T]</b> {type}" : $"<b>[V]</b> {toMei}   <b>[T]</b> {type}";
             string text = fishing == null ? talk : fishing.State switch
             {
-                FishingState.Idle => $"<b>[Hold LMB]</b> Cast   {talk}   <b>[I]</b> Bag   <b>[N]</b> Words   <b>[J]</b> Journal   <b>[Esc]</b> Menu",
+                FishingState.Idle => $"<b>[Hold LMB]</b> {UiText.T("Cast", "钓鱼", 2)}   {talk}   <b>[I]</b> {UiText.T("Bag", "包", 3)}   <b>[N]</b> {UiText.T("Words", "词语", 3)}   <b>[J]</b> Journal   <b>[Esc]</b> {UiText.T("Menu", "菜单", 3)}",
                 FishingState.Charging => "Release to cast! Aim with the camera (hold <b>RMB</b> to look around)",
                 FishingState.Casting => "Wheee...",
                 FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> Reel in   {talk}",
-                FishingState.Bite => "<b>CLICK NOW!</b>",
-                FishingState.Reeling => "Hold <b>LMB</b> to reel · let go when the fish pulls!",
-                FishingState.Landing => "Nice catch! Click to put it in your bucket",
+                FishingState.Bite => $"<b>{UiText.T("CLICK NOW!", "快！", 1)}</b>",
+                FishingState.Reeling => "Hold <b>LMB</b> to lift the green bar, let go to drop it: keep the fish inside until the meter fills!",
+                FishingState.Landing => UiText.T("Nice catch! Click to put it in your bucket", "太好了！点一下，放到包里", 3),
                 _ => "",
             };
             _hint.text = text;
@@ -613,7 +703,9 @@ namespace UntitledGame.UI
         {
             Vector2 half = _root.rect.size * 0.5f;
             float minX = -half.x + size.x * pivot.x + 20, maxX = half.x - size.x * (1 - pivot.x) - 20;
-            float minY = -half.y + size.y * pivot.y + 100, maxY = half.y - size.y * (1 - pivot.y) - 140;
+            // Stay above the offer card when one is showing (Mei's side-chat bubble used to hide under it).
+            float bottom = _offer != null && _offer.gameObject.activeSelf ? 330f : 100f;
+            float minY = -half.y + size.y * pivot.y + bottom, maxY = half.y - size.y * (1 - pivot.y) - 140;
             return new Vector2(Mathf.Clamp(local.x, minX, maxX), Mathf.Clamp(local.y, minY, maxY));
         }
 
@@ -671,14 +763,16 @@ namespace UntitledGame.UI
             _tension.gameObject.SetActive(reeling);
             if (reeling)
             {
-                float t = fishing.Tension;
-                _tensionFill.rectTransform.anchorMax = new Vector2(t, 1);
-                _tensionFill.color = t < 0.55f ? UITheme.Green : t < 0.8f ? UITheme.Yellow : UITheme.Red;
-                _tensionFish.rectTransform.anchorMin = _tensionFish.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(t), 0.5f);
-                _tensionFish.rectTransform.localRotation = Quaternion.Euler(0, 0, fishing.FishPulling ? Mathf.Sin(Time.time * 30f) * 12f : 0f);
-                _tensionLabel.text = fishing.FishPulling ? "<color=#E0604E>It's pulling! Ease off!</color>" : "Reel it in!";
-                _tensionDistance.text = $"{fishing.FishDistance:0.0} m";
-                _tension.localScale = Vector3.one * (fishing.FishPulling ? 1f + 0.01f * Mathf.Sin(Time.time * 40f) : 1f);
+                _tensionFill.rectTransform.anchorMin = new Vector2(0, fishing.BarPos);
+                _tensionFill.rectTransform.anchorMax = new Vector2(1, fishing.BarPos + fishing.BarSize);
+                _tensionFill.color = (fishing.FishInBar ? UITheme.Green : UITheme.Hex("#A8D48A")).WithAlpha(0.9f);
+                _tensionFish.rectTransform.anchorMin = _tensionFish.rectTransform.anchorMax = new Vector2(0.5f, fishing.FishPos);
+                _tensionFish.rectTransform.localRotation = Quaternion.Euler(0, 0, fishing.FishInBar ? 0f : Mathf.Sin(Time.time * 30f) * 14f);
+                _reelMeter.rectTransform.anchorMax = new Vector2(1, Mathf.Max(0.02f, fishing.Progress));
+                _reelMeter.color = Color.Lerp(UITheme.Red, UITheme.Green, fishing.Progress);
+                _tensionLabel.text = fishing.FishInBar ? "Reel!" : "<color=#E0604E>Catch it!</color>";
+                _tensionDistance.text = fishing.Perfect ? "<color=#2C7F79>perfect so far</color>" : "hold LMB";
+                _tension.localScale = Vector3.one * (fishing.FishInBar ? 1f : 1f + 0.01f * Mathf.Sin(Time.time * 40f));
             }
         }
 
@@ -699,19 +793,23 @@ namespace UntitledGame.UI
             }
             bool offer = _offerKeeper != null && (fishing == null || fishing.State == FishingState.Idle);
             _offer.gameObject.SetActive(offer);
+            // Slide left of the shop window when it's open.
+            _offer.anchoredPosition = new Vector2(_shop != null && _shop.IsOpen ? -250f : 0f, 170f);
             if (offer)
             {
                 var o = _offerKeeper.PendingOffer;
-                _offerText.text = $"<b>{_offerKeeper.DisplayName}</b> <size=20><color=#8A7563>({_offerKeeper.DisplayNameEnglish})</color></size>\n{o.english}  <size=20><color=#8A7563>· you have ¥{Inventory.Money}</color></size>";
+                _offerText.text = $"<b>{_offerKeeper.DisplayName}</b> <size=20><color=#8A7563>({_offerKeeper.DisplayNameEnglish}) is waiting for your answer. Say it out loud: 要 / 不要</color></size>\n{o.english}  <size=20><color=#8A7563>· you have ¥{Inventory.Money}</color></size>";
             }
 
             var cur = interaction != null ? interaction.Current : null;
-            bool prompt = cur != null && !offer && (fishing == null || fishing.State == FishingState.Idle);
+            var keeper = ShopConversation.Instance != null ? ShopConversation.Instance.Candidate : null;
+            string promptText = keeper != null ? $"[E] Talk to {keeper.DisplayName} ({keeper.DisplayNameEnglish}) and see the {keeper.Shop?.english.ToLower()}" : cur?.Prompt;
+            bool prompt = promptText != null && !offer && (fishing == null || fishing.State == FishingState.Idle);
             _prompt.gameObject.SetActive(prompt);
             if (prompt)
             {
-                _promptText.text = cur.Prompt;
-                _prompt.sizeDelta = new Vector2(Mathf.Clamp(_promptText.GetPreferredValues(cur.Prompt, 900, 40).x + 50, 260, 900), 50);
+                _promptText.text = promptText;
+                _prompt.sizeDelta = new Vector2(Mathf.Clamp(_promptText.GetPreferredValues(promptText, 900, 40).x + 50, 260, 900), 50);
             }
         }
 

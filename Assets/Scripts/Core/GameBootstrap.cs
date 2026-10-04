@@ -66,7 +66,8 @@ namespace UntitledGame.Core
 
             RepairText(data);
             StartCoroutine(RefreshNotebookPinyin(data));
-            ConversationLog.Import(data.conversation);
+            // The journal's transcript starts fresh every session (the characters still remember what was said).
+            ConversationLog.Clear();
             foreach (var agent in Agents())
                 agent.ImportMemory(data.memories.FirstOrDefault(m => m.agent == agent.MemoryKey));
 
@@ -192,9 +193,11 @@ namespace UntitledGame.Core
             {
                 var t = _player.transform;
                 data.hasPlayerPos = true;
-                data.playerX = t.position.x;
-                data.playerY = t.position.y;
-                data.playerZ = t.position.z;
+                // Saved while out in the boat: come back on the dock, where you got in.
+                var pos = Fishing.Rowboat.PlayerAboard ? Fishing.Rowboat.Instance.SafeSpot : t.position;
+                data.playerX = pos.x;
+                data.playerY = pos.y;
+                data.playerZ = pos.z;
                 data.playerYaw = t.eulerAngles.y;
             }
             data.conversation = ConversationLog.Export(SavedChatLines);

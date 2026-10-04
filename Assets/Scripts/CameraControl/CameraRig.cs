@@ -36,6 +36,9 @@ namespace UntitledGame.CameraControl
         /// <summary>Temporary zoom override (e.g. closer while talking); null to release.</summary>
         public float? DistanceOverride { get; set; }
 
+        /// <summary>Temporary minimum pitch (e.g. looking down into the cabin over its walls); null to release.</summary>
+        public float? MinPitchOverride { get; set; }
+
         public void Configure(Transform t, float startYaw, float startPitch, float startDistance)
         {
             target = t;
@@ -63,6 +66,7 @@ namespace UntitledGame.CameraControl
             if (target == null) return;
             _focus = target.position + Vector3.up * focusHeight;
             _focusOffset = FocusOffset;
+            _shownPitch = MinPitchOverride.HasValue ? Mathf.Max(pitch, MinPitchOverride.Value) : pitch;
             Apply();
         }
 
@@ -94,6 +98,9 @@ namespace UntitledGame.CameraControl
                 if (Mathf.Abs(scroll) > 0.0001f) _targetDistance = Mathf.Clamp(_targetDistance * (1f - scroll * 1.2f), minDistance, maxDistance);
             }
             pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+            // Ease up to an override's pitch rather than snapping, and keep the player's own pitch otherwise.
+            float shownPitch = MinPitchOverride.HasValue ? Mathf.Max(pitch, MinPitchOverride.Value) : pitch;
+            _shownPitch = Mathf.Lerp(_shownPitch < 0f ? pitch : _shownPitch, shownPitch, 1f - Mathf.Exp(-5f * Time.deltaTime));
 
             float wantedDistance = DistanceOverride ?? _targetDistance;
             distance = Mathf.Lerp(distance, wantedDistance, 1f - Mathf.Exp(-4f * Time.deltaTime));
@@ -104,10 +111,12 @@ namespace UntitledGame.CameraControl
             Apply();
         }
 
+        private float _shownPitch = -1f;
+
         private void Apply()
         {
             Vector3 focus = _focus + _focusOffset;
-            Quaternion rot = Quaternion.Euler(pitch, yaw, 0f);
+            Quaternion rot = Quaternion.Euler(_shownPitch < 0f ? pitch : _shownPitch, yaw, 0f);
             Vector3 pos = focus - rot * Vector3.forward * distance;
 
             float ground = Mathf.Max(WorldShape.TerrainHeight(pos.x, pos.z), WorldShape.WaterLevel) + 0.6f;

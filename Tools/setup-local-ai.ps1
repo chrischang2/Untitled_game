@@ -5,8 +5,9 @@
     - Qwen3.5 GGUF model                        -> Mei + the shopkeepers (strong Mandarin)
     - sherpa-onnx runtime (in-process via C#)   -> speech recognition + speech synthesis
     - SenseVoice                                -> fast, accurate Mandarin speech recognition
-    - Matcha zh-en + vocos vocoder              -> Mei's Mandarin voice
-    - Piper voices (chaowen / xiao_ya / kristin)-> shopkeeper voices + Mei's English voice
+    - Kokoro v1.1-zh (multi-speaker)            -> Mei's natural voice (Mandarin + English)
+    - Matcha zh-en + vocos vocoder              -> Mei's classic (fastest) Mandarin voice
+    - Piper voices (chaowen / xiao_ya / kristin)-> shopkeeper voices + Mei's classic English voice
 
   Re-running is safe: finished files are skipped.
 
@@ -93,6 +94,8 @@ Expand-Into $sherpaArchive (Join-Path $root "sherpa") "sherpa-onnx-c-api.dll"
 # --- Speech recognition -------------------------------------------------------
 Write-Host "`n[3/4] SenseVoice speech recognition"
 Get-SherpaModel "asr-models" "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09" "model.int8.onnx"
+# Qwen3-ASR (837 MB): re-hears lines that contain English (better at English / mixed sentences than SenseVoice).
+Get-SherpaModel "asr-models" "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25" "decoder.int8.onnx"
 
 # --- Voices -------------------------------------------------------------------
 Write-Host "`n[4/4] Voices"
@@ -101,6 +104,8 @@ Get-File "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models
 Get-SherpaModel "tts-models" "vits-piper-zh_CN-chaowen-medium" "zh_CN-chaowen-medium.onnx"
 Get-SherpaModel "tts-models" "vits-piper-zh_CN-xiao_ya-medium" "zh_CN-xiao_ya-medium.onnx"
 Get-SherpaModel "tts-models" "vits-piper-en_US-kristin-medium" "en_US-kristin-medium.onnx"
+# Mei's natural voice (347 MB). The fp32 model: the int8 one ran ~4x slower on a Ryzen 7 7435HS.
+Get-SherpaModel "tts-models" "kokoro-multi-lang-v1_1" "voices.bin"
 
 # Record the chosen LLM so the game can find it (other paths use the defaults in LocalAIConfig.cs).
 @{ llmModel = "models/$ggufName" } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $root "localai.json")

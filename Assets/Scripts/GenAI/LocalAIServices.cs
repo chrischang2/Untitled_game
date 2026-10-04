@@ -181,6 +181,8 @@ namespace UntitledGame.GenAI
             Add(() => SpeechEngine.Piper(SpeechEngine.VoiceMale, male, th), male);
             string female = Config.Resolve(Root, Config.voiceFemale);
             Add(() => SpeechEngine.Piper(SpeechEngine.VoiceFemale, female, th), female);
+            string natural = Config.Resolve(Root, Config.voiceNatural);
+            Add(() => SpeechEngine.Kokoro(SpeechEngine.VoiceNatural, natural, Mathf.Max(1, Config.naturalVoiceThreads)), natural);
 
             Speech = new SpeechEngine();
             SttStatus = TtsStatus = ServiceStatus.Starting;
@@ -192,6 +194,8 @@ namespace UntitledGame.GenAI
                 TtsStatus = Speech.TtsReady ? ServiceStatus.Ready : ServiceStatus.Failed;
                 if (Speech.Error != null) LastError = Speech.Error;
                 Debug.Log($"[LocalAI] Speech ready in {Time.realtimeSinceStartup - t0:0.0}s (ASR {SttStatus}, TTS {TtsStatus}).");
+                if (UntitledGame.Core.SaveSystem.Settings.asrMode != (int)SpeechEngine.AsrMode.SenseVoice)
+                    Speech.LoadQwen(Config.Resolve(Root, Config.qwenAsrModel), Mathf.Max(2, Config.naturalVoiceThreads));
                 StatusChanged?.Invoke();
             });
         }

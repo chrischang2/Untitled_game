@@ -26,6 +26,7 @@ Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, F
 
 ## Dictionary
 - [CC-CEDICT](https://www.mdbg.net/chinese/dictionary?page=cedict) (CC BY-SA 4.0), by MDBG and contributors. It is used for pinyin and for traditional→simplified conversion, and is downloaded to `Assets/StreamingAssets/cedict_ts.u8`. If you share a build, keep this credit and the license with it.
+- HSK 2.0 levels 1–3 word list (595 words) with pinyin, from [complete-hsk-vocabulary](https://github.com/drkameleon/complete-hsk-vocabulary) by drkameleon (MIT). The short English meanings were written for this game. It is the curriculum for 高老师's lessons and tests, scores how ambitious your Chinese is, keeps the game's vocabulary at about HSK 3, and is kept in `Assets/StreamingAssets/hsk1-3.txt`.
 
 ## Fonts (SIL Open Font License 1.1)
 - Varela Round, by Joe Prince (Google Fonts)
@@ -41,9 +42,10 @@ Nature Kit, Survival Kit, Pirate Kit, Holiday Kit, Mini Characters, Cube Pets, F
 | [Qwen3.5-4B / 2B Instruct](https://huggingface.co/Qwen) (GGUF by Unsloth) | Mei's and the shopkeepers' brains | Apache 2.0 |
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 1.13.8 (native DLLs + C# bindings in `Assets/Plugins/SherpaOnnx`) | in-process speech recognition and synthesis | Apache 2.0 |
 | SenseVoice-Small, int8, 2025-09-09 (from [ASLP-lab/WSYue-ASR](https://huggingface.co/ASLP-lab/WSYue-ASR), based on FunAudioLLM SenseVoice) | speech to text (pinned to Mandarin) | see the model pages; the SenseVoice model license allows commercial use with attribution |
-| [Matcha-TTS zh-en](https://modelscope.cn/models/dengcunqin/matcha_tts_zh_en_20251010) by dengcunqin + `vocos-16khz-univ` vocoder | Mei's voice (Mandarin + English) | no license stated by the author; fine for personal use, but check before sharing a build |
+| [Kokoro-82M v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh) by hexgrad (sherpa-onnx export `kokoro-multi-lang-v1_1`) | Mei's natural voice (Mandarin + English), the default | Apache 2.0 |
+| [Matcha-TTS zh-en](https://modelscope.cn/models/dengcunqin/matcha_tts_zh_en_20251010) by dengcunqin + `vocos-16khz-univ` vocoder | Mei's classic voice (Esc → Mei sounds like → Classic) | no license stated by the author; fine for personal use, but check before sharing a build |
 | Piper voice `zh_CN-chaowen-medium` | male shopkeepers (老王, 李师傅) | dataset CC0 |
 | Piper voice `zh_CN-xiao_ya-medium` | female shopkeepers (陈阿姨, 小林) | trained on the Data Baker BZNSYP corpus: **non-commercial use only** |
-| Piper voice `en_US-kristin-medium` | Mei's English | trained on LibriVox recordings (public domain) |
+| Piper voice `en_US-kristin-medium` | Mei's English with the classic voice | trained on LibriVox recordings (public domain) |
 
 This is fine for a personal learning game. For anything commercial, swap the xiao_ya voice (set `voiceFemale` in `LocalAI/localai.json`) and check the Matcha model's terms.

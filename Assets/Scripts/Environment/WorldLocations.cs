@@ -17,7 +17,7 @@ namespace UntitledGame.Environment
             if (WorldShape.IsOnDock(p.x, p.z)) return "on the dock";
             if (Vector2.Distance(new Vector2(p.x, p.z), WorldShape.CampCenter) < WorldShape.CampRadius + 3f) return "at the camp by the cabin";
             if (WorldShape.DistanceToPath(p.x, p.z) < 2f) return "on the path";
-            return WorldShape.ShoreDistance(p.x, p.z) < 6f ? "on the lake shore" : "in the woods by the lake";
+            return WorldShape.ShoreDistance(p.x, p.z) < 0f ? "out at sea" : WorldShape.ShoreDistance(p.x, p.z) < 6f ? "on the beach" : "in the woods behind the beach";
         }
     }
 }

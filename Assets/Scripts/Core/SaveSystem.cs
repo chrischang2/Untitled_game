@@ -32,12 +32,17 @@ namespace UntitledGame.Core
         public float sfxVolume = 0.9f;
         public float voiceVolume = 1f;
         public float voiceSpeed = 0.9f;
+        /// <summary>Kokoro speaker for Mei's natural voice, or -1 for the classic (fastest) Matcha + Piper voices.</summary>
+        public int meiVoice = 3;
+        /// <summary>0 = Auto (SenseVoice; Qwen3-ASR for lines with English), 1 = SenseVoice only, 2 = Qwen3-ASR for everything.</summary>
+        public int asrMode;
         public bool speakReplies = true;
         public bool companionChatter = true;
         public bool handsFree;
         public ImmersionLevel immersion = ImmersionLevel.Beginner;
         public PinyinMode pinyin = PinyinMode.Always;
-        public float realSecondsPerHour = 60f;
+        public float realSecondsPerHour = 120f;   // 6am-2am (the waking day) = 40 real minutes
+        public int settingsVersion;
         public float mouseSensitivity = 1f;
         public bool keepVoiceRecordings = true;
     }
@@ -80,6 +85,8 @@ namespace UntitledGame.Core
         public bool bowlFilled;
         public bool collar;
         public int lastTreatDay;
+        public int fullDay = -1;    // the day she was fed until full: she brings a bait the next day
+        public int giftDay = -1;    // the last day she brought one
     }
 
     [Serializable]
@@ -117,6 +124,20 @@ namespace UntitledGame.Core
         public List<SavedMessage> messages = new List<SavedMessage>();
     }
 
+    /// <summary>Friendship with one shopkeeper (see Progression.Affinity).</summary>
+    [Serializable]
+    public class KeeperState
+    {
+        public string shopId;
+        public int points;
+        public int talkDay = -1;
+        public int talkPointsToday;
+        public int lastGiftDay = -1;
+        public List<string> facts = new List<string>();          // learned facts: "hometown", "like:茶", ...
+        public List<string> recentLines = new List<string>();    // no points for repeating yourself
+        public List<string> askedQuestions = new List<string>();
+    }
+
     [Serializable]
     public class SaveData
     {
@@ -139,6 +160,22 @@ namespace UntitledGame.Core
         public int day = 1;
         public int totalCatches;
         public List<string> companionNotes = new List<string>();
+
+        // Stats (see Progression.PlayerStats): five levels each, trained with Coach Wu.
+        public int statCast, statBar, statGrip, statLuck, statQuality, statBite;
+        public int strength = 1; // old (lake) saves: becomes cast-distance levels
+        public List<string> booksRead = new List<string>();
+        public List<string> discoveredFish;
+        public List<KeeperState> keepers = new List<KeeperState>();
+        public float energy = -1f;   // -1 = full (a new game)
+        public bool islandCamp;      // the camp on the island has been set up
+        public string cosBoat = "", cosCat = "", cosMei = "", cosHouse = ""; // cosmetics being used
+
+        // HSK lessons and tests at the test centre (see Progression.Hsk).
+        public int hskLevel;                                   // highest HSK test passed (0-3)
+        public List<string> lessonsDone = new List<string>();  // "level-lesson", e.g. "1-3"
+        public int lastTestDay = -1;                           // one test a day
+        public List<string> hskMissed = new List<string>();    // words answered wrong (come back in practice)
 
         // Where you were standing.
         public bool hasPlayerPos;
@@ -279,6 +316,12 @@ namespace UntitledGame.Core
                 }
             }
             _settings.settings ??= new GameSettings();
+            // v1: days got longer (the old default was 60 real seconds per game hour; now 120).
+            if (_settings.settings.settingsVersion < 1)
+            {
+                if (_settings.settings.realSecondsPerHour <= 60f) _settings.settings.realSecondsPerHour = 120f;
+                _settings.settings.settingsVersion = 1;
+            }
         }
 
         private static void SaveSettings()
@@ -322,6 +365,14 @@ namespace UntitledGame.Core
             d.conversation ??= new List<SavedLine>();
             d.memories ??= new List<AgentMemory>();
             if (string.IsNullOrEmpty(d.equippedRod)) d.equippedRod = "rod_old";
+            UntitledGame.Progression.PlayerStats.Normalise(d);
+            d.keepers ??= new List<KeeperState>();
+            foreach (var k in d.keepers)
+            {
+                k.facts ??= new List<string>();
+                k.recentLines ??= new List<string>();
+                k.askedQuestions ??= new List<string>();
+            }
             if (string.IsNullOrEmpty(d.createdUtc)) d.createdUtc = DateTime.UtcNow.ToString("o");
             d.version = 3;
         }

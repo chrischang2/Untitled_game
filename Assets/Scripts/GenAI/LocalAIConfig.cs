@@ -24,12 +24,15 @@ namespace UntitledGame.GenAI
         // Speech (sherpa-onnx, in-process).
         public string sherpaDir = "sherpa";
         public string asrModel = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09";
+        public string qwenAsrModel = "models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25"; // optional: better English lines
         public string voiceMei = "models/matcha-icefall-zh-en";
         public string vocoder = "models/vocos-16khz-univ.onnx";
         public string voiceEnglish = "models/vits-piper-en_US-kristin-medium";
         public string voiceMale = "models/vits-piper-zh_CN-chaowen-medium";
         public string voiceFemale = "models/vits-piper-zh_CN-xiao_ya-medium";
+        public string voiceNatural = "models/kokoro-multi-lang-v1_1"; // Mei's natural voice (Kokoro, fp32: int8 is slower on this CPU)
         public int speechThreads = 4;
+        public int naturalVoiceThreads = 6;  // Kokoro: 6 threads ran at ~0.64x real time next to the LLM
         public bool keepServersRunningInEditor = true;
 
         public const string FolderName = "LocalAI";

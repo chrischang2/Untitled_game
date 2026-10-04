@@ -7,6 +7,7 @@ using UntitledGame.Core;
 using UntitledGame.Economy;
 using UntitledGame.Home;
 using UntitledGame.Language;
+using UntitledGame.Progression;
 
 namespace UntitledGame.UI
 {
@@ -21,6 +22,7 @@ namespace UntitledGame.UI
 
         public InventoryPanel(RectTransform canvas) : base(canvas, "Bag", new Vector2(1100, 900), "Bag")
         {
+            ChineseTitle("包", 3);
             var area = UIFactory.Rect("Area", Window).Stretch(50, 40, 100, 36);
             _content = UIFactory.ScrollList(area, 8);
             _onChanged = () => { if (IsOpen) Refresh(); };
@@ -32,23 +34,46 @@ namespace UntitledGame.UI
             foreach (Transform c in _content) Object.Destroy(c.gameObject);
 
             Header($"Money: ¥{Inventory.Money}");
+            Line($"<b>Fishing knowledge: {PlayerStats.Knowledge} book{(PlayerStats.Knowledge == 1 ? "" : "s")}</b>  <color=#8A7563>({PlayerStats.DiscoveredFishCount}/{PlayerStats.TotalFishCount} kinds of fish discovered; buy books from Teacher Zhou)</color>");
 
-            Header($"Fish bucket  {Inventory.BucketCount}/{Inventory.BucketCapacity}" + (Inventory.BucketCount > 0 ? $"  ·  worth about ¥{Inventory.BucketValue}" : ""));
-            if (Inventory.BucketCount == 0) Line("Empty. Go catch something!");
-            foreach (var g in Inventory.Bucket.GroupBy(b => b.species.id))
+            // Everything you carry takes a slot (fish stack 20 of a kind, other things 99).
+            var slots = Inventory.Slots();
+            Header($"Bag  {slots.Count}/{Inventory.SlotCapacity} slots" + (Inventory.BucketCount > 0 ? $"  ·  fish worth about ¥{Inventory.BucketValue}" : ""));
+            for (int i = 0; i < Inventory.SlotCapacity || i < slots.Count; i++)
             {
-                var s = g.First().species;
-                Line($"{g.Count()} × {s.name}  <color=#8A7563>(best {g.Max(x => x.length):0} cm, ~¥{g.Sum(x => Catalog.FishPrice(x.species, x.length))})</color>");
+                if (i < slots.Count)
+                {
+                    var s = slots[i];
+                    string extra = s.speciesId != null
+                        ? $"heaviest {Fishing.FishDatabase.WeightText(Inventory.Bucket.Where(b => b.species.id == s.speciesId).Max(b => b.length))}, ~¥{s.value}"
+                        : $"worth ~¥{s.value}";
+                    Line($"{i + 1}.  <b>{s.label}</b> x {s.count}  <color=#8A7563>({extra})</color>" + (i >= Inventory.SlotCapacity ? "  <color=#E0604E>(over capacity)</color>" : ""));
+                }
+                else Line($"{i + 1}.  <color=#8A7563>empty</color>");
             }
-            if (Inventory.BucketCount > 0) Line("<color=#8A7563><i>Sell them at the fish shop at the market. The shopkeeper only speaks Mandarin, so ask Mei how.</i></color>");
+            Line("<color=#8A7563><i>If you pass out, you keep only your 3 most valuable slots. Old Wang sells bigger buckets for more slots.</i></color>");
+            Line($"<b>Energy {Progression.Energy.Current:0}/{Progression.Energy.Max:0}</b>  <color=#8A7563>({Progression.Energy.Bed?.english}: {Progression.Energy.BedEnergy[Progression.Energy.BedLevel]}, " +
+                 $"home comfort level {Progression.Energy.ComfortLevel}: +{Progression.Energy.ComfortLevel * Progression.Energy.EnergyPerComfortLevel}" +
+                 (Progression.Energy.NextComfortThreshold > 0 ? $"; {Progression.Energy.ComfortPoints}/{Progression.Energy.NextComfortThreshold} comfort to the next level" : "") + ")</color>");
 
-            Header("Rods");
-            foreach (var rod in Inventory.OwnedRods())
+            Header("Stats  <size=20><color=#8A7563>(train with Coach Wu)</color></size>");
+            foreach (var stat in PlayerStats.Stats)
+                Line($"{PlayerStats.StatName(stat)}  <b>{PlayerStats.Level(stat)}/{PlayerStats.MaxLevel}</b>  <color=#8A7563>{PlayerStats.StatValue(stat)}</color>");
+
+            var cosmetics = Inventory.Owned().Where(x => x.def.category == ItemCategory.Cosmetic).Select(x => x.def).ToList();
+            if (cosmetics.Count > 0)
             {
-                bool equipped = Inventory.Rod.id == rod.id;
-                Row($"{rod.english}  <color=#8A7563>cast {rod.castDistance:0} m · reel ×{rod.reelSpeed:0.##}</color>",
-                    equipped ? null : "Equip", () => Inventory.EquipRod(rod.id), equipped ? "equipped" : null);
+                Header("Cosmetics");
+                foreach (var def in cosmetics)
+                {
+                    bool on = Cosmetics.Chosen(def.cosmeticFor) == def.id;
+                    Row($"{def.english}  <color=#8A7563>({def.cosmeticFor})</color>", on ? "Take off" : "Use",
+                        () => Cosmetics.Choose(def.cosmeticFor, on ? null : def.id), null);
+                }
             }
+
+            Header("Line");
+            Line($"<b>{Inventory.LineName}</b>  <color=#8A7563>(your strongest line is always on the rod; Old Wang sells stronger ones)</color>");
 
             Header("Bait");
             var baits = Inventory.Owned().Where(x => x.def.category == ItemCategory.Bait).ToList();
@@ -59,6 +84,28 @@ namespace UntitledGame.UI
                 bool using_ = current != null && current.id == def.id;
                 Row($"{def.english} × {count}  <color=#8A7563>{def.description}</color>", using_ ? null : "Use", () => Inventory.SelectBait(def.id), using_ ? "using" : null);
             }
+
+            var books = Inventory.Owned().Where(x => x.def.category == ItemCategory.Book).ToList();
+            if (books.Count > 0)
+            {
+                Header("Books");
+                foreach (var (def, _) in books)
+                {
+                    bool read = PlayerStats.HasRead(def.id);
+                    var fish = (def.teachesFish ?? new string[0]).Select(Fishing.FishDatabase.Get).Where(f => f != null).Select(f => f.name);
+                    Row($"{def.english}  <color=#8A7563>{(read ? "about " + string.Join(", ", fish) : def.description)}</color>",
+                        read ? null : "Read", () => ReadBook(def.id), read ? "read" : null);
+                }
+            }
+
+            var giftItems = Inventory.Owned().Where(x => x.def.category == ItemCategory.Gift && x.count > 0).ToList();
+            if (giftItems.Count > 0)
+            {
+                Header("Gifts");
+                foreach (var (def, count) in giftItems) Line($"{def.english} x {count}  <color=#8A7563>{def.description}</color>");
+                Line("<color=#8A7563><i>Give one by telling a shopkeeper, in Chinese, that it's for them (e.g. 这是送给你的…). One gift a day each.</i></color>");
+            }
+            if (Inventory.Owns("boat")) Line("<b>Old Wang's rowboat</b>  <color=#8A7563>Press F at the boat by the dock to row out. Big fish live far from shore.</color>");
 
             var gear = Inventory.Owned().Where(x => x.def.category == ItemCategory.Accessory).ToList();
             if (gear.Count > 0)
@@ -83,7 +130,11 @@ namespace UntitledGame.UI
             {
                 var def = Catalog.Get(p.id);
                 if (def == null) continue;
-                Row($"{def.english}  <color=#8A7563>(placed)</color>", "Put away", () =>
+                Row($"{def.english}  <color=#8A7563>(placed)</color>", "Move", () =>
+                {
+                    Close();
+                    HomeItems.Instance?.StartMoving(p);
+                }, button2: "Put away", onClick2: () =>
                 {
                     HomeItems.Instance?.PutAway(p);
                     Refresh();
@@ -99,6 +150,15 @@ namespace UntitledGame.UI
             Line("<color=#8A7563><i>F near Tangyuan to pet her (or give a treat). F near her bowl to fill it.</i></color>");
         }
 
+        private static void ReadBook(string id)
+        {
+            var found = PlayerStats.ReadBook(id);
+            AudioManager.Instance?.PlaySfx("SFX/rpg_bookFlip1", 0.6f);
+            GameEvents.Toast(found.Count == 0
+                ? "You read it again. Nothing new, but it's a good read."
+                : $"You discovered {found.Count} new fish: {string.Join(", ", found.Select(f => f.name))}. They can bite now!", 5f);
+        }
+
         private void Header(string text)
         {
             var t = UIFactory.Text(_content, "Header", text, 30, UITheme.Ink, TextAlignmentOptions.BottomLeft, title: true);
@@ -111,7 +171,7 @@ namespace UntitledGame.UI
             t.rectTransform.SetLayout(36);
         }
 
-        private void Row(string text, string button, UnityAction onClick, string tag = null)
+        private void Row(string text, string button, UnityAction onClick, string tag = null, string button2 = null, UnityAction onClick2 = null)
         {
             var row = UIFactory.Rect("Row", _content);
             row.SetLayout(48);
@@ -119,11 +179,16 @@ namespace UntitledGame.UI
             t.rectTransform.anchorMin = Vector2.zero;
             t.rectTransform.anchorMax = new Vector2(1, 1);
             t.rectTransform.offsetMin = new Vector2(20, 0);
-            t.rectTransform.offsetMax = new Vector2(-190, 0);
+            t.rectTransform.offsetMax = new Vector2(button2 != null ? -370 : -190, 0);
             if (button != null)
             {
                 var b = UIFactory.Button(row, button, () => { onClick(); if (IsOpen) Refresh(); }, UITheme.TealDark, 20);
-                b.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-6, 0), new Vector2(170, 42));
+                b.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(button2 != null ? -186 : -6, 0), new Vector2(170, 42));
+            }
+            if (button2 != null)
+            {
+                var b2 = UIFactory.Button(row, button2, () => { onClick2?.Invoke(); if (IsOpen) Refresh(); }, UITheme.InkSoft, 20);
+                b2.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-6, 0), new Vector2(170, 42));
             }
             else if (tag != null)
             {
@@ -145,6 +210,7 @@ namespace UntitledGame.UI
 
         public NotebookPanel(RectTransform canvas) : base(canvas, "Notebook", new Vector2(1100, 900), "Words Mei taught you")
         {
+            ChineseTitle("美教你的词语", 3);
             _count = UIFactory.Text(Window, "Count", "", 24, UITheme.InkSoft, TextAlignmentOptions.Center);
             _count.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -84), new Vector2(900, 34));
             var area = UIFactory.Rect("Area", Window).Stretch(50, 40, 130, 36);

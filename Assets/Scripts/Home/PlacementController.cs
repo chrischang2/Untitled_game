@@ -28,11 +28,28 @@ namespace UntitledGame.Home
 
         private void Awake() => Instance = this;
 
-        public void Begin(string itemId)
+        private PlacedItem _moving;       // moving something already placed (null: placing from the bag)
+        private GameObject _movingObject; // its object, hidden while it's being moved
+
+        /// <summary>Picks up something already placed and lets the player put it somewhere else (Esc puts it back).</summary>
+        public void BeginMove(PlacedItem placed, GameObject existing)
+        {
+            if (placed == null) return;
+            Begin(placed.id, fromBag: false);
+            if (_itemId == null) return;
+            _moving = placed;
+            _movingObject = existing;
+            _yaw = placed.yaw;
+            if (existing != null) existing.SetActive(false);
+        }
+
+        public void Begin(string itemId) => Begin(itemId, fromBag: true);
+
+        private void Begin(string itemId, bool fromBag)
         {
             Cancel();
             var def = Catalog.Get(itemId);
-            if (def == null || !def.placeable || Inventory.Count(itemId) <= 0) return;
+            if (def == null || !def.placeable || (fromBag && Inventory.Count(itemId) <= 0)) return;
             _itemId = itemId;
             _startedFrame = Time.frameCount;
             _ghost = ItemVisuals.Create(def);
@@ -50,6 +67,9 @@ namespace UntitledGame.Home
 
         public void Cancel()
         {
+            if (_movingObject != null) _movingObject.SetActive(true); // moving was cancelled: it stays where it was
+            _moving = null;
+            _movingObject = null;
             if (_ghost != null) Destroy(_ghost);
             if (_ring != null) Destroy(_ring.gameObject);
             _ghost = null;
@@ -107,8 +127,11 @@ namespace UntitledGame.Home
                 if (_valid)
                 {
                     string id = _itemId;
+                    var moving = _moving;
+                    _movingObject = null; // HomeItems replaces it
                     Cancel();
-                    HomeItems.Instance?.Place(id, p, _yaw);
+                    if (moving != null) HomeItems.Instance?.Move(moving, p, _yaw);
+                    else HomeItems.Instance?.Place(id, p, _yaw);
                 }
                 else
                 {

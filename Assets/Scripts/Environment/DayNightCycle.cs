@@ -121,6 +121,16 @@ namespace UntitledGame.Environment
 
         private void OnValidate() => Apply();
 
+        /// <summary>Jump to an hour on a given day (sleeping, passing out). Fires NewDay if the day changed.</summary>
+        public void SkipTo(int day, float hour)
+        {
+            bool newDay = day != Day;
+            Day = Mathf.Max(1, day);
+            timeOfDay = Mathf.Repeat(hour, 24f);
+            if (newDay) NewDay?.Invoke(Day);
+            Apply();
+        }
+
         public void Apply()
         {
             if (skyZenith == null || skyZenith.Count < 2) return;

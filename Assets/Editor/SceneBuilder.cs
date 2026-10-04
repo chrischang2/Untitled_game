@@ -60,6 +60,7 @@ namespace UntitledGame.EditorTools
             BuildWater();
             BuildDock(out Vector3 dockEnd, out Quaternion dockRot);
             BuildCamp(out Vector3 fireSpot);
+            BuildIsland();
             ScatterNature(fireSpot);
 
             var systems = new GameObject("Systems").transform;
@@ -120,9 +121,14 @@ namespace UntitledGame.EditorTools
             {
                 c = Color.Lerp(BedShallow, BedDeep, Mathf.InverseLerp(0.2f, 3.5f, -h));
             }
-            else if (d < 2.6f + noise * 1.2f && h < 0.55f)
+            else if (WorldShape.OnIsland(p.x, p.z, 8f))
             {
-                c = Color.Lerp(WetSand, Sand, Mathf.InverseLerp(0f, 1.2f, d));
+                // The island: sandy beaches round a grassy hump.
+                c = h < 0.9f + noise * 0.3f ? Color.Lerp(WetSand, Sand, Mathf.InverseLerp(0f, 0.5f, h)) : Color.Lerp(GrassB, GrassA, noise);
+            }
+            else if (d < 7f + noise * 2.5f && h < 0.9f)
+            {
+                c = Color.Lerp(WetSand, Sand, Mathf.InverseLerp(0f, 1.5f, d));
             }
             else
             {
@@ -230,8 +236,9 @@ namespace UntitledGame.EditorTools
 
         private static void BuildWater()
         {
-            float size = 96f;
-            int n = 96;
+            // The sea: a big plane from behind the beach out to the horizon (the land hides the part under it).
+            float size = 300f;
+            int n = 200;
             var verts = new List<Vector3>();
             var uvs = new List<Vector2>();
             var tris = new List<int>();
@@ -247,17 +254,17 @@ namespace UntitledGame.EditorTools
                 int i = z * (n + 1) + x;
                 tris.AddRange(new[] { i, i + n + 1, i + n + 2, i, i + n + 2, i + 1 });
             }
-            var mesh = new Mesh { name = "Lake", indexFormat = IndexFormat.UInt32 };
+            var mesh = new Mesh { name = "Sea", indexFormat = IndexFormat.UInt32 };
             mesh.SetVertices(verts);
             mesh.SetUVs(0, uvs);
             mesh.SetTriangles(tris, 0);
             mesh.RecalculateNormals();
             mesh.bounds = new Bounds(Vector3.zero, new Vector3(size, 2f, size));
-            SaveMesh(mesh, "Lake");
+            SaveMesh(mesh, "Sea");
 
-            var go = new GameObject("Lake");
+            var go = new GameObject("Sea");
             go.transform.SetParent(_env, false);
-            go.transform.position = new Vector3(WorldShape.LakeCenter.x, WorldShape.WaterLevel, WorldShape.LakeCenter.y);
+            go.transform.position = new Vector3(0f, WorldShape.WaterLevel, WorldShape.CoastZ + size * 0.5f - 30f);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = ComfyAssets.WaterMat;
@@ -390,14 +397,68 @@ namespace UntitledGame.EditorTools
             Place("PirateKit/crate", root, L(-width * 0.5f + 0.55f, deck, 2.4f), yaw + 8f, 0.55f);
             Place("SurvivalKit/fish", root, L(width * 0.5f - 0.35f, deck + 0.52f, length - 2.2f), yaw + 70f, 2.2f);
 
-            // Rowboat tied up alongside.
-            var boat = Place("PirateKit/boat-row-small", _env, L(width * 0.5f + 1.6f, -0.1f, length - 5f), yaw + 4f, 0.95f, isStatic: false);
-            if (boat != null) boat.AddComponent<Floater>().Configure(0.035f, 1.8f, 0.8f);
+            // Old Wang's rowboat, tied up beside the end of the dock (rideable once rented: Rowboat).
+            var boatRoot = new GameObject("Rowboat").transform;
+            boatRoot.SetParent(_env, false);
+            boatRoot.SetPositionAndRotation(L(width * 0.5f + 1.5f, -0.1f, length - 1.2f), Quaternion.Euler(0f, yaw + 4f, 0f));
+            var boat = Place("PirateKit/boat-row-small", boatRoot, boatRoot.position, yaw + 4f, 0.95f, isStatic: false);
+            if (boat != null)
+            {
+                boat.AddComponent<Floater>().Configure(0.035f, 1.8f, 0.8f);
+                boatRoot.gameObject.AddComponent<Rowboat>().Configure(boat.transform);
+            }
 
             dockEnd = L(0f, deck, length - 1.2f);
         }
 
         // ------------------------------------------------------------------ camp
+
+        /// <summary>The island far out to sea: a grassy hump with a few trees and rocks, and a camp spot (IslandCamp).</summary>
+        private static void BuildIsland()
+        {
+            var island = new GameObject("Island").transform;
+            island.SetParent(_env, false);
+            Vector2 c = WorldShape.IslandCenter;
+            Vector3 centre = Ground(c.x, c.y);
+            var rngTrees = new[] { (a: 20f, r: 6.5f), (a: 110f, r: 7.5f), (a: 200f, r: 5.5f), (a: 290f, r: 8f), (a: 250f, r: 3.5f) };
+            foreach (var t in rngTrees)
+            {
+                float a = t.a * Mathf.Deg2Rad;
+                var tree = Place("NatureKit/" + Pick(Broadleaf), island, Ground(c.x + Mathf.Cos(a) * t.r, c.y + Mathf.Sin(a) * t.r, 0.05f), R(0, 360), R(3.4f, 4.4f));
+                if (tree != null)
+                {
+                    var cap = tree.AddComponent<CapsuleCollider>();
+                    cap.radius = 0.06f;
+                    cap.height = 0.5f;
+                    cap.center = new Vector3(0, 0.25f, 0);
+                }
+            }
+            for (int k = 0; k < 14; k++)
+            {
+                float a = R(0, Mathf.PI * 2f), r = R(10f, 13.5f);
+                Place("NatureKit/" + Pick(BigRocks), island, Ground(c.x + Mathf.Cos(a) * r, c.y + Mathf.Sin(a) * r, 0.1f), R(0, 360), R(1.4f, 2.6f));
+            }
+            for (int k = 0; k < 30; k++)
+            {
+                float a = R(0, Mathf.PI * 2f), r = R(0f, 9f);
+                Place("NatureKit/" + Pick(Grasses), island, Ground(c.x + Mathf.Cos(a) * r, c.y + Mathf.Sin(a) * r, 0.02f), R(0, 360), R(2.4f, 3.4f), shadows: false);
+            }
+
+            // The camp spot: tent + campfire appear once the player sets up camp.
+            var campGo = new GameObject("IslandCamp");
+            campGo.transform.SetParent(island, false);
+            campGo.transform.SetPositionAndRotation(centre + new Vector3(0f, 0f, -2f), Quaternion.Euler(0f, 180f, 0f));
+            var visuals = new GameObject("CampVisuals").transform;
+            visuals.SetParent(campGo.transform, false);
+            Place("NatureKit/tent_detailedOpen", visuals, Ground(c.x - 1.6f, c.y - 1.2f), 200f, 3.4f);
+            Place("NatureKit/campfire_stones", visuals, Ground(c.x + 1.2f, c.y - 3.4f), 0f, 2.4f);
+            Place("NatureKit/campfire_logs", visuals, Ground(c.x + 1.2f, c.y - 3.4f, 0.02f), 30f, 2.2f);
+            Place("SurvivalKit/bedroll", visuals, Ground(c.x - 1.4f, c.y + 0.6f), 160f, 2.6f);
+            campGo.AddComponent<IslandCamp>().Configure(visuals.gameObject);
+            // A marker you can see from a distance: a flag-like lantern post.
+            var lamp = Place("FantasyTown/lantern", island, Ground(c.x + 2.5f, c.y - 1.5f), 0f, 1.25f);
+            if (lamp != null) AddLight(lamp.transform, new Vector3(0, 1.38f, 0), C("#FFC477"), 8f, 2.2f, 0f, false, 0.9f);
+        }
 
         private static void BuildCamp(out Vector3 fireSpot)
         {
@@ -411,7 +472,7 @@ namespace UntitledGame.EditorTools
             var camp = new GameObject("Camp").transform;
             camp.SetParent(_env, false);
 
-            BuildCabin(camp, center - f * 5.2f - r * 1.0f, yaw);
+            BuildCabin(camp, new Vector3(WorldShape.CabinCenter.x, WorldShape.CampHeight, WorldShape.CabinCenter.y), yaw);
 
             // Campfire with log seats.
             fireSpot = center + r * 3.6f + f * 1.2f;
@@ -469,48 +530,59 @@ namespace UntitledGame.EditorTools
 
         private static void BuildCabin(Transform parent, Vector3 pos, float yaw)
         {
-            const float scale = 2.4f;
+            const float scale = WorldShape.CabinScale;
             var root = new GameObject("Cabin").transform;
             root.SetParent(parent, false);
             pos.y = WorldShape.CampHeight - 0.02f;
             root.SetPositionAndRotation(pos, Quaternion.Euler(0, yaw, 0));
             root.localScale = Vector3.one * scale;
+            _cabinRoot = root;
 
-            void Piece(string name, float x, float z, float rotY)
+            // Pieces are grouped by wall so the runtime Cabin can hide the walls between the camera and the player.
+            Transform Group(string name)
+            {
+                var g = new GameObject(name).transform;
+                g.SetParent(root, false);
+                return g;
+            }
+            Transform floorGroup = Group("Floor"), front = Group("Front"), back = Group("Back"), left = Group("Left"), right = Group("Right"), corners = Group("Corners");
+
+            GameObject Piece(Transform group, string name, float x, float z, float rotY, bool isStatic = true)
             {
                 var prefab = ComfyAssets.Model("HolidayKit/" + name);
-                if (prefab == null) return;
-                var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, root);
+                if (prefab == null) return null;
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab, group);
                 KenneyMaterials.Remap(go, "HolidayKit");
                 go.transform.localPosition = new Vector3(x, 0f, z - 0.5f);
                 go.transform.localRotation = Quaternion.Euler(0, rotY, 0);
                 go.transform.localScale = Vector3.one;
-                GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+                if (isStatic) GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+                return go;
             }
 
             // Floor.
             for (int x = -1; x <= 1; x++)
             for (int z = 0; z <= 1; z++)
-                Piece("floor-wood", x, z, 0);
-            // Front (+z, facing the lake).
-            Piece("cabin-window-a", -1, 1, 0);
-            Piece("cabin-doorway", 0, 1, 0);
-            Piece("cabin-door-rotate", 0, 1, 0);
-            Piece("cabin-window-a", 1, 1, 0);
+                Piece(floorGroup, "floor-wood", x, z, 0);
+            // Front (+z, facing the lake). The door's leaf (child "door", pivot on its hinge) swings open at runtime.
+            Piece(front, "cabin-window-a", -1, 1, 0);
+            Piece(front, "cabin-doorway", 0, 1, 0);
+            Piece(front, "cabin-door-rotate", 0, 1, 0, isStatic: false);
+            Piece(front, "cabin-window-a", 1, 1, 0);
             // Back.
-            Piece("cabin-wall", -1, 0, 180);
-            Piece("cabin-window-b", 0, 0, 180);
-            Piece("cabin-wall", 1, 0, 180);
+            Piece(back, "cabin-wall", -1, 0, 180);
+            Piece(back, "cabin-window-b", 0, 0, 180);
+            Piece(back, "cabin-wall", 1, 0, 180);
             // Sides.
-            Piece("cabin-wall", 1, 0, 90);
-            Piece("cabin-window-c", 1, 1, 90);
-            Piece("cabin-wall", -1, 0, 270);
-            Piece("cabin-window-c", -1, 1, 270);
+            Piece(right, "cabin-wall", 1, 0, 90);
+            Piece(right, "cabin-window-c", 1, 1, 90);
+            Piece(left, "cabin-wall", -1, 0, 270);
+            Piece(left, "cabin-window-c", -1, 1, 270);
             // Corners.
-            Piece("cabin-corner-logs", 1, 1, 0);
-            Piece("cabin-corner-logs", 1, 0, 90);
-            Piece("cabin-corner-logs", -1, 0, 180);
-            Piece("cabin-corner-logs", -1, 1, 270);
+            Piece(corners, "cabin-corner-logs", 1, 1, 0);
+            Piece(corners, "cabin-corner-logs", 1, 0, 90);
+            Piece(corners, "cabin-corner-logs", -1, 0, 180);
+            Piece(corners, "cabin-corner-logs", -1, 1, 270);
 
             // Procedural gable roof (in cabin-local units).
             var mb = new MeshBuilder();
@@ -549,9 +621,44 @@ namespace UntitledGame.EditorTools
             roofGo.AddComponent<MeshRenderer>().sharedMaterial = ComfyAssets.PlainLitMat;
             GameObjectUtility.SetStaticEditorFlags(roofGo, StaticEditorFlags.BatchingStatic);
 
-            var col = root.gameObject.AddComponent<BoxCollider>();
-            col.center = new Vector3(0, 0.8f, 0f);
-            col.size = new Vector3(3.2f, 1.6f, 2.3f);
+            // Walls you can't walk through, with a gap for the doorway (measured from the Kenney pieces with
+            // DebugTools.DumpCabinPieces: walls are 0.3 thick on the tile edge, the doorway is 0.45 wide and 0.78 high).
+            void Wall(Vector3 center, Vector3 size)
+            {
+                var c = root.gameObject.AddComponent<BoxCollider>();
+                c.center = center;
+                c.size = size;
+            }
+            const float halfW = 1.5f, halfD = 1.0f, t = 0.3f, h = 1.0f, door = 0.225f;
+            Wall(new Vector3(0, h / 2, -halfD), new Vector3(halfW * 2 + t, h, t));                        // back
+            Wall(new Vector3(-halfW, h / 2, 0), new Vector3(t, h, halfD * 2 + t));                        // left
+            Wall(new Vector3(halfW, h / 2, 0), new Vector3(t, h, halfD * 2 + t));                         // right
+            float sideLen = halfW + t / 2 - door;
+            Wall(new Vector3(-(door + sideLen / 2), h / 2, halfD), new Vector3(sideLen, h, t));           // front, left of the door
+            Wall(new Vector3(door + sideLen / 2, h / 2, halfD), new Vector3(sideLen, h, t));              // front, right of the door
+            Wall(new Vector3(0, (0.78f + h) / 2, halfD), new Vector3(door * 2, h - 0.78f, t));            // above the door
+            Wall(new Vector3(0, 0.075f / 2, 0), new Vector3(halfW * 2, 0.075f, halfD * 2));              // floor (furniture sits on it)
+
+            var interior = new GameObject("InteriorLight").transform;
+            interior.SetParent(root, false);
+            interior.localPosition = new Vector3(0, 0.85f, -0.1f);
+            var il = interior.gameObject.AddComponent<Light>(); // switched on by Cabin while the player is inside
+            il.type = LightType.Point;
+            il.color = C("#FFD9A0");
+            il.range = 7f;
+            il.intensity = 1.6f;
+            il.shadows = LightShadows.None;
+            il.enabled = false;
+
+            root.gameObject.AddComponent<Cabin>();
+
+            // The bed (the house comes with a sleeping mat; BedInteractable swaps in better beds as you buy them).
+            var bedGo = new GameObject("Bed");
+            bedGo.transform.SetParent(root, false);
+            bedGo.transform.localPosition = new Vector3(-0.95f, Cabin.FloorTop, -0.5f);
+            bedGo.transform.localRotation = Quaternion.Euler(0f, 90f, 0f);
+            bedGo.transform.localScale = Vector3.one / scale; // real-world size inside the scaled cabin
+            bedGo.AddComponent<BedInteractable>();
 
             // Porch lantern + a warm glow in the window at night.
             var lantern = Place("HolidayKit/lantern-hanging", root, root.TransformPoint(new Vector3(0.62f, 0.98f, 1.12f)), yaw, 1f);
@@ -635,10 +742,12 @@ namespace UntitledGame.EditorTools
 
         // ------------------------------------------------------------------ market
 
-        private static readonly string[] StallModels = { "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red" };
+        private static readonly string[] StallModels = { "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green" };
         private static readonly string[] KeeperModels =
         {
             "MiniCharacters/character-male-d", "MiniCharacters/character-female-a", "MiniCharacters/character-male-e", "MiniCharacters/character-female-c",
+            "MiniCharacters/character-female-d", "MiniCharacters/character-male-c", "MiniCharacters/character-male-b", "MiniCharacters/character-female-e",
+            "MiniCharacters/character-female-b",
         };
 
         private static Bounds ModelBounds(GameObject go)
@@ -709,10 +818,11 @@ namespace UntitledGame.EditorTools
             // A bit of market clutter and a sign at the entrance.
             Vector2 entrance = c2 - new Vector2(WorldShape.MarketRadius * 0.75f, 0f);
             Place("NatureKit/sign", market, Ground(entrance.x, entrance.y + 2f), 90f + 180f, 2.8f);
-            Place("FantasyTown/cart", market, Ground(c2.x - 3f, c2.y - 7f), 30f, 1.4f);
-            Place("PirateKit/barrel", market, Ground(c2.x + 1f, c2.y + 7.8f), 0f, 0.55f);
-            Place("PirateKit/crate", market, Ground(c2.x - 1.5f, c2.y + 7.5f), 20f, 0.55f);
-            Place("FantasyTown/stall-bench", market, Ground(c2.x - 2.5f, c2.y + 3.5f), 90f, 1.6f);
+            // (Kept clear of the bookshop and trainer stalls north and south of the entrance.)
+            Place("FantasyTown/cart", market, Ground(c2.x - 11.5f, c2.y - 7.5f), 30f, 1.4f);
+            Place("PirateKit/barrel", market, Ground(c2.x - 10.6f, c2.y + 8.2f), 0f, 0.55f);
+            Place("PirateKit/crate", market, Ground(c2.x - 11.4f, c2.y + 7.4f), 20f, 0.55f);
+            Place("FantasyTown/stall-bench", market, Ground(c2.x + 1.5f, c2.y - 0.5f), 0f, 1.6f);
         }
 
         // Tuned from preview captures of Kenney's stall models.
@@ -792,6 +902,97 @@ namespace UntitledGame.EditorTools
                     PlaceItem("teddy", parent, At(0.45f), yaw + 20f);
                     break;
                 }
+                case "books":
+                    PlaceItem("book_basics", parent, At(-0.55f), yaw + 8f);
+                    PlaceItem("book_bigfish", parent, At(-0.05f), yaw - 6f);
+                    PlaceItem("book_deep", parent, At(0.45f), yaw + 14f);
+                    Place("PirateKit/crate", parent, g(-1.75f, 1.6f), yaw + 12f, 0.55f);
+                    break;
+                case "gym":
+                {
+                    // Dumbbells on the counter, built from primitives (no free dumbbell model).
+                    for (int k = 0; k < 2; k++)
+                    {
+                        var bell = new GameObject("Dumbbell");
+                        bell.transform.SetParent(parent, false);
+                        bell.transform.position = At(-0.45f + k * 0.7f) + Vector3.up * 0.09f;
+                        bell.transform.rotation = Quaternion.Euler(0f, yaw + 90f + k * 15f, 0f);
+                        var mat = ComfyAssets.PlainLitMat;
+                        void Part(PrimitiveType type, Vector3 pos, Vector3 scale, Quaternion rot)
+                        {
+                            var p = GameObject.CreatePrimitive(type);
+                            Object.DestroyImmediate(p.GetComponent<Collider>());
+                            p.transform.SetParent(bell.transform, false);
+                            p.transform.localPosition = pos;
+                            p.transform.localScale = scale;
+                            p.transform.localRotation = rot;
+                            p.GetComponent<Renderer>().sharedMaterial = mat;
+                        }
+                        Quaternion side = Quaternion.Euler(0f, 0f, 90f);
+                        Part(PrimitiveType.Cylinder, Vector3.zero, new Vector3(0.05f, 0.22f, 0.05f), side);
+                        Part(PrimitiveType.Cylinder, new Vector3(-0.2f, 0f, 0f), new Vector3(0.17f, 0.05f, 0.17f), side);
+                        Part(PrimitiveType.Cylinder, new Vector3(0.2f, 0f, 0f), new Vector3(0.17f, 0.05f, 0.17f), side);
+                        if (k == 0) Tag(bell, "training");
+                    }
+                    Place("PirateKit/barrel", parent, g(1.8f, 1.4f), yaw, 0.55f);
+                    break;
+                }
+                case "school":
+                {
+                    // A blackboard on two legs beside the counter, and a pile of books on it.
+                    var board = new GameObject("Blackboard");
+                    board.transform.SetParent(parent, false);
+                    board.transform.position = g(1.75f, 1.1f);
+                    board.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                    var dark = new Material(ComfyAssets.PlainLitMat) { name = "Blackboard" };
+                    dark.SetColor("_BaseColor", C("#2F4A3A"));
+                    dark.SetFloat("_VertexColorWeight", 0f);
+                    string darkPath = $"{ComfyAssets.MatFolder}/Blackboard.mat";
+                    AssetDatabase.DeleteAsset(darkPath);
+                    AssetDatabase.CreateAsset(dark, darkPath);
+                    void Piece(Vector3 pos, Vector3 scale, Material m)
+                    {
+                        var p = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        Object.DestroyImmediate(p.GetComponent<Collider>());
+                        p.transform.SetParent(board.transform, false);
+                        p.transform.localPosition = pos;
+                        p.transform.localScale = scale;
+                        p.GetComponent<Renderer>().sharedMaterial = m;
+                    }
+                    Piece(new Vector3(0f, 1.15f, 0f), new Vector3(1.2f, 0.8f, 0.05f), dark);
+                    Piece(new Vector3(-0.55f, 0.6f, 0.03f), new Vector3(0.06f, 1.2f, 0.06f), ComfyAssets.PlainLitMat);
+                    Piece(new Vector3(0.55f, 0.6f, 0.03f), new Vector3(0.06f, 1.2f, 0.06f), ComfyAssets.PlainLitMat);
+                    Place("FurnitureKit/books", parent, At(-0.3f), yaw + 8f, 0.2f);
+                    break;
+                }
+                case "colours":
+                {
+                    // Paint pots in three colours.
+                    string[] pots = { "#E0604E", "#4F8FC0", "#F2C94C" };
+                    for (int k = 0; k < 3; k++)
+                    {
+                        var pot = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                        Object.DestroyImmediate(pot.GetComponent<Collider>());
+                        pot.name = "PaintPot";
+                        pot.transform.SetParent(parent, false);
+                        pot.transform.position = At(-0.5f + k * 0.5f) + Vector3.up * 0.11f;
+                        pot.transform.localScale = new Vector3(0.22f, 0.11f, 0.22f);
+                        var mat = new Material(ComfyAssets.PlainLitMat) { name = "PaintPot" + k };
+                        mat.SetColor("_BaseColor", C(pots[k]));
+                        mat.SetFloat("_VertexColorWeight", 0f);
+                        string matPath = $"{ComfyAssets.MatFolder}/PaintPot{k}.mat";
+                        AssetDatabase.DeleteAsset(matPath);
+                        AssetDatabase.CreateAsset(mat, matPath);
+                        pot.GetComponent<Renderer>().sharedMaterial = mat;
+                    }
+                    break;
+                }
+                case "gifts":
+                    Tag(Place("FoodKit/cup-tea", parent, At(-0.6f), yaw + 10f, 1.2f), "gift_tea");
+                    Tag(Place("FoodKit/mug", parent, At(-0.2f), yaw - 20f, 1.2f), "gift_coffee");
+                    Tag(Place("FoodKit/loaf", parent, At(0.25f), yaw + 30f, 1.2f), "gift_bread");
+                    Place("FoodKit/apple", parent, At(0.62f), yaw, 1.2f);
+                    break;
                 case "pet":
                     Tag(Place("FurnitureKit/cardboardBoxClosed", parent, At(-0.5f), yaw + 5f, 0.1f), "cat_food");
                     Tag(Place("FoodKit/fish-bones", parent, At(0.1f), yaw + 40f, 1.1f), "cat_treat");
@@ -822,8 +1023,20 @@ namespace UntitledGame.EditorTools
         private static readonly string[] Mushrooms = { "mushroom_red", "mushroom_redGroup", "mushroom_tan", "mushroom_tanGroup", "mushroom_redTall" };
         private static readonly string[] Deadwood = { "log", "log_large", "stump_old", "stump_oldTall", "stump_round", "stump_roundDetailed" };
 
+        private static Transform _cabinRoot;
+
+        /// <summary>Inside the cabin's walls (plus a margin): no grass or flowers growing through the floor.</summary>
+        private static bool InCabin(float x, float z, float pad = 0.5f)
+        {
+            if (_cabinRoot == null) return false;
+            Vector3 l = _cabinRoot.InverseTransformPoint(new Vector3(x, _cabinRoot.position.y, z));
+            float s = _cabinRoot.lossyScale.x;
+            return Mathf.Abs(l.x) < Cabin.HalfWidth + pad / s && Mathf.Abs(l.z) < Cabin.HalfDepth + pad / s;
+        }
+
         private static bool Blocked(float x, float z, float campPad, float pathPad, Vector3 fire)
         {
+            if (InCabin(x, z)) return true;
             if (Vector2.Distance(new Vector2(x, z), WorldShape.CampCenter) < WorldShape.CampRadius + campPad) return true;
             if (WorldShape.DistanceToPath(x, z) < pathPad) return true;
             if (WorldShape.IsOnDock(x, z, 3f)) return true;
@@ -910,48 +1123,25 @@ namespace UntitledGame.EditorTools
             for (int k = 0; k < 60; k++)
             {
                 Vector2 p = WorldShape.CampCenter + Random2(R(6f, 11f));
-                if (WorldShape.DistanceToPath(p.x, p.y) < 1.5f) continue;
+                if (WorldShape.DistanceToPath(p.x, p.y) < 1.5f || InCabin(p.x, p.y)) continue;
                 Place("NatureKit/" + Pick(Flowers), small, Ground(p.x, p.y, 0.02f), R(0, 360), R(2.4f, 3.2f), shadows: false);
             }
 
-            // Shoreline rocks and reeds.
-            for (int k = 0; k < 160; k++)
+            // Rocks along the waterline and tufts of beach grass behind it.
+            for (int k = 0; k < 200; k++)
             {
-                float a = R(0, Mathf.PI * 2f);
-                float rr = WorldShape.LakeRadiusAt(a) + R(-1.6f, 2.2f);
-                float x = Mathf.Cos(a) * rr, z = Mathf.Sin(a) * rr;
-                if (Blocked(x, z, 0f, 2.5f, fire)) continue;
-                if (_rng.NextDouble() < 0.35)
+                float x = R(-WorldShape.PlayableRadius, WorldShape.PlayableRadius);
+                bool rockOut = _rng.NextDouble() < 0.4;
+                float z = WorldShape.ShoreZ(x) + (rockOut ? R(-1.5f, 3f) : -R(3f, 11f));
+                if (Blocked(x, z, 0f, 2.5f, fire) || WorldShape.IsOnDock(x, z, 3f)) continue;
+                if (rockOut)
                 {
-                    var rock = Place("NatureKit/" + Pick(BigRocks), small, Ground(x, z, 0.15f), R(0, 360), R(1.6f, 2.8f));
+                    var rock = Place("NatureKit/" + Pick(BigRocks), small, Ground(x, z, 0.15f), R(0, 360), R(1.6f, 3.2f));
                     if (rock != null && WorldShape.TerrainHeight(x, z) > -0.3f) AddBoxCollider(rock, 0.75f);
                 }
                 else
                 {
-                    Place("NatureKit/" + Pick(new[] { "grass_leafsLarge", "grass_large", "plant_flatTall" }), water, Ground(x, z, 0.02f), R(0, 360), R(3f, 4.2f), shadows: false);
-                }
-            }
-
-            // Lily pad clusters.
-            for (int k = 0; k < 16; k++)
-            {
-                float a = R(0, Mathf.PI * 2f);
-                float rr = WorldShape.LakeRadiusAt(a) - R(2.5f, 8f);
-                Vector3 c = new Vector3(Mathf.Cos(a) * rr, 0f, Mathf.Sin(a) * rr);
-                if (WorldShape.IsOnDock(c.x, c.z, 4f)) continue;
-                var cluster = new GameObject("Lilies").transform;
-                cluster.SetParent(water, false);
-                cluster.position = c;
-                cluster.gameObject.layer = 4;
-                var trig = cluster.gameObject.AddComponent<SphereCollider>();
-                trig.isTrigger = true;
-                trig.radius = 2.5f;
-                int count = _rng.Next(4, 9);
-                for (int j = 0; j < count; j++)
-                {
-                    Vector2 o = Random2(R(0.2f, 2.2f));
-                    var lily = Place("NatureKit/" + (_rng.NextDouble() < 0.6 ? "lily_large" : "lily_small"), cluster, new Vector3(c.x + o.x, 0.02f, c.z + o.y), R(0, 360), R(2.6f, 3.6f), isStatic: false, shadows: false);
-                    if (lily != null) lily.AddComponent<Floater>().Configure(0.012f, 1.2f, 0.7f);
+                    Place("NatureKit/" + Pick(new[] { "grass_leafsLarge", "grass_large", "grass" }), water, Ground(x, z, 0.02f), R(0, 360), R(2.6f, 3.6f), shadows: false);
                 }
             }
 
@@ -1073,11 +1263,12 @@ namespace UntitledGame.EditorTools
             var spots = new[] { (a: 40f, r: 18f, m: "CubePets/animal-deer", s: 0.55f), (a: 150f, r: 22f, m: "CubePets/animal-deer", s: 0.5f), (a: 250f, r: 9f, m: "CubePets/animal-bunny", s: 0.2f), (a: 300f, r: 12f, m: "CubePets/animal-fox", s: 0.3f) };
             foreach (var s in spots)
             {
-                float a = s.a * Mathf.Deg2Rad;
-                float rr = WorldShape.LakeRadiusAt(a) + s.r;
+                // (a = x position along the beach, r = how far inland)
+                float cx = Mathf.Lerp(-60f, 60f, s.a / 360f);
+                Vector2 spot = WorldShape.ShorePoint(cx) + new Vector2(0f, -s.r - 6f);
                 var go = new GameObject(Path.GetFileName(s.m));
                 go.transform.SetParent(critters, false);
-                go.transform.position = Ground(Mathf.Cos(a) * rr, Mathf.Sin(a) * rr, 0.02f);
+                go.transform.position = Ground(spot.x, spot.y, 0.02f);
                 go.transform.rotation = Quaternion.Euler(0, R(0, 360), 0);
                 var ca = AttachModel(go, s.m, s.s);
                 go.AddComponent<AmbientCritter>().Configure(ca, "idle", "eat", "idle");
@@ -1139,6 +1330,7 @@ namespace UntitledGame.EditorTools
 
             new GameObject("HomeItems").AddComponent<HomeItems>().transform.SetParent(systems, false);
             new GameObject("Placement").AddComponent<PlacementController>().transform.SetParent(systems, false);
+            player.AddComponent<ShopConversation>();
             var interaction = player.AddComponent<InteractionController>();
 
             // Weather + rain.
@@ -1183,15 +1375,19 @@ namespace UntitledGame.EditorTools
             var spots = new List<Vector3> { new Vector3(WorldShape.CampCenter.x, 1.2f, WorldShape.CampCenter.y) };
             for (int k = 0; k < 7; k++)
             {
-                float a = k / 7f * Mathf.PI * 2f + 0.3f;
-                float rr2 = WorldShape.LakeRadiusAt(a) + 3f;
-                spots.Add(new Vector3(Mathf.Cos(a) * rr2, WorldShape.TerrainHeight(Mathf.Cos(a) * rr2, Mathf.Sin(a) * rr2) + 1.2f, Mathf.Sin(a) * rr2));
+                Vector2 fp = WorldShape.ShorePoint(-54f + k * 18f) + new Vector2(0f, -6f);
+                spots.Add(new Vector3(fp.x, WorldShape.TerrainHeight(fp.x, fp.y) + 1.2f, fp.y));
             }
             foreach (var s in spots) BuildFireflies(ff, s);
 
             // UI.
             var uiGo = new GameObject("UI");
             uiGo.transform.SetParent(systems, false);
+            var sleepGo = new GameObject("Sleep");
+            sleepGo.transform.SetParent(systems, false);
+            sleepGo.AddComponent<SleepSystem>();
+            sleepGo.AddComponent<Cosmetics>();
+
             var ui = uiGo.AddComponent<GameUI>();
             ui.Configure(brain, player.transform, player.GetComponent<FishingController>(), vc, interaction);
         }

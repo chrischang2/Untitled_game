@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using UntitledGame.Environment;
+using UntitledGame.Economy;
 
 namespace UntitledGame.Fishing
 {
@@ -21,7 +21,14 @@ namespace UntitledGame.Fishing
 
     public enum CatchModel { SmallFish, LargeFish, Bottle, Teacup, Driftwood }
 
-    /// <summary>One catchable thing. Chinese names are here from day one for the language-learning mode.</summary>
+    /// <summary>How the fish moves in the reeling minigame (as in Stardew Valley).</summary>
+    public enum FishMotion { Mixed, Smooth, Sinker, Floater, Dart }
+
+    /// <summary>
+    /// One kind of sea creature. A fish can only bite once every requirement is met: the player has read about it
+    /// (a book from 周老师), the bobber is far enough from the shore, the bait on the hook is one it likes, the line is
+    /// strong enough for it, and it's the right time of day. Weights are random within a real-life range.
+    /// </summary>
     public class FishSpecies
     {
         public string id;
@@ -29,12 +36,16 @@ namespace UntitledGame.Fishing
         public string hanzi;
         public string pinyin;
         public Rarity rarity;
-        public float minLength;
-        public float maxLength;
+        public float minWeight;          // kg
+        public float maxWeight;          // kg
         public TimeWindow times = TimeWindow.Any;
-        public float minDepth;
         public bool likesRain;
-        public float difficulty; // 0 (calm) .. 1 (feisty)
+        public int difficulty;           // 0-100: how wild it is in the minigame
+        public FishMotion motion = FishMotion.Mixed;
+        public float barSize = 0.28f;    // the green bar's height for this fish (fraction of the track), before upgrades
+        public float minDistance;        // metres from the shoreline the bobber must be
+        public string[] baits = new string[0]; // bait item ids it bites on; "none" = a plain hook works too
+        public float lineKg;             // line strength (kg) needed
         public Color body = Color.gray;
         public Color fins = Color.white;
         public Color glow = Color.clear;
@@ -42,85 +53,105 @@ namespace UntitledGame.Fishing
         public string blurb;
 
         public bool IsFish => rarity != Rarity.Junk;
-        public string LengthText(float cm) => IsFish ? $"{cm:0.#} cm" : "";
+        public float MinShoreDistance => minDistance;
+        public bool TakesPlainHook => baits.Contains("none");
     }
 
     public struct CatchContext
     {
         public float hour;
-        public float depth;
         public bool raining;
-        public bool nearLilies;
-        public Economy.ItemDef bait;   // null = plain hook
-        public float rareBonus;        // from the rod
+        public ItemDef bait;           // null = plain hook
+        public float lineKg;           // strength of the line on the rod
+        public float shoreDistance;    // how far out the bobber is, in metres from the shoreline
     }
 
     public static class FishDatabase
     {
         private static Color C(string hex) => ColorUtility.TryParseHtmlString(hex, out var c) ? c : Color.magenta;
 
+        public const string PlainHook = "none";
+
         public static readonly List<FishSpecies> All = new List<FishSpecies>
         {
-            new FishSpecies { id = "minnow", name = "Minnow", hanzi = "小鱼", pinyin = "xiǎo yú", rarity = Rarity.Common,
-                minLength = 4, maxLength = 9, difficulty = 0.05f, body = C("#B9C7CF"), fins = C("#8FA3AD"),
-                blurb = "Tiny, quick and everywhere. Everybody's first catch." },
-            new FishSpecies { id = "bluegill", name = "Bluegill", hanzi = "蓝鳃鱼", pinyin = "lán sāi yú", rarity = Rarity.Common,
-                minLength = 10, maxLength = 24, times = TimeWindow.Morning | TimeWindow.Day, minDepth = 0.4f, difficulty = 0.15f,
-                body = C("#5C8FB8"), fins = C("#F0A04B"), blurb = "Loves warm shallows and sunny afternoons." },
-            new FishSpecies { id = "crucian", name = "Crucian Carp", hanzi = "鲫鱼", pinyin = "jì yú", rarity = Rarity.Common,
-                minLength = 10, maxLength = 32, minDepth = 0.6f, difficulty = 0.2f, body = C("#C9A95B"), fins = C("#A7773C"),
-                blurb = "A golden little carp that makes the best fish soup." },
-            new FishSpecies { id = "perch", name = "Perch", hanzi = "河鲈", pinyin = "hé lú", rarity = Rarity.Common,
-                minLength = 15, maxLength = 40, times = TimeWindow.Morning | TimeWindow.Day, minDepth = 0.8f, difficulty = 0.3f,
-                body = C("#9DB35A"), fins = C("#E0663A"), blurb = "Striped and bold, hunts in little gangs." },
-            new FishSpecies { id = "loach", name = "Loach", hanzi = "泥鳅", pinyin = "ní qiu", rarity = Rarity.Common,
-                minLength = 8, maxLength = 20, times = TimeWindow.Evening | TimeWindow.Night, likesRain = true, difficulty = 0.2f,
-                body = C("#8A6B4A"), fins = C("#5E4632"), blurb = "Wriggly mud-dweller. Comes out when it rains." },
-            new FishSpecies { id = "carp", name = "Common Carp", hanzi = "鲤鱼", pinyin = "lǐ yú", rarity = Rarity.Uncommon,
-                minLength = 30, maxLength = 80, minDepth = 1.2f, difficulty = 0.45f, model = CatchModel.LargeFish,
-                body = C("#B58A45"), fins = C("#C0603A"), blurb = "A strong, patient fish. A symbol of luck and perseverance." },
-            new FishSpecies { id = "grass_carp", name = "Grass Carp", hanzi = "草鱼", pinyin = "cǎo yú", rarity = Rarity.Uncommon,
-                minLength = 40, maxLength = 100, times = TimeWindow.Day, minDepth = 1.2f, difficulty = 0.5f, model = CatchModel.LargeFish,
-                body = C("#8C9A5C"), fins = C("#6B7445"), blurb = "Munches water plants all day long." },
-            new FishSpecies { id = "trout", name = "Rainbow Trout", hanzi = "虹鳟", pinyin = "hóng zūn", rarity = Rarity.Uncommon,
-                minLength = 25, maxLength = 60, times = TimeWindow.Morning | TimeWindow.Evening, minDepth = 1.5f, difficulty = 0.55f,
-                model = CatchModel.LargeFish, body = C("#9FB7C9"), fins = C("#E57A9A"), blurb = "Shimmers pink and silver in the low sun." },
-            new FishSpecies { id = "bass", name = "Largemouth Bass", hanzi = "大口黑鲈", pinyin = "dà kǒu hēi lú", rarity = Rarity.Uncommon,
-                minLength = 25, maxLength = 60, times = TimeWindow.Morning | TimeWindow.Evening, minDepth = 1f, difficulty = 0.5f,
-                model = CatchModel.LargeFish, body = C("#5E8A4C"), fins = C("#3E5E33"), blurb = "Ambushes from the lily pads." },
-            new FishSpecies { id = "catfish", name = "Catfish", hanzi = "鲶鱼", pinyin = "nián yú", rarity = Rarity.Uncommon,
-                minLength = 30, maxLength = 90, times = TimeWindow.Evening | TimeWindow.Night, minDepth = 2f, likesRain = true,
-                difficulty = 0.55f, model = CatchModel.LargeFish, body = C("#5B5F66"), fins = C("#3B3E44"),
-                blurb = "Whiskered night owl of the lake bottom." },
-            new FishSpecies { id = "koi", name = "Golden Koi", hanzi = "锦鲤", pinyin = "jǐn lǐ", rarity = Rarity.Rare,
-                minLength = 30, maxLength = 70, times = TimeWindow.Morning, minDepth = 0.8f, difficulty = 0.5f,
-                model = CatchModel.LargeFish, body = C("#F08A2E"), fins = C("#FFF2DC"), blurb = "Said to bring good fortune to whoever sees one." },
-            new FishSpecies { id = "pike", name = "Pike", hanzi = "狗鱼", pinyin = "gǒu yú", rarity = Rarity.Rare,
-                minLength = 50, maxLength = 120, times = TimeWindow.Day, minDepth = 2f, difficulty = 0.75f, model = CatchModel.LargeFish,
-                body = C("#6E8F4E"), fins = C("#B3A04A"), blurb = "Toothy and dramatic. Hold on tight!" },
-            new FishSpecies { id = "snakehead", name = "Snakehead", hanzi = "黑鱼", pinyin = "hēi yú", rarity = Rarity.Rare,
-                minLength = 40, maxLength = 90, times = TimeWindow.Day | TimeWindow.Evening, minDepth = 1f, difficulty = 0.7f,
-                model = CatchModel.LargeFish, body = C("#3F4A3A"), fins = C("#6B5A3A"), blurb = "Can gulp air. A little bit grumpy." },
-            new FishSpecies { id = "eel", name = "Eel", hanzi = "鳗鱼", pinyin = "mán yú", rarity = Rarity.Rare,
-                minLength = 40, maxLength = 100, times = TimeWindow.Night, minDepth = 2f, likesRain = true, difficulty = 0.65f,
-                body = C("#4D5A3A"), fins = C("#6E7A4A"), blurb = "Slippery traveller of rainy nights." },
-            new FishSpecies { id = "sturgeon", name = "Old Sturgeon", hanzi = "鲟鱼", pinyin = "xún yú", rarity = Rarity.Legendary,
-                minLength = 100, maxLength = 200, times = TimeWindow.Night, minDepth = 3.5f, difficulty = 0.95f,
-                model = CatchModel.LargeFish, body = C("#6F7A80"), fins = C("#A8B0B5"), blurb = "An ancient giant of the deep water. Mei's never seen one." },
-            new FishSpecies { id = "moon_koi", name = "Moonlight Koi", hanzi = "月光锦鲤", pinyin = "yuè guāng jǐn lǐ", rarity = Rarity.Legendary,
-                minLength = 50, maxLength = 80, times = TimeWindow.Night, minDepth = 1.5f, difficulty = 0.85f, model = CatchModel.LargeFish,
-                body = C("#CFE3FF"), fins = C("#9CC3FF"), glow = new Color(0.25f, 0.4f, 0.8f), blurb = "Glows softly under the stars. A lake legend." },
-            new FishSpecies { id = "bottle", name = "Message in a Bottle", hanzi = "漂流瓶", pinyin = "piāo liú píng", rarity = Rarity.Junk,
-                model = CatchModel.Bottle, blurb = "There's a tiny note inside... it just says \"hi :)\"" },
-            new FishSpecies { id = "teacup", name = "Lost Teacup", hanzi = "茶杯", pinyin = "chá bēi", rarity = Rarity.Junk,
-                model = CatchModel.Teacup, blurb = "Somebody's favourite cup. Mei might want it." },
-            new FishSpecies { id = "driftwood", name = "Driftwood", hanzi = "浮木", pinyin = "fú mù", rarity = Rarity.Junk,
-                model = CatchModel.Driftwood, blurb = "Smooth and sun-bleached. Good for the campfire." },
+            // ---- near the beach (known from the start / 钓鱼入门)
+            new FishSpecies { id = "sardine", name = "Sardine", hanzi = "沙丁鱼", pinyin = "shā dīng yú", rarity = Rarity.Common,
+                minWeight = 0.03f, maxWeight = 0.15f, difficulty = 15, motion = FishMotion.Smooth, barSize = 0.34f, minDistance = 0f,
+                baits = new[] { PlainHook, "bait_worm", "bait_dough" }, lineKg = 1f, body = C("#9FB4C4"), fins = C("#6F8798"),
+                blurb = "Small, silvery and everywhere. Everybody's first catch." },
+            new FishSpecies { id = "croaker", name = "Yellow Croaker", hanzi = "小黄鱼", pinyin = "xiǎo huáng yú", rarity = Rarity.Common,
+                minWeight = 0.1f, maxWeight = 0.6f, times = TimeWindow.Morning | TimeWindow.Day | TimeWindow.Evening, difficulty = 25,
+                motion = FishMotion.Mixed, barSize = 0.30f, minDistance = 2f, baits = new[] { "bait_worm", "bait_shrimp" }, lineKg = 1f,
+                body = C("#E2C25A"), fins = C("#C99A35"), blurb = "Golden and chatty: it really does croak." },
+            new FishSpecies { id = "flounder", name = "Flounder", hanzi = "比目鱼", pinyin = "bǐ mù yú", rarity = Rarity.Common,
+                minWeight = 0.3f, maxWeight = 2.5f, likesRain = true, difficulty = 30, motion = FishMotion.Sinker, barSize = 0.28f, minDistance = 3f,
+                baits = new[] { "bait_worm", "bait_shrimp" }, lineKg = 2f, body = C("#A68B66"), fins = C("#7E6648"),
+                blurb = "Flat as a plate, with both eyes on one side." },
+            new FishSpecies { id = "mackerel", name = "Mackerel", hanzi = "鲭鱼", pinyin = "qīng yú", rarity = Rarity.Common,
+                minWeight = 0.3f, maxWeight = 1.2f, times = TimeWindow.Morning | TimeWindow.Day, difficulty = 40, motion = FishMotion.Dart,
+                barSize = 0.26f, minDistance = 6f, baits = new[] { "bait_worm", "bait_shrimp" }, lineKg = 2f,
+                body = C("#4E7FA0"), fins = C("#2F4E63"), blurb = "Striped, fast, and travels in big shiny schools." },
+            new FishSpecies { id = "pufferfish", name = "Pufferfish", hanzi = "河豚", pinyin = "hé tún", rarity = Rarity.Uncommon,
+                minWeight = 0.2f, maxWeight = 1.5f, times = TimeWindow.Day | TimeWindow.Evening, difficulty = 55, motion = FishMotion.Floater,
+                barSize = 0.22f, minDistance = 5f, baits = new[] { "bait_shrimp", "bait_crab" }, lineKg = 2f,
+                body = C("#D9C27A"), fins = C("#A88F4C"), blurb = "Puffs up into a spiky ball when it's cross." },
+
+            // ---- the shore (海边的鱼)
+            new FishSpecies { id = "seabream", name = "Sea Bream", hanzi = "鲷鱼", pinyin = "diāo yú", rarity = Rarity.Uncommon,
+                minWeight = 0.5f, maxWeight = 4f, times = TimeWindow.Morning | TimeWindow.Day, difficulty = 50, motion = FishMotion.Mixed,
+                barSize = 0.24f, minDistance = 10f, baits = new[] { "bait_shrimp", "bait_crab", "bait_squid" }, lineKg = 5f,
+                body = C("#E28A86"), fins = C("#B9585A"), model = CatchModel.LargeFish, blurb = "Pink and lucky: the fish for celebrations." },
+            new FishSpecies { id = "seabass", name = "Sea Bass", hanzi = "鲈鱼", pinyin = "lú yú", rarity = Rarity.Uncommon,
+                minWeight = 0.5f, maxWeight = 6f, times = TimeWindow.Morning | TimeWindow.Evening | TimeWindow.Night, likesRain = true,
+                difficulty = 55, motion = FishMotion.Mixed, barSize = 0.24f, minDistance = 8f, baits = new[] { "bait_shrimp", "bait_fish" },
+                lineKg = 6f, body = C("#8E9EA6"), fins = C("#5D6B72"), model = CatchModel.LargeFish, blurb = "Hunts along the shore when the light is low." },
+            new FishSpecies { id = "hairtail", name = "Hairtail", hanzi = "带鱼", pinyin = "dài yú", rarity = Rarity.Uncommon,
+                minWeight = 0.3f, maxWeight = 2f, times = TimeWindow.Evening | TimeWindow.Night, difficulty = 60, motion = FishMotion.Dart,
+                barSize = 0.22f, minDistance = 14f, baits = new[] { "bait_squid", "bait_fish" }, lineKg = 3f,
+                body = C("#D7DDE3"), fins = C("#A9B3BC"), blurb = "Long, thin and shiny like a silver ribbon." },
+
+            // ---- under the rocks (石头下的鱼)
+            new FishSpecies { id = "octopus", name = "Octopus", hanzi = "章鱼", pinyin = "zhāng yú", rarity = Rarity.Uncommon,
+                minWeight = 1f, maxWeight = 8f, times = TimeWindow.Evening | TimeWindow.Night, difficulty = 65, motion = FishMotion.Sinker,
+                barSize = 0.22f, minDistance = 6f, baits = new[] { "bait_crab" }, lineKg = 6f,
+                body = C("#B5655A"), fins = C("#8B4740"), model = CatchModel.LargeFish, blurb = "Clever, shy and very good at hiding." },
+            new FishSpecies { id = "conger", name = "Conger Eel", hanzi = "海鳗", pinyin = "hǎi mán", rarity = Rarity.Rare,
+                minWeight = 1f, maxWeight = 12f, times = TimeWindow.Night, likesRain = true, difficulty = 70, motion = FishMotion.Smooth,
+                barSize = 0.20f, minDistance = 12f, baits = new[] { "bait_squid", "bait_fish" }, lineKg = 15f,
+                body = C("#5B5E52"), fins = C("#3E4038"), model = CatchModel.LargeFish, blurb = "Lives in rocky holes and comes out on rainy nights." },
+            new FishSpecies { id = "grouper", name = "Grouper", hanzi = "石斑鱼", pinyin = "shí bān yú", rarity = Rarity.Rare,
+                minWeight = 2f, maxWeight = 25f, times = TimeWindow.Day | TimeWindow.Evening, difficulty = 72, motion = FishMotion.Sinker,
+                barSize = 0.20f, minDistance = 18f, baits = new[] { "bait_crab", "bait_fish" }, lineKg = 15f,
+                body = C("#8B6A4A"), fins = C("#5E4632"), model = CatchModel.LargeFish, blurb = "A heavy, spotty rock-dweller with a huge mouth." },
+
+            // ---- the open sea (远海的鱼): the boat
+            new FishSpecies { id = "skipjack", name = "Skipjack Tuna", hanzi = "鲣鱼", pinyin = "jiān yú", rarity = Rarity.Rare,
+                minWeight = 2f, maxWeight = 8f, times = TimeWindow.Morning | TimeWindow.Day, difficulty = 75, motion = FishMotion.Dart,
+                barSize = 0.19f, minDistance = 30f, baits = new[] { "bait_fish", "bait_squid" }, lineKg = 15f,
+                body = C("#3F5E86"), fins = C("#9FB3C9"), model = CatchModel.LargeFish, blurb = "A little tuna that never stops swimming." },
+            new FishSpecies { id = "sailfish", name = "Sailfish", hanzi = "旗鱼", pinyin = "qí yú", rarity = Rarity.Rare,
+                minWeight = 25f, maxWeight = 90f, times = TimeWindow.Day, difficulty = 85, motion = FishMotion.Dart,
+                barSize = 0.17f, minDistance = 45f, baits = new[] { "bait_fish", "bait_squid" }, lineKg = 40f,
+                body = C("#2E5C9A"), fins = C("#6FA0D8"), model = CatchModel.LargeFish, blurb = "The fastest fish in the sea, with a sail on its back." },
+            new FishSpecies { id = "shark", name = "Blue Shark", hanzi = "鲨鱼", pinyin = "shā yú", rarity = Rarity.Legendary,
+                minWeight = 30f, maxWeight = 150f, times = TimeWindow.Evening | TimeWindow.Night, difficulty = 88, motion = FishMotion.Mixed,
+                barSize = 0.17f, minDistance = 50f, baits = new[] { "bait_squid", "bait_fish" }, lineKg = 40f,
+                body = C("#4F78A8"), fins = C("#C9D6E3"), model = CatchModel.LargeFish, blurb = "Long, blue and elegant. Mei pretends she isn't scared." },
+
+            // ---- legends (海的传说)
+            new FishSpecies { id = "tuna", name = "Bluefin Tuna", hanzi = "金枪鱼", pinyin = "jīn qiāng yú", rarity = Rarity.Legendary,
+                minWeight = 60f, maxWeight = 250f, times = TimeWindow.Morning | TimeWindow.Day, difficulty = 92, motion = FishMotion.Mixed,
+                barSize = 0.15f, minDistance = 60f, baits = new[] { "bait_fish" }, lineKg = 80f,
+                body = C("#273F66"), fins = C("#D9B44A"), model = CatchModel.LargeFish, blurb = "The king of the sea. Old Wang has dreamed of one for years." },
+            new FishSpecies { id = "oarfish", name = "Oarfish", hanzi = "皇带鱼", pinyin = "huáng dài yú", rarity = Rarity.Legendary,
+                minWeight = 40f, maxWeight = 200f, times = TimeWindow.Night, difficulty = 95, motion = FishMotion.Floater,
+                barSize = 0.15f, minDistance = 55f, baits = new[] { "bait_glow" }, lineKg = 40f,
+                body = C("#E3E7EE"), fins = C("#E0604E"), glow = new Color(0.3f, 0.45f, 0.85f), model = CatchModel.LargeFish,
+                blurb = "A silver giant from the deep, said to rise only on dark nights." },
+
         };
 
         public static FishSpecies Get(string id) => All.FirstOrDefault(f => f.id == id);
-
-        public static int CatchableFishCount => All.Count;
 
         public static TimeWindow WindowFor(float hour)
         {
@@ -132,46 +163,41 @@ namespace UntitledGame.Fishing
 
         private static float RarityWeight(Rarity r) => r switch
         {
-            Rarity.Junk => 3f,
+            Rarity.Junk => 2.5f,
             Rarity.Common => 16f,
-            Rarity.Uncommon => 7f,
-            Rarity.Rare => 2.2f,
-            Rarity.Legendary => 0.45f,
+            Rarity.Uncommon => 9f,
+            Rarity.Rare => 4f,
+            Rarity.Legendary => 1.4f,
             _ => 1f,
         };
 
-        public static IEnumerable<FishSpecies> Available(CatchContext ctx)
+        /// <summary>
+        /// Why this fish can't bite right now, or null if every requirement is met (junk only needs nothing).
+        /// </summary>
+        public static string Missing(FishSpecies f, CatchContext ctx)
         {
-            var window = WindowFor(ctx.hour);
-            return All.Where(f => (f.times & window) != 0 && ctx.depth + 0.01f >= f.minDepth);
+            if (!f.IsFish) return null;
+            if (!Progression.PlayerStats.IsDiscovered(f)) return "undiscovered";
+            if ((f.times & WindowFor(ctx.hour)) == 0) return "wrong time of day";
+            if (ctx.shoreDistance + 0.01f < f.minDistance) return $"too close to the shore (needs {f.minDistance:0} m out)";
+            string bait = ctx.bait != null ? ctx.bait.id : PlainHook;
+            if (!f.baits.Contains(bait)) return "doesn't like this bait";
+            if (ctx.lineKg + 0.01f < f.lineKg) return $"line too weak (needs {f.lineKg:0} kg)";
+            return null;
         }
+
+        public static IEnumerable<FishSpecies> Available(CatchContext ctx) => All.Where(f => Missing(f, ctx) == null);
 
         public static FishSpecies Roll(CatchContext ctx, System.Random rng = null)
         {
             var options = Available(ctx).ToList();
-            if (options.Count == 0) return All[0];
+            if (options.Count == 0) return null; // nothing here wants this bait / line / spot
             float Weight(FishSpecies f)
             {
                 float w = RarityWeight(f.rarity);
-                if (ctx.raining && f.likesRain) w *= 2.2f;
-                if (ctx.nearLilies && (f.id == "bass" || f.id == "koi" || f.id == "bluegill")) w *= 1.8f;
-                if (f.minDepth > 1.5f) w *= Mathf.Lerp(0.6f, 1.4f, Mathf.InverseLerp(f.minDepth, f.minDepth + 2f, ctx.depth));
-                if (f.rarity == Rarity.Rare) w *= 1f + ctx.rareBonus;
-                if (f.rarity == Rarity.Legendary) w *= 1f + ctx.rareBonus * 2f;
-                var b = ctx.bait;
-                if (b != null && (!b.nightOnly || WindowFor(ctx.hour) == TimeWindow.Night))
-                {
-                    w *= f.rarity switch
-                    {
-                        Rarity.Common => b.commonMult,
-                        Rarity.Uncommon => b.uncommonMult,
-                        Rarity.Rare => b.rareMult,
-                        Rarity.Legendary => b.legendaryMult,
-                        _ => 1f,
-                    };
-                    if (b.favouredFish != null && System.Array.IndexOf(b.favouredFish, f.id) >= 0) w *= 2.4f;
-                    if (f.rarity == Rarity.Junk) w *= 0.6f;
-                }
+                if (ctx.raining && f.likesRain) w *= 2f;
+                // Further out than it needs to be: still bites, a bit more often for deep-water fish.
+                if (f.minDistance > 0f && ctx.shoreDistance > f.minDistance + 10f) w *= 1.2f;
                 return w;
             }
             float total = options.Sum(Weight);
@@ -184,13 +210,16 @@ namespace UntitledGame.Fishing
             return options[options.Count - 1];
         }
 
-        public static float RollLength(FishSpecies f)
+        /// <summary>A weight within the species' range; the quality upgrade makes big ones more likely.</summary>
+        public static float RollWeight(FishSpecies f, int qualityLevel = 0)
         {
-            if (!f.IsFish) return 0f;
-            // Bias towards smaller fish; big ones are special.
-            float t = Mathf.Pow(UnityEngine.Random.value, 1.6f);
-            return Mathf.Round(Mathf.Lerp(f.minLength, f.maxLength, t) * 10f) / 10f;
+            float bias = 1.8f / (1f + 0.4f * Mathf.Max(0, qualityLevel)); // >1 favours small fish, <1 big ones
+            float t = Mathf.Pow(UnityEngine.Random.value, bias);
+            float kg = Mathf.Lerp(f.minWeight, f.maxWeight, t);
+            return kg < 1f ? Mathf.Round(kg * 1000f) / 1000f : Mathf.Round(kg * 100f) / 100f;
         }
+
+        public static string WeightText(float kg) => kg < 1f ? $"{kg * 1000f:0} g" : $"{kg:0.##} kg";
 
         public static string RarityLabel(Rarity r) => r switch
         {
@@ -226,21 +255,42 @@ namespace UntitledGame.Fishing
         public static string WhereText(FishSpecies f)
         {
             if (!f.IsFish) return "anywhere";
-            if (f.minDepth >= 3f) return "the deepest water";
-            if (f.minDepth >= 1.5f) return "deep water";
-            if (f.minDepth >= 0.8f) return "a little way out";
-            return "shallows";
+            if (f.minDistance >= 30f) return $"{f.minDistance:0}+ m out (boat)";
+            if (f.minDistance <= 0f) return "right by the beach";
+            return $"{f.minDistance:0}+ m from shore";
         }
+
+        /// <summary>"Earthworms, Shrimp Bait (or a plain hook)".</summary>
+        public static string BaitText(FishSpecies f)
+        {
+            var names = f.baits.Where(b => b != PlainHook).Select(b => Catalog.Get(b)?.english ?? b).ToList();
+            string list = names.Count > 0 ? string.Join(", ", names) : "";
+            if (f.TakesPlainHook) list = list.Length > 0 ? list + " (or a plain hook)" : "a plain hook";
+            return list;
+        }
+
+        public static string LineText(FishSpecies f)
+        {
+            var line = Catalog.LineFor(f.lineKg);
+            return line != null ? $"{line.english} ({f.lineKg:0} kg)" : $"a {f.lineKg:0} kg line";
+        }
+
+        /// <summary>The book that teaches about this fish (null if it's known from the start).</summary>
+        public static ItemDef BookFor(FishSpecies f) =>
+            Catalog.Items.FirstOrDefault(i => i.category == ItemCategory.Book && i.teachesFish != null && i.teachesFish.Contains(f.id));
     }
 
-    /// <summary>What the player caught, with its rolled size.</summary>
+    /// <summary>What the player caught, with its rolled weight (kg; the field keeps its old name for saves).</summary>
     public class CatchResult
     {
         public FishSpecies species;
-        public float length;
+        public float length;           // weight in kg
+        public float Weight => length;
         public bool isNewSpecies;
         public bool isRecord;
         public bool inBucket;
+        public bool perfect;
+        public bool bonus;
         public Vector3 position;
     }
 }

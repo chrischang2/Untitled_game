@@ -2,8 +2,9 @@
 
 A cozy low-poly fishing game in Unity 6 (URP) for learning Mandarin by talking. You fish off a little dock with your friend and tutor **Mei**, and look after your cat **汤圆 Tangyuan**. At the market you buy and sell things with the locals, speaking Chinese with your real voice. They talk back out loud.
 
-- **All dialogue is in Mandarin.** The menus stay in English.
-- **The four shopkeepers speak only Mandarin.** They don't understand English at all.
+- **All dialogue is in Mandarin.** The menus start in English and turn Chinese as you pass HSK tests.
+- **The nine shopkeepers speak only Mandarin.** They don't understand English at all.
+- **Mei only speaks when spoken to**, apart from saying hello when you open the game.
 - **Mei is your only source of Chinese.** Ask her anything, in English or Chinese, and she teaches you exactly what you need, one phrase at a time: how to greet 老王, ask 多少钱, say 我想卖鱼, or buy 猫粮.
 - **Pinyin is added by the game.** It comes from the CC-CEDICT dictionary, never from the AI, so it is always correct. The words Mei teaches go into your notebook.
 
@@ -12,19 +13,28 @@ Everything runs locally on your PC:
 ```
   hold V, speak ──► SenseVoice (speech → text, Mandarin) ──► llama.cpp + Qwen3.5-4B (streamed)
                                                                 │ sentence by sentence
-  they talk ◄── Matcha / Piper voices (sherpa-onnx) ◄──────────┘
+  they talk ◄── Kokoro / Piper voices (sherpa-onnx)  ◄──────────┘
 ```
 
 ## The market (southeast of the cabin)
 | Stall | Keeper | Sells / buys |
 |---|---|---|
-| 渔具店 Tackle shop | 老王 Old Wang | rods (bamboo, carbon, golden), bait (worms, shrimp, dough, glow lure), a big bucket, strong line, a fancy float |
-| 鱼店 Fish market | 陈阿姨 Auntie Chen | **buys your fish**. Rarer and bigger fish pay more |
+| 渔具店 Tackle shop | 老王 Old Wang | **baits** (worms, dough, shrimp, squid, crabs, live baitfish, glow lure: each fish only bites on certain ones), **lines** (红/蓝/黑/金线: 6/15/40/80 kg, for heavier fish), his rowboat, a big bucket, a fancy float |
+| 鱼店 Fish market | 陈阿姨 Auntie Chen | **buys your fish**. Rarer and bigger fish pay more, and passing HSK tests adds +10% / +20% / +35% automatically |
 | 家具店 Furniture shop | 李师傅 Master Li | chairs, tables, a sofa, lamps, plants, a rug, a bookcase, a radio, a teddy bear… for your camp |
 | 宠物店 Pet shop | 小林 Xiao Lin | cat food, dried-fish treats, a bowl, a bed, a box, yarn, a scratching post, a bell collar for Tangyuan |
+| 书店 Bookshop | 周老师 Teacher Zhou | fishing books. **Reading one (bag → Read) teaches you new fish**: how far out they swim, what bait they like, what line they need. A new game only knows the sardine |
+| 颜色店 Colour shop | 小方 Xiao Fang | cosmetics: boat paint, hats for Tangyuan, sun hats for Mei, roof colours for the house |
+| 礼品店 Gift shop | 刘奶奶 Granny Liu | gifts for the shopkeepers (flowers, tea, coffee, cake, fruit, sweets, a hat, an umbrella, a watch...). She knows what everyone likes, if you ask her |
+| 健身房 Fitness trainer | 武教练 Coach Wu | six trainings, five levels each: 力量 (cast further), 眼睛 (wider green bar), 跑步 (fish escape slower), 运气 (bonus fish), 技术 (heavier fish), 安静 (faster bites). Friends can train higher |
+| 考试中心 Test centre | 高老师 Teacher Gao | **lessons, free practice and HSK 1–3 tests** (see below). Nothing for sale |
+
+**Unlocking goods takes two things:** enough friendship with the seller, and (for the better goods) a passed HSK test. The shop window shows what each locked item needs.
 
 How shopping works:
-1. Walk up to a stall, face the keeper, hold **V** and say something like 老板，我想买竹鱼竿 or 阿姨，我想卖鱼.
+1. Walk up to a stall, face the keeper and press **E**. They greet you and the **shop window** opens on the right with everything they sell (or, at the fish market, your catch). Hold **V** and say something like 老板，我想买竹鱼竿 or 阿姨，我想卖鱼, **Everything with shopkeepers is spoken**: the shop window only lists the wares (and your friendship); there are no buy buttons, and typing (T) only goes to Mei.
+   - Stuck? Hold **B** to ask Mei quietly, in English if you like: "what did he just say?" or "how do I say I want the cheaper one?". She knows the whole conversation so far. The keeper waits, and the offer stays open.
+   - Press **E** again, say 再见, or just walk away to leave.
 2. The game works out what you asked for:
    - Clear lines are read by rules. Item names are matched by sound, so a slightly wrong tone still works.
    - Unclear lines go to a small AI classifier.
@@ -32,6 +42,26 @@ How shopping works:
 4. Say 要 or 可以 to accept, or 不要了 to decline. You can also press **Y** or **X** on the offer card.
 
 The keepers can't invent prices or give things away: the game decides, and they just narrate it.
+
+## Lessons and HSK tests (高老师's test centre)
+Everything is spoken. Press **E** at the test centre and say:
+- **我想上课**: the next lesson. You repeat each of its words after her (the window shows the characters, pinyin and English), then she quizzes you on 8 of them from English. Get 6 right to pass. **Passing a lesson the first time pays** ¥40 (HSK 1), ¥60 (HSK 2) or ¥70 (HSK 3). Say 第三课 to pick a lesson.
+- **我想练习**: free practice with 10 random words, including ones you got wrong before. It never pays.
+- **我想考试**: the next HSK test. She asks 20 words from English, and you need 15. Take it as often as you like. After each answer the window shows what it heard (with pinyin): press **Y** if that's what you said, or **N** (or just say it again) to retry.
+
+When a lesson or test ends, a big banner says whether you passed, and Teacher Gao's window keeps the result with the words you missed.
+
+In a lesson, 不知道 skips a word, 不学了 stops, and walking away ends it.
+
+| Level | Lessons | Words | Passing the test unlocks |
+|---|---|---|---|
+| HSK 1 | 11, by theme | 150 | fish +10%, blue line, squid & crab bait, good oars, huge bucket, *Fish under the Rocks*, double bed, sofa, radio, new cosmetics |
+| HSK 2 | 10 | 147 | fish +20%, black line, live baitfish, sail, giant bucket, *Fish of the Open Sea*, big bed, new cosmetics |
+| HSK 3 | 20 | 298 | fish +35%, gold line, glow lure, new boat (the island), *Legends of the Sea*, golden cosmetics |
+
+The lessons of each level cover every word of it once. HSK 1's are grouped by theme: hello and thank you, numbers and money, family and people, time and dates, food and shopping, places, things around you, everyday actions, describing things, questions, and little words. Answers are checked by the game, not the AI. The word itself counts, and so does anything heard with the same pinyin ignoring tones, in any of its readings (喝 heard as 和, 菜 as 才). The consonants and vowels still have to be right (书 shū isn't 十 shí). In a lesson you can also say "skip" in English.
+
+**More Chinese as you go.** Each interface label has an HSK level. At that level it shows both languages, and after the next test only the Chinese. From HSK 1 the clock, day, money and bag are in Chinese (上午 10:20, 第3天, 2651块, 鱼 2/8), and later the hints, tabs and window titles follow.
 
 ## Quick start
 
@@ -54,22 +84,35 @@ The keepers can't invent prices or give things away: the game decides, and they 
 | **Right mouse drag**, **scroll** | look around, zoom |
 | **Hold left mouse**, release | charge and cast (aim with the camera) |
 | **Click** when the bobber dives | hook the fish |
-| **Hold left mouse** | reel in. **Let go when the fish pulls**, or the line snaps |
-| **E** or move | reel your line back in |
-| **Hold V** | talk to whoever you're facing: a shopkeeper at their stall, otherwise Mei |
-| **Hold B** | always talk to Mei, even at a stall ("Mei, how do I say…?") |
-| **T** / **Enter** | type instead (**Tab** switches between the shopkeeper and Mei) |
-| **Y** / **X** | accept / decline the offer on the card |
-| **F** | interact: feed Tangyuan by hand (cat food or treats) or pet her, fill her bowl |
+| **Hold left mouse** (reeling) | lift the green bar; let go to drop it. Keep the fish inside until the meter fills (Stardew Valley style) |
+| **E** or move | reel your line back in. **E while reeling cuts the line** (to save energy) |
+| **E** (at a stall) | start / end a conversation with the shopkeeper |
+| **Hold V** | talk to the shopkeeper you're in a conversation with, otherwise Mei |
+| **Hold B** | always talk to Mei, also in hands-free mode. During a shop conversation it's a quiet side chat about it ("what did she say?", "how do I say…?") |
+| **T** / **Enter** | type to Mei (shopkeepers are only ever spoken to) |
+| **F** | interact: feed Tangyuan by hand (cat food or treats) or pet her, fill her bowl, get in / out of Old Wang's boat |
+| **WASD** (in the boat) | row. Big fish live far from the shore |
 | **I** | bag: money, bucket, rods (equip), bait (use), camp items (place / put away) |
 | **N** | notebook: every word Mei has taught you, with pinyin, and how often you've used it |
-| **J** | fishing journal |
+| **J** | journal: fish, and **People** (what you've learned about each shopkeeper, likes/dislikes in Chinese) |
 | **C** | conversation log, with pinyin |
 | **H** | hide the HUD |
-| **Esc** | menu: volumes, voices, talking speed, **Mei's English**, **pinyin**, hands-free talking, day length, **Saves & logs** |
+| **Esc** | menu: volumes, voices, **what Mei sounds like**, talking speed, **Mei's English**, **pinyin**, hands-free talking, day length, **Saves & logs** |
 | **F5** | quick save |
 
-Placing furniture: open the bag (**I**) and choose **Place**. Then **left-click** to put it down, **R** or **scroll** to rotate, and **right-click** or **Esc** to cancel.
+**Energy and days.** Fishing uses energy: 10 per cast, and reeling drains more (heavy fish drain it fast). Sleep in your bed at any time to wake at 6am refreshed. At 2am or at zero energy you pass out: you keep only your 3 most valuable bag slots and wake at 10am at home. Better beds (Master Li) and furniture (comfort) give more energy. The waking day lasts 40 real minutes by default (Esc → Day length).
+
+**The bag holds only fish** (each kind stacks in one slot). Everything else (bait, gifts, books, furniture, cards) is a key item and never takes space. You start with 4 slots; Old Wang's buckets give 8, 12 and 16. Only fish bite: there's no junk to fish up.
+
+**The journal (J)** has four tabs: the fish you've caught, the people you've met (喜欢 / 不喜欢 in Chinese with pinyin only: ask Mei what they mean), a **phrasebook** (how friendship works, phrases for asking about people and giving gifts, and each shopkeeper's favourite topics), and a **transcript** of everything said with Mei and the shopkeepers. The transcript starts fresh each time you open the game.
+
+**The boat and the island.** Past your boat's range the currents push you back; Old Wang sells upgrades. The best boat reaches an island far out where you can camp for several days.
+
+The log cabin by the camp is yours: walk up to the door and it opens. Inside, the roof and the walls nearest the camera fade away so you can see in, and you can furnish it.
+
+Placing furniture: open the bag (**I**) and choose **Place**. Then **left-click** to put it down, **R** or **scroll** to rotate, and **right-click** or **Esc** to cancel. To **move** something, stand next to it and press **F** (or choose **Move** in the bag).
+
+**Gifts:** the shop window shows how to give one (say 这是送给你的… plus the gift), with the gifts you're carrying. One gift a day per shopkeeper.
 
 ### Learning settings (Esc)
 - **Mei's English:**
@@ -173,13 +216,14 @@ Everything visual is **generated by editor scripts**, so the world can be rebuil
 | Build Windows Player | `UntitledGame.EditorTools.BuildTools.BuildWindows` (or `RebuildAll`) |
 
 ### End-to-end self-test
-`Builds/WillowLake/WillowLake.exe -selftest` plays through the game on its own. It uses its own save file, and writes a PASS/FAIL report and screenshots to `Captures/selftest/`. It covers:
+`Builds/WillowLake/WillowLake.exe -selftest` plays through the game on its own. Add `-only parser,home,school` to run just those sections (the full run takes about 8 minutes). It uses its own save file, and writes a PASS/FAIL report and screenshots to `Captures/selftest/`. It covers:
 - **Voice chat:** it speaks to Mei and the shopkeepers with the game's own voices, round-tripping through the speech recogniser.
 - **The market:** it buys a rod and worms, gets refused in English, and sells fish.
 - **Home:** it buys and places Tangyuan's bowl and feeds her.
 - **Fishing:** it fishes with bait.
 - **The shop parser:** unit checks on typical (and mis-heard) lines.
-- **Saves:** it saves into another slot and reloads the scene through the real load path. It checks that money, words, your position, the chat log and Mei's memory come back, and that the AI isn't restarted. It then damages the save file on purpose to check that recovery works, and checks the chat log's contents.
+- **The test centre:** it checks that the lessons cover every HSK word, and how answers are graded. It starts a lesson by voice, answers it (some answers spoken), practises, and passes the HSK 1 test. It checks the test's confirm step (Y/N), that the result is kept, and that there's no daily limit. Then it checks that the blue line and the +10% fish bonus unlock, and that the interface turns Chinese.
+- **Saves:** it saves into another slot and reloads the scene through the real load path. It checks that money, words, your position and Mei's memory come back (and that the journal's transcript starts fresh), and that the AI isn't restarted. It then damages the save file on purpose to check that recovery works, and checks the chat log's contents.
 
 ```
 Assets/

@@ -11,10 +11,10 @@ A cozy fishing game where every conversation happens in Mandarin, spoken aloud a
 - **Loading.** `SpeechEngine` loads the native DLLs from `LocalAI/sherpa`, then runs recognition and synthesis on worker threads. Results are pumped back to the main thread.
 - **Recognition.** SenseVoice-Small int8, pinned to `zh` with inverse text normalisation, takes about 0.1–0.2 s per line. English speech still comes through, in uppercase, and is normalised to sentence case.
 - **Voices.**
-  - Mei uses Matcha zh-en + vocos; it handles mixed Chinese and English sentences.
-  - Her pure-English runs use Piper Kristin.
+  - Mei's default is the natural voice: Kokoro v1.1-zh (fp32, 103 speakers; 3–57 are female, 58+ male). It reads both her Mandarin and her English with the same speaker, chosen in Esc → "Mei sounds like". Kokoro runs at about 0.65× real time on 6 threads next to the LLM, so it has its own thread.
+  - The classic voice is still available: Matcha zh-en + vocos for Mandarin and Piper Kristin for English. It's about 10× faster but sounds robotic.
   - The keepers use Piper chaowen (male) or xiao_ya (female), each with its own pitch.
-- **Playback.** `CharacterVoice` splits text by script, reads `[gloss]` brackets as pauses, and plays sentence by sentence while the LLM is still streaming.
+- **Playback.** `CharacterVoice` splits text by script and reads `[gloss]` brackets as pauses. It plays sentence by sentence while the LLM is still streaming. With the natural voice, each sentence is also cut into clauses and starts playing as soon as its first clause is synthesised.
 
 ### LLM (llama-server, Vulkan)
 - **Model:** Qwen3.5-4B Q4_K_M, with `--reasoning off`.
@@ -28,6 +28,10 @@ A cozy fishing game where every conversation happens in Mandarin, spoken aloud a
   - **Pinyin filter.** Any pinyin the model writes anyway is stripped (`SpeechText.ModelPinyin`).
   - **Unprompted remarks.** She speaks up for the first greeting, arriving at the market, a full bucket, a hungry cat, sunset, rain, catches, quiet moments, and praise after a purchase.
   - **Staying quiet.** She never talks over a shopkeeper, or within 15 s of the player talking to one.
+- **Shop conversations** (`ShopConversation`, on the player):
+  - **E** at a stall starts a conversation: the keeper greets you, the camera moves in, and V and typing go to that keeper.
+  - It ends with **E**, with 再见 (after the keeper says goodbye), or by walking away. Keepers no longer greet passers-by.
+  - **B** is always Mei, even in hands-free mode. During a conversation it's a quiet side chat: Mei gets this conversation's transcript, the keeper's last line and the open offer. She either explains what was said or gives one sentence to say next. The keeper and the offer wait.
 - **Shopkeepers** (`ShopkeeperBrain`, one turn at a time):
   1. **Understand.** `ShopIntentParser` reads clear lines with rules. It matches items by per-character toneless pinyin plus aliases, and parses Chinese numerals, 要 / 不要, 卖鱼 and 多少钱. Unclear lines fall back to a JSON-schema-constrained LLM call.
   2. **Resolve.** The game applies the real rules (price, money, ownership, bucket contents) and makes an offer if appropriate.

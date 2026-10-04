@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,6 +9,8 @@ using UntitledGame.Economy;
 using UntitledGame.Language;
 using UntitledGame.Environment;
 using UntitledGame.Fishing;
+using UntitledGame.GenAI;
+using UntitledGame.Progression;
 
 namespace UntitledGame.UI
 {
@@ -62,7 +65,7 @@ namespace UntitledGame.UI
             _chinese.text = r.inBucket
                 ? $"Worth about ¥{Catalog.FishPrice(s, r.length)}  <size=22><color=#8A7563>· bucket {Inventory.BucketCount}/{Inventory.BucketCapacity}</color></size>"
                 : "<color=#E0604E>Bucket full: released</color>";
-            string size = s.IsFish ? $"{r.length:0.#} cm · " : "";
+            string size = s.IsFish ? $"{FishDatabase.WeightText(r.length)}{(r.perfect ? " · perfect" : "")} · " : "";
             var rc = FishDatabase.RarityColor(s.rarity);
             _details.text = $"{size}<color=#{ColorUtility.ToHtmlStringRGB(rc)}>{FishDatabase.RarityLabel(s.rarity)}</color>";
             _blurb.text = s.blurb;
@@ -94,8 +97,19 @@ namespace UntitledGame.UI
         protected readonly RectTransform Root;
         protected readonly RectTransform Window;
         private readonly CanvasGroup _group;
+        private readonly TMPro.TextMeshProUGUI _titleText;
+        private readonly string _titleEnglish;
+        private string _titleChinese;
+        private int _titleTier;
 
         public bool IsOpen { get; private set; }
+
+        /// <summary>The window title turns Chinese as HSK tests are passed (see UiText).</summary>
+        protected void ChineseTitle(string chinese, int tier)
+        {
+            _titleChinese = chinese;
+            _titleTier = tier;
+        }
 
         protected ModalPanel(RectTransform canvas, string name, Vector2 size, string title)
         {
@@ -107,6 +121,8 @@ namespace UntitledGame.UI
             Window = win.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, size);
             var t = UIFactory.Text(Window, "Title", title, 50, UITheme.Ink, TextAlignmentOptions.Center, title: true);
             t.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -22), new Vector2(size.x - 80, 64));
+            _titleText = t;
+            _titleEnglish = title;
             var close = UIFactory.Button(Window, "x", Close, UITheme.InkSoft, 30);
             close.GetComponent<RectTransform>().Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-22, -22), new Vector2(56, 56));
             Root.gameObject.SetActive(false);
@@ -124,6 +140,7 @@ namespace UntitledGame.UI
             Root.SetAsLastSibling();
             InputGate.BlockGameplay(this);
             AudioManager.Instance?.PlaySfx("SFX/rpg_bookOpen", 0.5f);
+            if (_titleChinese != null) _titleText.text = UiText.Plain(_titleEnglish, _titleChinese, _titleTier);
             Refresh();
         }
 
@@ -146,15 +163,40 @@ namespace UntitledGame.UI
         private readonly List<(FishSpecies species, Image icon, TextMeshProUGUI name, TextMeshProUGUI info, Image strip)> _cards =
             new List<(FishSpecies, Image, TextMeshProUGUI, TextMeshProUGUI, Image)>();
 
-        public JournalPanel(RectTransform canvas) : base(canvas, "Journal", new Vector2(1500, 900), "Fishing Journal")
+        private readonly RectTransform _grid, _peopleArea, _people, _transcriptArea, _transcript;
+        private bool _showPeople, _showTranscript, _showPhrases;
+        private readonly TextMeshProUGUI _fishTab, _peopleTab, _transcriptTab, _phraseTab;
+
+        public JournalPanel(RectTransform canvas) : base(canvas, "Journal", new Vector2(1500, 980), "Journal")
         {
             _progress = UIFactory.Text(Window, "Progress", "", 26, UITheme.InkSoft, TextAlignmentOptions.Center);
             _progress.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -84), new Vector2(900, 36));
 
+            // Tabs: fish / people (what you've learned about the shopkeepers).
+            var fishTab = UIFactory.Button(Window, "Fish", () => { _showPeople = false; _showTranscript = false; _showPhrases = false; Refresh(); }, UITheme.TealDark, 22);
+            _fishTab = fishTab.GetComponentInChildren<TextMeshProUGUI>();
+            fishTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(40, -28), new Vector2(130, 48));
+            var peopleTab = UIFactory.Button(Window, "People", () => { _showPeople = true; _showTranscript = false; _showPhrases = false; Refresh(); }, UITheme.Orange, 22);
+            _peopleTab = peopleTab.GetComponentInChildren<TextMeshProUGUI>();
+            peopleTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(180, -28), new Vector2(130, 48));
+            var phraseTab = UIFactory.Button(Window, "Phrasebook", () => { _showPhrases = true; _showPeople = false; _showTranscript = false; Refresh(); }, UITheme.Teal, 22);
+            _phraseTab = phraseTab.GetComponentInChildren<TextMeshProUGUI>();
+            phraseTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(320, -28), new Vector2(170, 48));
+            var transcriptTab = UIFactory.Button(Window, "Transcript", () => { _showTranscript = true; _showPeople = false; _showPhrases = false; Refresh(); }, UITheme.InkSoft, 22);
+            _transcriptTab = transcriptTab.GetComponentInChildren<TextMeshProUGUI>();
+            transcriptTab.GetComponent<RectTransform>().Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-100, -28), new Vector2(170, 48));
+            _peopleArea = UIFactory.Rect("PeopleArea", Window).Stretch(40, 40, 136, 36);
+            _people = UIFactory.ScrollList(_peopleArea, 12);
+            _peopleArea.gameObject.SetActive(false);
+            _transcriptArea = UIFactory.Rect("TranscriptArea", Window).Stretch(40, 40, 136, 36);
+            _transcript = UIFactory.ScrollList(_transcriptArea, 6);
+            _transcriptArea.gameObject.SetActive(false);
+
             var grid = UIFactory.Rect("Grid", Window).Stretch(40, 40, 136, 36);
+            _grid = grid;
             var gl = grid.gameObject.AddComponent<GridLayoutGroup>();
-            gl.cellSize = new Vector2(274, 172);
-            gl.spacing = new Vector2(14, 14);
+            gl.cellSize = new Vector2(274, 182);
+            gl.spacing = new Vector2(14, 10);
             gl.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             gl.constraintCount = 5;
             gl.childAlignment = TextAnchor.UpperCenter;
@@ -168,25 +210,206 @@ namespace UntitledGame.UI
                 icon.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(10, -20), new Vector2(84, 84));
                 var name = UIFactory.Text(card.transform, "Name", "", 24, UITheme.Ink, TextAlignmentOptions.TopLeft, title: true);
                 name.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(100, -24), new Vector2(166, 80));
-                var info = UIFactory.Text(card.transform, "Info", "", 18, UITheme.InkSoft, TextAlignmentOptions.TopLeft);
-                info.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(12, -106), new Vector2(252, 64));
+                var info = UIFactory.Text(card.transform, "Info", "", 15, UITheme.InkSoft, TextAlignmentOptions.TopLeft);
+                info.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(12, -96), new Vector2(256, 84));
                 _cards.Add((s, icon, name, info, strip));
             }
         }
 
+        public bool ShowingPeople => _showPeople;
+
+        public void ShowPeople(bool people)
+        {
+            _showPeople = people;
+            _showTranscript = false;
+            _showPhrases = false;
+            if (IsOpen) Refresh();
+        }
+
+        public void ShowPhrasebook()
+        {
+            _showPhrases = true;
+            _showPeople = false;
+            _showTranscript = false;
+            if (IsOpen) Refresh();
+        }
+
+        public void ShowTranscript()
+        {
+            _showTranscript = true;
+            _showPeople = false;
+            _showPhrases = false;
+            if (IsOpen) Refresh();
+        }
+
+        // Phrases for getting to know the shopkeepers (hanzi, English). Pinyin is added by the game.
+        private static readonly (string section, (string zh, string en)[] phrases)[] Phrasebook =
+        {
+            ("Ask about them (what they tell you goes on the People page)", new[]
+            {
+                ("你喜欢什么？", "What do you like?"),
+                ("你不喜欢什么？", "What don't you like?"),
+                ("你是哪里人？", "Where are you from?"),
+                ("你的爱好是什么？", "What are your hobbies?"),
+                ("你家有几个人？", "How many people are in your family?"),
+                ("刘奶奶，老王喜欢什么？", "Granny Liu, what does Old Wang like? (she knows what everyone likes)"),
+            }),
+            ("Give a gift (one a day for each shopkeeper)", new[]
+            {
+                ("这是送给你的礼物。", "This is a present for you."),
+                ("这是送给你的茶。", "This tea is for you. (say the gift's name)"),
+                ("送给你！", "For you!"),
+                ("希望你喜欢。", "I hope you like it."),
+            }),
+            ("Chat (every Chinese sentence counts)", new[]
+            {
+                ("你好！你今天怎么样？", "Hello! How are you today?"),
+                ("今天天气很好。", "The weather is nice today."),
+                ("你在做什么？", "What are you doing?"),
+                ("我很喜欢你的店。", "I really like your shop."),
+                ("谢谢你！再见！", "Thank you! Goodbye!"),
+            }),
+        };
+
+        private void PhraseLine(string text, float size = 21)
+        {
+            var t = UIFactory.Text(_transcript, "Line", text, size, UITheme.Ink, TextAlignmentOptions.TopLeft);
+            t.rectTransform.SetLayout(t.GetPreferredValues(text, 1380, 2000).y + 6);
+        }
+
+        /// <summary>How friendship works, and phrases for getting to know the shopkeepers.</summary>
+        private void RefreshPhrasebook()
+        {
+            foreach (Transform c in _transcript) Object.Destroy(c.gameObject);
+            _progress.text = "Phrasebook: making friends at the market";
+            PhraseLine("<b>How friendship works</b>", 26);
+            PhraseLine("- Every sentence you say to a shopkeeper in Chinese earns friendship. Harder words (HSK 2-3) and longer sentences earn more " +
+                       $"(up to {Affinity.TalkCapPerDay} points a day for each shopkeeper; saying the same thing again earns nothing).\n" +
+                       "- When you arrive they ask you a question: answering it in Chinese earns extra.\n" +
+                       "- Talking about the things they love earns a bonus (see below).\n" +
+                       $"- Gifts: one they love <b>+{Affinity.GiftLiked}</b>, an ordinary one +{Affinity.GiftNeutral}, one they don't like {Affinity.GiftDisliked}. " +
+                       "Buy gifts at Granny Liu's 礼品店. To find out what someone likes, ask them, ask Granny Liu, or ask Mei.\n" +
+                       $"- Levels: {string.Join(" > ", Affinity.LevelHanzi.Select((h, i) => $"{h} ({Affinity.Thresholds[i]})"))}. Closer friends sell you better things and tell you more about themselves.");
+            foreach (var (section, phrases) in Phrasebook)
+            {
+                PhraseLine($"\n<b>{section}</b>", 26);
+                foreach (var (zh, en) in phrases)
+                    PhraseLine($"<b>{zh}</b>  <color=#2C7F79><i>{Pinyin.Of(zh)}</i></color>\n<size=18><color=#8A7563>{en}</color></size>");
+            }
+            PhraseLine("\n<b>What they love talking about</b>  <size=18><color=#8A7563>(don't know a word? Ask Mei)</color></size>", 26);
+            foreach (var shop in Catalog.Shops)
+            {
+                var p = KeeperProfiles.For(shop.id);
+                if (p == null) continue;
+                string topics = string.Join("、", p.topics.Select(t => $"{t} <color=#2C7F79><i>{Pinyin.Of(t)}</i></color>"));
+                PhraseLine($"<b>{shop.keeperName}</b> <size=18>({shop.keeperEnglish})</size>:  {topics}");
+            }
+        }
+
+        /// <summary>Everything said with Mei and the shopkeepers this session, with pinyin (starts fresh each session).</summary>
+        private void RefreshTranscript()
+        {
+            foreach (Transform c in _transcript) Object.Destroy(c.gameObject);
+            var entries = ConversationLog.Entries;
+            _progress.text = entries.Count == 0 ? "Nothing said yet this session." : $"This session's conversations ({entries.Count} lines)";
+            foreach (var e in entries)
+            {
+                string who = e.fromPlayer ? "<color=#2C7F79><b>You</b></color>" : $"<color=#C9504A><b>{e.speaker}</b></color>";
+                string py = Pinyin.ContainsHanzi(e.text) && !e.fromPlayer ? $"\n<size=17><color=#2C7F79><i>{Pinyin.Annotate(e.text)}</i></color></size>" : "";
+                string line = $"{who}  {e.text}{py}";
+                var t = UIFactory.Text(_transcript, "Line", line, 21, UITheme.Ink, TextAlignmentOptions.TopLeft);
+                t.rectTransform.SetLayout(t.GetPreferredValues(line, 1380, 2000).y + 6);
+            }
+        }
+
+        /// <summary>
+        /// What you've learned about each shopkeeper. Likes and dislikes are written only in Chinese with pinyin
+        /// (they're vocabulary to learn); other facts are in English.
+        /// </summary>
+        private void RefreshPeople()
+        {
+            foreach (Transform c in _people) Object.Destroy(c.gameObject);
+            int known = 0, total = 0;
+            foreach (var shop in Catalog.Shops)
+            {
+                var p = KeeperProfiles.For(shop.id);
+                if (p == null) continue;
+                var all = p.AllFacts().ToList();
+                var learned = all.Where(f => Affinity.Knows(shop.id, f.id)).ToList();
+                known += learned.Count;
+                total += all.Count;
+                int level = Affinity.Level(shop.id);
+
+                string Words(string kind)
+                {
+                    var list = (kind == "like" ? p.likes : p.dislikes)
+                        .Select(h => Affinity.Knows(shop.id, kind + ":" + h) ? $"{h} <color=#2C7F79><i>{Pinyin.Of(h)}</i></color>" : "？").ToList();
+                    return string.Join("、", list);
+                }
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"<size=28><b>{shop.keeperName}</b></size> <color=#2C7F79><i>{Pinyin.Of(shop.keeperName)}</i></color>  ·  {shop.keeperEnglish}, {shop.english}\n");
+                sb.Append($"<color=#8A7563>Friendship:</color> {Affinity.LevelHanzi[level]} <color=#2C7F79><i>{Pinyin.Of(Affinity.LevelHanzi[level])}</i></color> ({level}/{Affinity.Thresholds.Length - 1})\n");
+                sb.Append($"喜欢 <color=#2C7F79><i>xǐhuan</i></color>: {Words("like")}     不喜欢 <color=#2C7F79><i>bù xǐhuan</i></color>: {Words("dislike")}\n");
+                var facts = learned.Where(f => !f.id.StartsWith("like:") && !f.id.StartsWith("dislike:")).Select(f => "- " + f.english).ToList();
+                int unknown = all.Count - learned.Count;
+                if (facts.Count > 0) sb.Append(string.Join("\n", facts)).Append('\n');
+                if (unknown > 0) sb.Append($"<color=#8A7563><i>{unknown} more thing{(unknown == 1 ? "" : "s")} to find out. Ask them about themselves, or ask Mei.</i></color>");
+
+                var card = UIFactory.Panel(_people, "Person_" + shop.id, UITheme.CreamDark.WithAlpha(0.6f), shadow: false, small: true);
+                var t = UIFactory.Text(card.transform, "Text", sb.ToString(), 21, UITheme.Ink, TextAlignmentOptions.TopLeft);
+                t.rectTransform.Stretch(20, 20, 12, 10);
+                float h = t.GetPreferredValues(sb.ToString(), 1340, 2000).y + 30;
+                card.rectTransform.SetLayout(Mathf.Max(120, h));
+            }
+            _progress.text = $"{known} / {total} things learned about the shopkeepers";
+        }
+
         protected override void Refresh()
         {
+            if (_fishTab != null) _fishTab.text = UiText.Plain("Fish", "鱼", 1);
+            if (_peopleTab != null) _peopleTab.text = UiText.Plain("People", "朋友", 1);
+            if (_transcriptTab != null) _transcriptTab.text = UiText.Plain("Transcript", "说过的话", 2);
+            _grid.gameObject.SetActive(!_showPeople && !_showTranscript && !_showPhrases);
+            _peopleArea.gameObject.SetActive(_showPeople);
+            _transcriptArea.gameObject.SetActive(_showTranscript || _showPhrases);
+            if (_showPhrases)
+            {
+                RefreshPhrasebook();
+                return;
+            }
+            if (_showTranscript)
+            {
+                RefreshTranscript();
+                return;
+            }
+            if (_showPeople)
+            {
+                RefreshPeople();
+                return;
+            }
             _progress.text = $"{CatchJournal.SpeciesDiscovered} / {FishDatabase.All.Count} discovered   ·   {CatchJournal.TotalCatches} total catches";
             foreach (var (s, icon, name, info, strip) in _cards)
             {
                 var rec = CatchJournal.Get(s.id);
                 bool known = rec != null && rec.count > 0;
-                icon.color = known ? (s.IsFish ? s.body : UITheme.InkSoft) : new Color(0.3f, 0.25f, 0.2f, 0.25f);
-                name.text = known ? s.name : "???";
-                string when = $"{FishDatabase.WhenText(s)} · {FishDatabase.WhereText(s)}";
-                info.text = known
-                    ? (s.IsFish ? $"Caught {rec.count}× · best {rec.bestLength:0.#} cm\n{when}" : $"Found {rec.count}×\n{s.blurb}")
-                    : $"<color=#{ColorUtility.ToHtmlStringRGB(FishDatabase.RarityColor(s.rarity))}>{FishDatabase.RarityLabel(s.rarity)}</color>\nHint: {when}";
+                if (!known && !Progression.PlayerStats.IsDiscovered(s))
+                {
+                    icon.color = new Color(0.3f, 0.25f, 0.2f, 0.12f);
+                    name.text = "???";
+                    info.text = "Undiscovered. A book from Teacher Zhou's bookshop would tell you about it.";
+                    continue;
+                }
+                // Read about (or caught): show what it takes to catch one.
+                icon.color = known ? (s.IsFish ? s.body : UITheme.InkSoft) : new Color(0.3f, 0.25f, 0.2f, 0.45f);
+                name.text = s.name;
+                if (!s.IsFish)
+                {
+                    info.text = known ? $"Found {rec.count}x\n{s.blurb}" : "Washes about anywhere.";
+                    continue;
+                }
+                string caught = known ? $"Caught {rec.count}x, heaviest {FishDatabase.WeightText(rec.bestLength)}" : $"<color=#{ColorUtility.ToHtmlStringRGB(FishDatabase.RarityColor(s.rarity))}>{FishDatabase.RarityLabel(s.rarity)}</color>, not caught yet";
+                info.text = $"{caught}\n{FishDatabase.WeightText(s.minWeight)}-{FishDatabase.WeightText(s.maxWeight)} · {FishDatabase.WhereText(s)} · {FishDatabase.WhenText(s)}\n" +
+                            $"Bait: {FishDatabase.BaitText(s)}\nLine: {FishDatabase.LineText(s)}";
             }
         }
     }
@@ -199,16 +422,22 @@ namespace UntitledGame.UI
 
         public SettingsPanel(RectTransform canvas, CompanionBrain brain, System.Action openSaves) : base(canvas, "Settings", new Vector2(1040, 1040), "Take a break")
         {
+            ChineseTitle("休息一下", 2);
             _brain = brain;
             var list = UIFactory.Rect("Rows", Window).Stretch(60, 60, 100, 120);
-            UIFactory.VLayout(list.gameObject, 10, new RectOffset(0, 0, 0, 0));
+            UIFactory.VLayout(list.gameObject, 5, new RectOffset(0, 0, 0, 0));
 
             var st = SaveSystem.Settings;
             SliderRow(list, "Music", () => st.musicVolume, v => st.musicVolume = v);
             SliderRow(list, "Nature sounds", () => st.ambienceVolume, v => st.ambienceVolume = v);
             SliderRow(list, "Effects", () => st.sfxVolume, v => st.sfxVolume = v);
-            SliderRow(list, "Mei's voice", () => st.voiceVolume, v => st.voiceVolume = v);
+            SliderRow(list, "Voice volume", () => st.voiceVolume, v => st.voiceVolume = v);
             OptionRow(list, "Voices", () => st.speakReplies ? "On" : "Subtitles only", () => st.speakReplies = !st.speakReplies);
+            OptionRow(list, "Mei sounds like", () => MeiVoices.Label(st.meiVoice), () =>
+            {
+                st.meiVoice = MeiVoices.Next(st.meiVoice);
+                MeiVoices.Preview();
+            });
             OptionRow(list, "Talking speed", () => st.voiceSpeed < 0.85f ? "Slow" : st.voiceSpeed < 0.95f ? "Relaxed" : "Normal", () =>
             {
                 st.voiceSpeed = st.voiceSpeed < 0.85f ? 0.9f : st.voiceSpeed < 0.95f ? 1f : 0.8f;
@@ -225,11 +454,23 @@ namespace UntitledGame.UI
                 PinyinMode.NewWordsOnly => "New words only",
                 _ => "Off",
             }, () => st.pinyin = (PinyinMode)(((int)st.pinyin + 1) % 3));
-            OptionRow(list, "Talking", () => st.handsFree ? "Hands-free (beta)" : "Hold V / B to talk", () => st.handsFree = !st.handsFree);
-            OptionRow(list, "Mei starts chats", () => st.companionChatter ? "Sometimes" : "Only when asked", () => st.companionChatter = !st.companionChatter);
-            OptionRow(list, "Day length", () => $"{Mathf.RoundToInt(st.realSecondsPerHour * 24f / 60f)} minutes", () =>
+            OptionRow(list, "Speech recognition", () => st.asrMode switch
             {
-                st.realSecondsPerHour = st.realSecondsPerHour <= 30f ? 60f : st.realSecondsPerHour <= 60f ? 120f : 30f;
+                1 => "SenseVoice only (fastest)",
+                2 => "Qwen3-ASR (beta, slower)",
+                _ => "Auto (Qwen3 for English)",
+            }, () =>
+            {
+                st.asrMode = (st.asrMode + 1) % 3;
+                var sp = LocalAIServices.Instance?.Speech;
+                if (st.asrMode != 1 && sp != null && !sp.QwenReady)
+                    sp.LoadQwen(LocalAIServices.Instance.Config.Resolve(LocalAIServices.Instance.Root, LocalAIServices.Instance.Config.qwenAsrModel), 6);
+            });
+            OptionRow(list, "Talking", () => st.handsFree ? "Hands-free (beta)" : "Hold V / B to talk", () => st.handsFree = !st.handsFree);
+            // The waking day runs 6am-2am (20 game hours).
+            OptionRow(list, "Day length", () => $"{Mathf.RoundToInt(st.realSecondsPerHour * 20f / 60f)} min (6am-2am)", () =>
+            {
+                st.realSecondsPerHour = st.realSecondsPerHour < 100f ? 120f : st.realSecondsPerHour < 150f ? 180f : 90f;
                 if (DayNightCycle.Instance != null) DayNightCycle.Instance.RealSecondsPerHour = st.realSecondsPerHour;
             });
 
@@ -248,7 +489,7 @@ namespace UntitledGame.UI
         private RectTransform Row(Transform parent, string label)
         {
             var row = UIFactory.Rect("Row_" + label, parent);
-            row.SetLayout(60);
+            row.SetLayout(52);
             var l = UIFactory.Text(row, "Label", label, 28, UITheme.Ink, TextAlignmentOptions.MidlineLeft);
             l.rectTransform.anchorMin = new Vector2(0, 0);
             l.rectTransform.anchorMax = new Vector2(0.42f, 1);

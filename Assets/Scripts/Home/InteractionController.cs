@@ -12,7 +12,8 @@ namespace UntitledGame.Home
 
         private void Update()
         {
-            Current = PlacementController.Active ? null : Interactable.Nearest(transform.position);
+            // In the boat, F means "get out" (handled by the boat).
+            Current = PlacementController.Active || Fishing.Rowboat.PlayerAboard ? null : Interactable.Nearest(transform.position);
             if (Current != null && !InputGate.GameplayBlocked && Input.GetKeyDown(key)) Current.Interact();
         }
     }

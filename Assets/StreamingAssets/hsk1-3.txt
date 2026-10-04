@@ -1,0 +1,596 @@
+# HSK 2.0 levels 1-3. Words and pinyin from github.com/drkameleon/complete-hsk-vocabulary (MIT); learner glosses written for this game. word<TAB>level<TAB>pinyin<TAB>meaning
+爱	1	ài	to love
+八	1	bā	eight
+爸爸	1	bàba	dad
+杯子	1	bēizi	cup
+北京	1	Běijīng	Beijing
+本	1	běn	(measure word for books)
+不	1	bù	not
+不客气	1	bùkèqi	you're welcome
+菜	1	cài	dish; vegetables
+茶	1	chá	tea
+吃	1	chī	to eat
+出租车	1	chūzūchē	taxi
+打电话	1	dǎdiànhuà	to make a phone call
+大	1	dà	big
+的	1	de	(possessive particle, 's)
+点	1	diǎn	o'clock; a little
+电脑	1	diànnǎo	computer
+电视	1	diànshì	television
+电影	1	diànyǐng	movie
+东西	1	dōngxi	thing, stuff
+都	1	dōu	all, both
+读	1	dú	to read aloud
+对不起	1	duìbuqǐ	sorry
+多	1	duō	many, much
+多少	1	duōshao	how many, how much
+儿子	1	érzi	son
+二	1	èr	two
+饭馆	1	fànguǎn	restaurant
+飞机	1	fēijī	airplane
+分钟	1	fēnzhōng	minute
+高兴	1	gāoxìng	happy, glad
+个	1	gè	(general measure word)
+工作	1	gōngzuò	work; to work
+狗	1	gǒu	dog
+汉语	1	Hànyǔ	Chinese language
+好	1	hǎo	good
+喝	1	hē	to drink
+和	1	hé	and; with
+很	1	hěn	very
+后面	1	hòumian	behind, at the back
+回	1	huí	to return
+会	1	huì	can (know how to)
+火车站	1	huǒchēzhàn	train station
+几	1	jǐ	how many (small number)
+家	1	jiā	home, family
+叫	1	jiào	to be called
+今天	1	jīntiān	today
+九	1	jiǔ	nine
+开	1	kāi	to open; to drive
+看	1	kàn	to look, to watch
+看见	1	kànjiàn	to see
+块	1	kuài	yuan (money, spoken); piece
+来	1	lái	to come
+老师	1	lǎoshī	teacher
+了	1	le	(completed action particle)
+冷	1	lěng	cold
+里	1	lǐ	inside
+零	1	líng	zero
+六	1	liù	six
+妈妈	1	māma	mum
+吗	1	ma	(question particle)
+买	1	mǎi	to buy
+猫	1	māo	cat
+没	1	méi	not (have); didn't
+没关系	1	méiguānxi	it doesn't matter
+米饭	1	mǐfàn	cooked rice
+名字	1	míngzi	name
+明天	1	míngtiān	tomorrow
+哪	1	nǎ	which
+那	1	nà	that
+呢	1	ne	(question particle: and you?)
+能	1	néng	can (be able to)
+你	1	nǐ	you
+年	1	nián	year
+女儿	1	nǚér	daughter
+朋友	1	péngyou	friend
+漂亮	1	piàoliang	pretty
+苹果	1	píngguǒ	apple
+七	1	qī	seven
+前面	1	qiánmiàn	in front
+钱	1	qián	money
+请	1	qǐng	please; to invite
+去	1	qù	to go
+热	1	rè	hot
+人	1	rén	person
+认识	1	rènshi	to know (a person)
+日	1	rì	day (of the month)
+三	1	sān	three
+商店	1	shāngdiàn	shop
+上	1	shàng	up, on; last (week)
+上午	1	shàngwǔ	morning
+少	1	shǎo	few, little
+什么	1	shénme	what
+十	1	shí	ten
+时候	1	shíhou	time, moment
+是	1	shì	to be (is, am, are)
+书	1	shū	book
+谁	1	shéi	who
+水	1	shuǐ	water
+水果	1	shuǐguǒ	fruit
+睡觉	1	shuìjiào	to sleep
+说话	1	shuōhuà	to talk
+四	1	sì	four
+岁	1	suì	years old
+他	1	tā	he
+她	1	tā	she
+太	1	tài	too (much)
+天气	1	tiānqì	weather
+听	1	tīng	to listen
+同学	1	tóngxué	classmate
+喂	1	wéi	hello (on the phone)
+我	1	wǒ	I, me
+我们	1	wǒmen	we, us
+五	1	wǔ	five
+喜欢	1	xǐhuan	to like
+下	1	xià	down, under; next (week)
+下午	1	xiàwǔ	afternoon
+下雨	1	xiàyǔ	to rain
+先生	1	xiānsheng	Mr., sir
+现在	1	xiànzài	now
+想	1	xiǎng	to want to; to miss
+小	1	xiǎo	small
+小姐	1	xiǎojie	Miss, young lady
+些	1	xiē	some
+写	1	xiě	to write
+谢谢	1	xièxie	thank you
+星期	1	xīngqī	week
+学生	1	xuésheng	student
+学习	1	xuéxí	to study
+学校	1	xuéxiào	school
+一	1	yī	one
+衣服	1	yīfu	clothes
+医生	1	yīshēng	doctor
+医院	1	yīyuàn	hospital
+椅子	1	yǐzi	chair
+有	1	yǒu	to have; there is
+月	1	yuè	month; moon
+再见	1	zàijiàn	goodbye
+在	1	zài	at, in; to be (somewhere)
+怎么	1	zěnme	how
+怎么样	1	zěnmeyàng	how is it?
+这	1	zhè	this
+中国	1	Zhōngguó	China
+中午	1	zhōngwǔ	noon
+住	1	zhù	to live (somewhere)
+桌子	1	zhuōzi	table
+字	1	zì	character, word
+昨天	1	zuótiān	yesterday
+坐	1	zuò	to sit; to take (a bus)
+做	1	zuò	to do, to make
+吧	2	ba	(suggestion particle: let's...)
+白	2	bái	white
+百	2	bǎi	hundred
+帮助	2	bāngzhù	to help
+报纸	2	bàozhǐ	newspaper
+比	2	bǐ	than; compared with
+便宜	2	piányi	cheap
+别	2	bié	don't
+唱歌	2	chànggē	to sing
+出	2	chū	to go out
+穿	2	chuān	to wear
+船	2	chuán	boat
+次	2	cì	time (occurrence)
+从	2	cóng	from
+错	2	cuò	wrong
+打篮球	2	dǎlánqiú	to play basketball
+大家	2	dàjiā	everyone
+但是	2	dànshì	but
+到	2	dào	to arrive; to
+得	2	de	(particle: runs fast = 跑得快)
+弟弟	2	dìdi	younger brother
+第一	2	dìyī	first
+懂	2	dǒng	to understand
+房间	2	fángjiān	room
+非常	2	fēicháng	extremely
+服务员	2	fúwùyuán	waiter
+高	2	gāo	tall, high
+告诉	2	gàosu	to tell
+哥哥	2	gēge	older brother
+给	2	gěi	to give; for
+公共汽车	2	gōnggòngqìchē	bus
+公斤	2	gōngjīn	kilogram
+公司	2	gōngsī	company
+贵	2	guì	expensive
+还	2	hái	still, also
+孩子	2	háizi	child
+好吃	2	hǎochī	tasty
+号	2	hào	date; number
+黑	2	hēi	black
+红	2	hóng	red
+欢迎	2	huānyíng	welcome
+回答	2	huídá	to answer
+机场	2	jīchǎng	airport
+鸡蛋	2	jīdàn	egg
+件	2	jiàn	(measure word for clothes, matters)
+教室	2	jiàoshì	classroom
+介绍	2	jièshào	to introduce
+姐姐	2	jiějie	older sister
+近	2	jìn	near
+进	2	jìn	to enter
+就	2	jiù	just, right away
+觉得	2	juéde	to feel, to think
+咖啡	2	kāfēi	coffee
+开始	2	kāishǐ	to begin
+考试	2	kǎoshì	exam; to take an exam
+可能	2	kěnéng	maybe, possible
+可以	2	kěyǐ	may, can (allowed)
+课	2	kè	lesson, class
+快	2	kuài	fast
+快乐	2	kuàilè	happy, joyful
+累	2	lèi	tired
+离	2	lí	away from
+两	2	liǎng	two (of something)
+路	2	lù	road
+旅游	2	lǚyóu	to travel
+卖	2	mài	to sell
+慢	2	màn	slow
+忙	2	máng	busy
+每	2	měi	every
+妹妹	2	mèimei	younger sister
+门	2	mén	door
+男人	2	nánrén	man
+您	2	nín	you (polite)
+牛奶	2	niúnǎi	milk
+女人	2	nǚrén	woman
+旁边	2	pángbiān	beside
+跑步	2	pǎobù	to run, to jog
+票	2	piào	ticket
+妻子	2	qīzi	wife
+起床	2	qǐchuáng	to get up
+千	2	qiān	thousand
+晴	2	qíng	sunny
+去年	2	qùnián	last year
+让	2	ràng	to let, to make (someone)
+上班	2	shàngbān	to go to work
+身体	2	shēntǐ	body; health
+生病	2	shēngbìng	to get sick
+生日	2	shēngrì	birthday
+时间	2	shíjiān	time
+事情	2	shìqing	matter, thing to do
+手表	2	shǒubiǎo	watch
+手机	2	shǒujī	mobile phone
+送	2	sòng	to give (as a gift); to see off
+所以	2	suǒyǐ	so, therefore
+它	2	tā	it
+踢	2	tī	to kick
+题	2	tí	question (on a test)
+跳舞	2	tiàowǔ	to dance
+外	2	wài	outside
+完	2	wán	to finish
+玩	2	wán	to play, to have fun
+晚上	2	wǎnshang	evening
+为	2	wèi	for
+问	2	wèn	to ask
+问题	2	wèntí	question; problem
+希望	2	xīwàng	to hope
+洗	2	xǐ	to wash
+西瓜	2	xīguā	watermelon
+向	2	xiàng	towards
+小时	2	xiǎoshí	hour
+笑	2	xiào	to laugh, to smile
+新	2	xīn	new
+姓	2	xìng	surname; to be surnamed
+休息	2	xiūxi	to rest
+雪	2	xuě	snow
+颜色	2	yánsè	colour
+眼睛	2	yǎnjing	eye
+羊肉	2	yángròu	lamb (meat)
+药	2	yào	medicine
+要	2	yào	to want; will
+也	2	yě	also, too
+一起	2	yīqǐ	together
+已经	2	yǐjīng	already
+意思	2	yìsi	meaning
+因为	2	yīnwèi	because
+阴	2	yīn	cloudy
+游泳	2	yóuyǒng	to swim
+右边	2	yòubian	right side
+鱼	2	yú	fish
+元	2	yuán	yuan (money)
+远	2	yuǎn	far
+运动	2	yùndòng	sport, exercise
+再	2	zài	again
+早上	2	zǎoshang	early morning
+张	2	zhāng	(measure word for flat things)
+长	2	cháng	long
+丈夫	2	zhàngfu	husband
+找	2	zhǎo	to look for
+着	2	zhe	(particle: ongoing state)
+真	2	zhēn	really, truly
+正在	2	zhèngzài	in the middle of (doing)
+知道	2	zhīdào	to know (a fact)
+准备	2	zhǔnbèi	to prepare
+自行车	2	zìxíngchē	bicycle
+走	2	zǒu	to walk
+最	2	zuì	most
+左边	2	zuǒbian	left side
+阿姨	3	āyí	auntie
+啊	3	a	ah! (exclamation)
+矮	3	ǎi	short (height)
+爱好	3	àihào	hobby
+安静	3	ānjìng	quiet
+把	3	bǎ	(particle: to take sth and...)
+班	3	bān	class (group of students)
+搬	3	bān	to move (house, objects)
+办法	3	bànfǎ	way, method
+办公室	3	bàngōngshì	office
+半	3	bàn	half
+帮忙	3	bāngmáng	to help out
+包	3	bāo	bag
+饱	3	bǎo	full (after eating)
+北方	3	běifāng	the north
+被	3	bèi	(passive particle: by)
+鼻子	3	bízi	nose
+比较	3	bǐjiào	fairly, rather; to compare
+比赛	3	bǐsài	competition, match
+必须	3	bìxū	must
+变化	3	biànhuà	change
+表示	3	biǎoshì	to express, to show
+表演	3	biǎoyǎn	to perform; performance
+别人	3	biéren	other people
+宾馆	3	bīnguǎn	hotel
+冰箱	3	bīngxiāng	fridge
+才	3	cái	only then; just
+菜单	3	càidān	menu
+参加	3	cānjiā	to take part in
+草	3	cǎo	grass
+层	3	céng	floor (of a building)
+差	3	chà	to lack; poor (quality)
+超市	3	chāoshì	supermarket
+衬衫	3	chènshān	shirt
+成绩	3	chéngjì	grades, results
+城市	3	chéngshì	city
+迟到	3	chídào	to be late
+出现	3	chūxiàn	to appear
+除了	3	chúle	except, besides
+厨房	3	chúfáng	kitchen
+春	3	chūn	spring (season)
+词语	3	cíyǔ	word, expression
+聪明	3	cōngming	clever
+打扫	3	dǎsǎo	to clean
+打算	3	dǎsuàn	to plan
+带	3	dài	to bring, to take along
+担心	3	dānxīn	to worry
+蛋糕	3	dàngāo	cake
+当然	3	dāngrán	of course
+地	3	de	(particle: -ly, 慢慢地)
+地方	3	dìfang	place
+地铁	3	dìtiě	subway, metro
+地图	3	dìtú	map
+灯	3	dēng	lamp, light
+低	3	dī	low
+电梯	3	diàntī	lift, elevator
+电子	3	diànzǐ	electronic
+东	3	dōng	east
+冬	3	dōng	winter
+动物	3	dòngwù	animal
+短	3	duǎn	short (length)
+段	3	duàn	section, period
+锻炼	3	duànliàn	to exercise, to work out
+多么	3	duōme	how (wonderful)!
+饿	3	è	hungry
+而且	3	érqiě	and also, moreover
+耳朵	3	ěrduo	ear
+发烧	3	fāshāo	to have a fever
+发现	3	fāxiàn	to discover
+方便	3	fāngbiàn	convenient
+放	3	fàng	to put
+放心	3	fàngxīn	to stop worrying
+分	3	fēn	minute; cent; to divide
+附近	3	fùjìn	nearby
+复习	3	fùxí	to revise, to review
+敢	3	gǎn	to dare
+感冒	3	gǎnmào	to catch a cold
+干净	3	gānjìng	clean
+刚才	3	gāngcái	just now
+根据	3	gēnjù	according to
+跟	3	gēn	with; to follow
+更	3	gèng	even more
+公园	3	gōngyuán	park
+故事	3	gùshi	story
+刮	3	guā	to blow (wind)
+关	3	guān	to close, to turn off
+关系	3	guānxi	relationship
+关心	3	guānxīn	to care about
+关于	3	guānyú	about, concerning
+国家	3	guójiā	country
+果汁	3	guǒzhī	fruit juice
+过去	3	guòqu	the past
+还是	3	háishi	or (in questions); still
+害怕	3	hàipà	to be afraid
+河	3	hé	river
+黑板	3	hēibǎn	blackboard
+护照	3	hùzhào	passport
+花	3	huā	flower; to spend
+花园	3	huāyuán	garden
+画	3	huà	to draw; painting
+坏	3	huài	bad, broken
+环境	3	huánjìng	environment
+换	3	huàn	to change, to swap
+黄	3	huáng	yellow
+会议	3	huìyì	meeting
+或者	3	huòzhě	or
+机会	3	jīhuì	chance, opportunity
+极	3	jí	extremely
+几乎	3	jīhū	almost
+记得	3	jìde	to remember
+季节	3	jìjié	season
+检查	3	jiǎnchá	to check
+简单	3	jiǎndān	simple
+见面	3	jiànmiàn	to meet
+健康	3	jiànkāng	healthy
+讲	3	jiǎng	to speak, to explain
+角	3	jiǎo	jiao (1/10 yuan); corner
+脚	3	jiǎo	foot
+教	3	jiāo	to teach
+接	3	jiē	to pick up (someone); to receive
+街道	3	jiēdào	street
+节目	3	jiémù	programme, show
+节日	3	jiérì	festival, holiday
+结婚	3	jiéhūn	to get married
+结束	3	jiéshù	to end
+解决	3	jiějué	to solve
+借	3	jiè	to borrow, to lend
+经常	3	jīngcháng	often
+经过	3	jīngguò	to pass by
+经理	3	jīnglǐ	manager
+久	3	jiǔ	a long time
+旧	3	jiù	old (not new)
+举行	3	jǔxíng	to hold (an event)
+句子	3	jùzi	sentence
+决定	3	juédìng	to decide
+可爱	3	kěài	cute
+渴	3	kě	thirsty
+刻	3	kè	quarter (of an hour)
+客人	3	kèrén	guest
+空调	3	kōngtiáo	air conditioner
+口	3	kǒu	mouth
+哭	3	kū	to cry
+裤子	3	kùzi	trousers
+筷子	3	kuàizi	chopsticks
+蓝	3	lán	blue
+老	3	lǎo	old
+了解	3	liǎojiě	to understand, to know well
+离开	3	líkāi	to leave
+礼物	3	lǐwù	present, gift
+历史	3	lìshǐ	history
+脸	3	liǎn	face
+练习	3	liànxí	to practise; exercise
+辆	3	liàng	(measure word for vehicles)
+邻居	3	línjū	neighbour
+楼	3	lóu	building; floor
+绿	3	lǜ	green
+马	3	mǎ	horse
+马上	3	mǎshàng	right away
+满意	3	mǎnyì	satisfied
+帽子	3	màozi	hat
+米	3	mǐ	metre; rice
+面包	3	miànbāo	bread
+面条	3	miàntiáo	noodles
+明白	3	míngbai	to understand
+拿	3	ná	to take, to hold
+奶奶	3	nǎinai	grandma (dad's mum)
+南	3	nán	south
+难	3	nán	difficult
+难过	3	nánguò	sad
+年级	3	niánjí	grade (year at school)
+年轻	3	niánqīng	young
+鸟	3	niǎo	bird
+努力	3	nǔlì	to work hard
+爬山	3	páshān	to climb a mountain
+盘子	3	pánzi	plate
+胖	3	pàng	fat
+啤酒	3	píjiǔ	beer
+葡萄	3	pútao	grape
+普通话	3	pǔtōnghuà	Mandarin (standard Chinese)
+其实	3	qíshí	actually
+其他	3	qítā	other
+奇怪	3	qíguài	strange
+骑	3	qí	to ride
+铅笔	3	qiānbǐ	pencil
+清楚	3	qīngchu	clear
+秋	3	qiū	autumn
+裙子	3	qúnzi	skirt
+然后	3	ránhòu	then, after that
+热情	3	rèqíng	warm, enthusiastic
+认为	3	rènwéi	to think, to believe
+认真	3	rènzhēn	serious, conscientious
+容易	3	róngyì	easy
+如果	3	rúguǒ	if
+伞	3	sǎn	umbrella
+上网	3	shàngwǎng	to go online
+生气	3	shēngqì	to get angry
+声音	3	shēngyīn	sound, voice
+使	3	shǐ	to make, to cause
+世界	3	shìjiè	world
+瘦	3	shòu	thin
+叔叔	3	shūshu	uncle
+舒服	3	shūfu	comfortable
+树	3	shù	tree
+数学	3	shùxué	maths
+刷	3	shuā	to brush
+双	3	shuāng	pair
+水平	3	shuǐpíng	level, standard
+司机	3	sījī	driver
+虽然	3	suīrán	although
+太阳	3	tàiyang	sun
+糖	3	táng	sugar, sweets
+特别	3	tèbié	especially
+疼	3	téng	painful, to hurt
+提高	3	tígāo	to improve
+体育	3	tǐyù	sports, PE
+甜	3	tián	sweet
+条	3	tiáo	(measure word for long things, fish)
+同事	3	tóngshì	colleague
+同意	3	tóngyì	to agree
+头发	3	tóufa	hair
+突然	3	tūrán	suddenly
+图书馆	3	túshūguǎn	library
+腿	3	tuǐ	leg
+完成	3	wánchéng	to complete
+碗	3	wǎn	bowl
+万	3	wàn	ten thousand
+忘记	3	wàngjì	to forget
+为了	3	wèile	in order to
+为什么	3	wèishénme	why
+位	3	wèi	(polite measure word for people)
+文化	3	wénhuà	culture
+习惯	3	xíguàn	habit; to be used to
+洗手间	3	xǐshǒujiān	toilet, restroom
+洗澡	3	xǐzǎo	to take a bath
+西	3	xī	west
+夏	3	xià	summer
+先	3	xiān	first
+相同	3	xiāngtóng	the same
+相信	3	xiāngxìn	to believe
+香蕉	3	xiāngjiāo	banana
+像	3	xiàng	to look like
+小心	3	xiǎoxīn	be careful
+校长	3	xiàozhǎng	headmaster
+鞋	3	xié	shoe
+新闻	3	xīnwén	news
+新鲜	3	xīnxiān	fresh
+信	3	xìn	letter
+行李箱	3	xínglixiāng	suitcase
+兴趣	3	xìngqù	interest
+熊猫	3	xióngmāo	panda
+需要	3	xūyào	to need
+选择	3	xuǎnzé	to choose
+眼镜	3	yǎnjìng	glasses
+要求	3	yāoqiú	to require; requirement
+爷爷	3	yéye	grandpa (dad's dad)
+一般	3	yībān	usually, ordinary
+一边	3	yībiān	while (doing two things)
+一定	3	yīdìng	definitely
+一共	3	yīgòng	altogether
+一会儿	3	yīhuìr	a moment
+一样	3	yīyàng	the same
+一直	3	yīzhí	all along; straight ahead
+以后	3	yǐhòu	after, later
+以前	3	yǐqián	before
+以为	3	yǐwéi	to (wrongly) think
+音乐	3	yīnyuè	music
+银行	3	yínháng	bank
+应该	3	yīnggāi	should
+影响	3	yǐngxiǎng	to affect; influence
+用	3	yòng	to use
+游戏	3	yóuxì	game
+有名	3	yǒumíng	famous
+又	3	yòu	again
+遇到	3	yùdào	to run into, to meet
+愿意	3	yuànyì	to be willing
+月亮	3	yuèliang	the moon
+越	3	yuè	the more... the more
+云	3	yún	cloud
+站	3	zhàn	station; to stand
+照顾	3	zhàogu	to look after
+照片	3	zhàopiàn	photo
+照相机	3	zhàoxiàngjī	camera
+着急	3	zháojí	anxious, in a hurry
+只	3	zhǐ	only
+中间	3	zhōngjiān	middle
+终于	3	zhōngyú	finally
+种	3	zhǒng	kind, type
+重要	3	zhòngyào	important
+周末	3	zhōumò	weekend
+主要	3	zhǔyào	main
+注意	3	zhùyì	to pay attention
+祝	3	zhù	to wish (someone well)
+字典	3	zìdiǎn	dictionary
+自己	3	zìjǐ	oneself
+总是	3	zǒngshì	always
+最近	3	zuìjìn	recently
+作业	3	zuòyè	homework
+作用	3	zuòyòng	effect

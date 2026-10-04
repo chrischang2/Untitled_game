@@ -18,7 +18,7 @@ namespace UntitledGame.Fishing
 
         public static CaughtRecord Get(string id) => SaveSystem.Data.journal.FirstOrDefault(r => r.speciesId == id);
 
-        public static int SpeciesDiscovered => SaveSystem.Data.journal.Count(r => r.count > 0);
+        public static int SpeciesDiscovered => SaveSystem.Data.journal.Count(r => r.count > 0 && FishDatabase.Get(r.speciesId) != null);
 
         public static int TotalCatches => SaveSystem.Data.totalCatches;
 

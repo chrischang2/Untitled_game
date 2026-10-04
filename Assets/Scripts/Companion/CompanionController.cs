@@ -79,6 +79,20 @@ namespace UntitledGame.Companion
             Vector3 toPlayer = target.position - transform.position;
             toPlayer.y = 0f;
             float dist = toPlayer.magnitude;
+
+            // The player is out in the boat or on the island: wait on the mainland (no following across the water).
+            if (Fishing.Rowboat.PlayerAboard || WorldShape.OnIsland(target.position.x, target.position.z, 6f))
+            {
+                _crumbs.Clear();
+                _lastCrumb = target.position;
+                _moving = false;
+                _sitting = false;
+                _sitSpot = null;
+                Face(toPlayer);
+                SnapToGround();
+                UpdateAnimation(voice != null && voice.IsSpeaking);
+                return;
+            }
             if (dist > 32f) TeleportNearPlayer();
 
             bool fishing = playerFishing != null && playerFishing.State != FishingState.Idle;
@@ -203,7 +217,7 @@ namespace UntitledGame.Companion
         private void SnapToGround()
         {
             Vector3 p = transform.position;
-            float y = WorldShape.IsOnDock(p.x, p.z) ? WorldShape.DockDeckHeight : Mathf.Max(WorldShape.TerrainHeight(p.x, p.z), WorldShape.WaterLevel - 0.3f);
+            float y = Cabin.GroundHeight(p);
             p.y = Mathf.Lerp(p.y, y, 1f - Mathf.Exp(-20f * Time.deltaTime));
             transform.position = p;
         }
@@ -217,7 +231,7 @@ namespace UntitledGame.Companion
             _moving = false;
             TeleportNearPlayer();
             Vector3 p = transform.position;
-            p.y = WorldShape.IsOnDock(p.x, p.z) ? WorldShape.DockDeckHeight : Mathf.Max(WorldShape.TerrainHeight(p.x, p.z), WorldShape.WaterLevel - 0.3f);
+            p.y = Cabin.GroundHeight(p);
             transform.position = p;
             Vector3 face = target.position - p;
             face.y = 0f;
@@ -228,9 +242,11 @@ namespace UntitledGame.Companion
         {
             Vector3[] options = { target.position - target.forward * 2f, target.position - target.forward * 1.2f + target.right * 0.9f, target.position - target.forward * 1.2f - target.right * 0.9f };
             Vector3 p = target.position;
+            bool playerInside = Cabin.IsInside(target.position);
             foreach (var o in options)
             {
-                if (PlayerController.IsWalkable(o)) { p = o; break; }
+                // Stay on the player's side of the cabin walls.
+                if (PlayerController.IsWalkable(o) && Cabin.IsInside(o) == playerInside) { p = o; break; }
             }
             transform.position = p;
             _crumbs.Clear();

@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 using UntitledGame.Core;
 using UntitledGame.Economy;
@@ -94,6 +95,7 @@ namespace UntitledGame.Home
 
             animator?.PlayOnce("eat", "idle", 0.15f);
             AudioManager.Instance?.PlaySfx("SFX/bubble_02", 0.35f, 0.2f);
+            CheckFull();
             SaveSystem.Save();
             Effects.Sparkle(transform.position + Vector3.up * 0.5f, 10);
             if (player != null) FacePoint(player.position);
@@ -130,6 +132,7 @@ namespace UntitledGame.Home
         {
             UpdateNeeds();
             UpdateCollar();
+            UpdateBaitGift();
 
             switch (_mode)
             {
@@ -143,6 +146,7 @@ namespace UntitledGame.Home
                         Pet.hunger = 0f;
                         Pet.bowlFilled = false;
                         Pet.happiness = Mathf.Clamp01(Pet.happiness + 0.15f);
+                        CheckFull();
                         SaveSystem.Save();
                         HomeItems.Instance?.RefreshBowl();
                         SetMode(Mode.Idle, 4f);
@@ -152,6 +156,65 @@ namespace UntitledGame.Home
                     if (Time.time > _modeUntil && Time.time > _nextDecision) Decide();
                     break;
             }
+        }
+
+        private static int Today => DayNightCycle.Instance != null ? DayNightCycle.Instance.Day : SaveSystem.Data.day;
+
+        /// <summary>Fed until full: remember the day; she'll bring a present tomorrow.</summary>
+        private void CheckFull()
+        {
+            if (Pet.hunger > 0.12f || Pet.fullDay == Today) return;
+            Pet.fullDay = Today;
+            ChatAudit.Write("PET", $"Tangyuan is full (day {Today}): she'll bring some bait tomorrow");
+            GameEvents.Toast("Tangyuan is full and purring. She looks like she's planning something for tomorrow...", 3.5f);
+        }
+
+        /// <summary>
+        /// The day after being fed until full, Tangyuan brings the player a little bait: a random kind Old Wang would sell
+        /// you (unlocked by friendship), cheaper kinds more often.
+        /// </summary>
+        private void UpdateBaitGift()
+        {
+            if (Pet.fullDay < 0 || Today <= Pet.fullDay || Pet.giftDay >= Today) return;
+            if (player == null || DistanceToPlayer > 10f || Fishing.Rowboat.PlayerAboard) return;
+            var (bait, count) = PickBaitGift();
+            if (bait != null && !Inventory.HasRoomFor(bait.id, count))
+            {
+                if (Time.frameCount % 600 == 0) GameEvents.Toast("Tangyuan has something for you, but your bag is full!", 3f);
+                return; // she waits until you have room
+            }
+            Pet.giftDay = Today;
+            Pet.fullDay = -1;
+            if (bait == null) return;
+            Inventory.Add(bait.id, count);
+            ChatAudit.Write("PET", $"Tangyuan brought {count} x {bait.english}");
+            animator?.PlayOnce("gesture-positive", "idle", 0.15f);
+            AudioManager.Instance?.PlaySfx("SFX/ui_pluck_002", 0.4f, 0.2f);
+            Effects.Sparkle(transform.position + Vector3.up * 0.5f, 16);
+            FacePoint(player.position);
+            GameEvents.Toast($"Tangyuan brought you {count} {bait.english}! A thank-you for feeding her so well yesterday.", 5f);
+            UntitledGame.Companion.CompanionBrain.Current?.SendGameEvent(
+                $"{UntitledGame.Companion.CompanionPersona.PetName} just brought the player {count} {bait.hanzi} [{bait.english.ToLower()}] as a thank-you for being fed so well yesterday.",
+                "React with delight in one short sentence. No lesson.");
+            SaveSystem.Save();
+        }
+
+        /// <summary>A bait Old Wang would sell you right now, weighted towards cheap ones (weight = 1 / price).</summary>
+        public static (ItemDef bait, int count) PickBaitGift()
+        {
+            var shop = Catalog.Shop("tackle");
+            int friendship = Progression.Affinity.Level("tackle");
+            var baits = shop.items.Select(Catalog.Get).Where(i => i != null && i.category == ItemCategory.Bait && i.minAffinity <= friendship).ToList();
+            if (baits.Count == 0) return (null, 0);
+            float total = baits.Sum(b => 1f / Mathf.Max(1, b.price));
+            float roll = Random.value * total;
+            foreach (var b in baits)
+            {
+                roll -= 1f / Mathf.Max(1, b.price);
+                if (roll <= 0f) return (b, b.price <= 30 ? 5 : 3);
+            }
+            var last = baits[baits.Count - 1];
+            return (last, last.price <= 30 ? 5 : 3);
         }
 
         private void UpdateNeeds()
@@ -242,6 +305,7 @@ namespace UntitledGame.Home
 
             if (_mode == Mode.Following)
             {
+                if (Fishing.Rowboat.PlayerAboard) { SetMode(Mode.Idle, 3f); return; } // cats don't do boats
                 if (Time.time > _modeUntil) { SetMode(Mode.Idle, 3f); return; }
                 if (to.magnitude < 1.2f) { animator?.Play("idle", 0.2f); return; }
                 if (to.magnitude > 30f) { SetMode(Mode.Idle, 3f); return; }
@@ -253,13 +317,17 @@ namespace UntitledGame.Home
             }
 
             float speed = _mode == Mode.Following && to.magnitude > 5f ? walkSpeed * 2.2f : walkSpeed;
-            Vector3 next = transform.position + to.normalized * speed * Time.deltaTime;
+            // In or out of the cabin: go via the door instead of through the wall.
+            Vector3 via = Cabin.Waypoint(transform.position, goal) - transform.position;
+            via.y = 0f;
+            Vector3 dir = via.sqrMagnitude > 0.0001f ? via.normalized : to.normalized;
+            Vector3 next = transform.position + dir * speed * Time.deltaTime;
             if (!PlayerController.IsWalkable(next))
             {
                 SetMode(Mode.Idle, 2f);
                 return;
             }
-            next.y = WorldShape.IsOnDock(next.x, next.z) ? WorldShape.DockDeckHeight : WorldShape.TerrainHeight(next.x, next.z);
+            next.y = Cabin.GroundHeight(next);
             transform.position = next;
             FacePoint(goal);
             animator?.Play(speed > walkSpeed ? "run" : "walk", 0.2f);

@@ -74,7 +74,7 @@ Copy-Kit "mini-characters" "MiniCharacters" @("character-*")
 Copy-Kit "cube-pets" "CubePets" @("animal-cat", "animal-dog", "animal-fish", "animal-chick", "animal-bunny", "animal-crab", "animal-fox", "animal-deer", "animal-parrot", "animal-beaver")
 Copy-Kit "fantasy-town-kit" "FantasyTown" @("lantern", "stall", "stall-green", "stall-red", "stall-bench", "stall-stool", "cart", "fence*", "hedge", "hedge-curved", "rock-*", "tree*", "poles*", "banner-*", "watermill*", "wheel")
 Copy-Kit "furniture-kit" "FurnitureKit" @("chairCushion", "tableRound", "loungeSofa", "lampRoundFloor", "pottedPlant", "rugRound", "bookcaseOpen",
-    "radio", "bear", "cardboardBoxOpen", "cardboardBoxClosed", "books", "plantSmall1")
+    "radio", "bear", "cardboardBoxOpen", "cardboardBoxClosed", "books", "plantSmall1", "bedSingle", "bedDouble")
 Copy-Kit "food-kit" "FoodKit" @("fish", "fish-bones", "cup-tea", "mug", "pot-stew", "pot-stew-lid", "bowl-soup", "loaf", "apple", "skewer", "mussel*")
 
 # ---------------------------------------------------------------- Audio

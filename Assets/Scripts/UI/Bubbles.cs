@@ -37,10 +37,14 @@ namespace UntitledGame.UI
         }
     }
 
-    /// <summary>A speech bubble that floats above one character's head.</summary>
+    /// <summary>
+    /// A speech bubble that floats above one character's head, or (docked) sits at the left edge of the
+    /// screen: Mei's is docked so she never covers the middle of the screen.
+    /// </summary>
     public class SpeechBubble
     {
         public readonly DialogueAgent Agent;
+        public readonly bool Docked;
         private readonly RectTransform _rt;
         private readonly CanvasGroup _group;
         private readonly TextMeshProUGUI _text, _pinyin;
@@ -49,9 +53,10 @@ namespace UntitledGame.UI
         private float _reveal;
         private float _hideAt;
 
-        public SpeechBubble(RectTransform parent, DialogueAgent agent, Color tagColor)
+        public SpeechBubble(RectTransform parent, DialogueAgent agent, Color tagColor, bool docked = false)
         {
             Agent = agent;
+            Docked = docked;
             var bubble = UIFactory.Panel(parent, "Bubble_" + agent.DisplayNameEnglish);
             _rt = bubble.rectTransform;
             _rt.anchorMin = _rt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -64,6 +69,7 @@ namespace UntitledGame.UI
             var tail = UIFactory.Image(bubble.transform, "Tail", UITheme.Cream.WithAlpha(0.96f), GameAssets.Instance.roundedRectSmall);
             tail.rectTransform.Anchor(new Vector2(0.5f, 0f), new Vector2(0.5f, 0.5f), new Vector2(0, 2), new Vector2(26, 26));
             tail.rectTransform.localRotation = Quaternion.Euler(0, 0, 45);
+            tail.gameObject.SetActive(!docked);
             var name = UIFactory.Panel(bubble.transform, "NameTag", tagColor, shadow: false, small: true);
             name.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 0.5f), new Vector2(26, 0), new Vector2(Mathf.Max(92, agent.DisplayName.Length * 30 + 30), 38));
             var nameText = UIFactory.Text(name.transform, "Name", agent.DisplayName, 24, Color.white, TextAlignmentOptions.Center, title: true);
@@ -134,7 +140,7 @@ namespace UntitledGame.UI
                 _text.text = _full;
                 _text.maxVisibleCharacters = Mathf.FloorToInt(_reveal);
                 pinyin = _pinyinLine;
-                const float maxWidth = 580;
+                float maxWidth = Docked ? 470 : 580;
                 Vector2 pref = _text.GetPreferredValues(_full, maxWidth - 52, 1000);
                 Vector2 prefPy = pinyin.Length > 0 ? _pinyin.GetPreferredValues(pinyin, maxWidth - 52, 1000) : Vector2.zero;
                 // Italic pinyin measures a little narrow; leave slack, then re-measure at the final width.
@@ -150,7 +156,15 @@ namespace UntitledGame.UI
 
             _group.alpha = Mathf.MoveTowards(_group.alpha, show ? 1f : 0f, Time.deltaTime * 4f);
             Visible = false;
-            if (_group.alpha > 0.001f && ui.ToCanvas(Agent.transform.position + Vector3.up * 1.6f, out var p, out bool behind))
+            if (Docked)
+            {
+                // Left edge, under the clock and money panels.
+                Vector2 half = ui.RootSize * 0.5f;
+                Target = new Vector2(-half.x + 30f + _rt.sizeDelta.x * 0.5f, half.y - 290f - _rt.sizeDelta.y);
+                Visible = _group.alpha > 0.001f;
+                if (Visible && _rt.anchoredPosition.y > half.y) _rt.anchoredPosition = Target;
+            }
+            else if (_group.alpha > 0.001f && ui.ToCanvas(Agent.transform.position + Vector3.up * 1.6f, out var p, out bool behind))
             {
                 if (behind) p = new Vector2(0, -ui.RootSize.y * 0.5f + 260);
                 Target = ui.ClampToScreen(p, _rt.sizeDelta, _rt.pivot);
@@ -164,13 +178,15 @@ namespace UntitledGame.UI
 
         public void Apply()
         {
-            if (Visible) _rt.anchoredPosition = Vector2.Lerp(_rt.anchoredPosition, Target, 1f - Mathf.Exp(-14f * Time.deltaTime));
+            if (!Visible) return;
+            // Docked bubbles don't glide (they used to slide over the energy bar after waking up).
+            _rt.anchoredPosition = Docked ? Target : Vector2.Lerp(_rt.anchoredPosition, Target, 1f - Mathf.Exp(-14f * Time.deltaTime));
         }
 
         /// <summary>Pushes overlapping bubbles apart vertically (e.g. two speakers clamped to the same screen edge).</summary>
         public static void Separate(List<SpeechBubble> bubbles, GameUI ui)
         {
-            var vis = bubbles.FindAll(b => b.Visible);
+            var vis = bubbles.FindAll(b => b.Visible && !b.Docked);
             vis.Sort((a, b) => b.Target.y.CompareTo(a.Target.y));
             for (int i = 0; i < vis.Count; i++)
             {
@@ -228,14 +244,7 @@ namespace UntitledGame.UI
                     string py = SaveSystem.Settings.pinyin == PinyinMode.Off ? "" : $"\n<size=17><color=#9FE3DA><i>{Pinyin.Of(k.Shop.hanzi)}</i></color></size>";
                     Show(ref n, ui, k.transform.position + Vector3.up * 2.9f, $"<size=30><b>{k.Shop.hanzi}</b></size>{py}", new Vector2(170, py.Length > 0 ? 78 : 52));
                 }
-                foreach (var tag in PriceTag.All)
-                {
-                    if (Vector3.Distance(player.position, tag.transform.position) > 6.5f) continue;
-                    var def = Catalog.Get(tag.itemId);
-                    if (def == null) continue;
-                    bool owned = def.unique && Inventory.Owns(def.id);
-                    Show(ref n, ui, tag.transform.position + Vector3.up * 0.35f, owned ? "<color=#9FE3DA>owned</color>" : $"¥{def.price}", new Vector2(owned ? 100 : 92, 38));
-                }
+                // (No price bubbles over the goods: they were clutter. Prices are in the shop window when you talk.)
             }
             for (int i = n; i < _pool.Count; i++) _pool[i].rt.gameObject.SetActive(false);
         }

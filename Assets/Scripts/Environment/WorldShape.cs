@@ -3,28 +3,31 @@ using UnityEngine;
 namespace UntitledGame.Environment
 {
     /// <summary>
-    /// Deterministic description of the lake world. Used by the editor world generator to build
-    /// the terrain mesh and at runtime for cheap "is this water / how deep / where's the ground" queries.
+    /// Deterministic description of the seaside world (Willow Bay): a beach running east-west with the sea to the
+    /// north, getting deeper the further out you go. Used by the editor world generator to build the terrain mesh
+    /// and at runtime for cheap "is this water / how deep / where's the ground / how far from shore" queries.
     /// </summary>
     public static class WorldShape
     {
         public const float WaterLevel = 0f;
-        public const float TerrainSize = 260f;
+        public const float TerrainSize = 360f; // big enough that its edge stays out of sight past the island
         public const float PlayableRadius = 82f;
-        public const float LakeBaseRadius = 27f;
+        /// <summary>The shoreline runs east-west at about this z; the sea is north of it (bigger z).</summary>
+        public const float CoastZ = -28f;
 
-        /// <summary>Dock heads out from the south shore towards the lake centre.</summary>
+        /// <summary>The dock heads north from the beach out to sea (DockDirection points inland, south).</summary>
         public const float DockAngleDeg = -90f;
-        public const float DockLength = 13f;
+        public const float DockLength = 7f; // short on purpose: deep water (big fish) needs the boat
         public const float DockWidth = 2.6f;
         public const float DockDeckHeight = 0.55f;
 
-        public static Vector2 LakeCenter => Vector2.zero;
+        /// <summary>A point well out at sea (straight out from the dock), e.g. for rowing tests.</summary>
+        public static Vector2 OpenSea => new Vector2(0f, CoastZ + 60f);
 
         public static Vector2 DockDirection => new Vector2(Mathf.Cos(DockAngleDeg * Mathf.Deg2Rad), Mathf.Sin(DockAngleDeg * Mathf.Deg2Rad));
 
         /// <summary>Where the dock meets the shoreline.</summary>
-        public static Vector2 DockShorePoint => LakeCenter + DockDirection * LakeRadiusAt(DockAngleDeg * Mathf.Deg2Rad);
+        public static Vector2 DockShorePoint => new Vector2(0f, ShoreZ(0f));
 
         /// <summary>Centre of the little camp (cabin, campfire) behind the dock.</summary>
         public static Vector2 CampCenter => DockShorePoint + DockDirection * 13f;
@@ -32,12 +35,32 @@ namespace UntitledGame.Environment
         public const float CampRadius = 10f;
         public const float CampHeight = 0.9f;
 
+        /// <summary>The cabin faces the lake: its front (door) points along this direction.</summary>
+        public static Vector2 CabinForward => -DockDirection;
+        /// <summary>The cabin's right-hand side (Unity's Cross(up, forward)).</summary>
+        public static Vector2 CabinRight => new Vector2(CabinForward.y, -CabinForward.x);
+        public static Vector2 CabinCenter => CampCenter - CabinForward * 5.2f - CabinRight * 1.0f;
+        public const float CabinScale = 2.4f;
+        /// <summary>Half size of the cabin's footprint in metres including the walls (x along CabinRight, y along CabinForward).</summary>
+        public static readonly Vector2 CabinHalfSize = new Vector2(1.5f * CabinScale + 0.4f, 1.0f * CabinScale + 0.4f);
+
+        /// <summary>How far (in metres) a point is outside the cabin's footprint; 0 inside.</summary>
+        public static float DistanceOutsideCabin(float x, float z)
+        {
+            Vector2 p = new Vector2(x, z) - CabinCenter;
+            float lx = Mathf.Abs(Vector2.Dot(p, CabinRight)) - CabinHalfSize.x;
+            float lz = Mathf.Abs(Vector2.Dot(p, CabinForward)) - CabinHalfSize.y;
+            return new Vector2(Mathf.Max(lx, 0f), Mathf.Max(lz, 0f)).magnitude;
+        }
+
         /// <summary>The little market with the four shops, east of the camp.</summary>
         public static Vector2 MarketCenter => CampCenter + new Vector2(24f, 3f);
         public const float MarketRadius = 11f;
         public const float MarketHeight = 1.0f;
-        public const float StallRing = 7.4f;
-        private static readonly float[] StallAngles = { -62f, -21f, 21f, 62f };
+        public const float StallRing = 7.6f;
+        // Nine stalls 37.5 degrees apart around the plaza, leaving the west side open as the entrance. In shop order:
+        // tackle, fish, furniture, pet, books, gym, colours, gifts, and the test centre straight across from the entrance.
+        private static readonly float[] StallAngles = { -75f, -37.5f, 37.5f, 75f, -112.5f, 112.5f, 150f, -150f, 0f };
         public static int StallCount => StallAngles.Length;
 
         /// <summary>Stall i sits on the east side of the plaza, facing its centre.</summary>
@@ -50,26 +73,30 @@ namespace UntitledGame.Environment
         /// <summary>Where a player stands to talk to shop i (in front of the counter).</summary>
         public static Vector2 CustomerSpot(int i) => Vector2.Lerp(StallPosition(i), MarketCenter, 0.38f);
 
-        public static float LakeRadiusAt(float angle)
+        /// <summary>z of the waterline at x: a gently wavy coast, straight and calm around the dock.</summary>
+        public static float ShoreZ(float x)
         {
-            float r = LakeBaseRadius
-                      + 4.5f * Mathf.Sin(2f * angle + 0.7f)
-                      + 2.6f * Mathf.Sin(3f * angle + 2.1f)
-                      + 1.3f * Mathf.Sin(5f * angle + 0.3f);
-            // Keep the dock stretch of shoreline smooth and gently curved.
-            float dockDelta = Mathf.DeltaAngle(angle * Mathf.Rad2Deg, DockAngleDeg);
-            float calm = Mathf.Clamp01(Mathf.Abs(dockDelta) / 25f);
-            float calmR = LakeBaseRadius + 1f;
-            return Mathf.Lerp(calmR, r, calm);
+            float waves = 4.2f * Mathf.Sin(x * 0.045f + 0.7f) + 2.2f * Mathf.Sin(x * 0.11f + 2.1f) + 0.9f * Mathf.Sin(x * 0.23f + 0.3f);
+            float calm = Mathf.Clamp01((Mathf.Abs(x) - 8f) / 16f); // the dock's stretch of beach stays straight
+            float wavesAtDock = 4.2f * Mathf.Sin(0.7f) + 2.2f * Mathf.Sin(2.1f) + 0.9f * Mathf.Sin(0.3f);
+            return CoastZ + Mathf.Lerp(0f, waves - wavesAtDock, calm);
         }
 
-        /// <summary>Signed horizontal distance to the shoreline (negative inside the lake).</summary>
-        public static float ShoreDistance(float x, float z)
-        {
-            Vector2 p = new Vector2(x, z) - LakeCenter;
-            float a = Mathf.Atan2(p.y, p.x);
-            return p.magnitude - LakeRadiusAt(a);
-        }
+        // ---- The island, far out to sea (only the best boat gets past the currents to reach it).
+        public static Vector2 IslandCenter => new Vector2(30f, CoastZ + 140f);
+        public const float IslandRadius = 13f;   // roughly where its beach meets the water
+
+        public static float IslandDistance(float x, float z) => Vector2.Distance(new Vector2(x, z), IslandCenter);
+        public static bool OnIsland(float x, float z, float margin = 0f) => IslandDistance(x, z) < IslandRadius + 4f + margin;
+
+        /// <summary>Height of the island's hill and beaches at a distance from its centre.</summary>
+        private static float IslandProfile(float r) => 2.4f - 3.6f * (r / 14f) * (r / 14f);
+
+        /// <summary>The point on the waterline at x.</summary>
+        public static Vector2 ShorePoint(float x) => new Vector2(x, ShoreZ(x));
+
+        /// <summary>Signed horizontal distance to the shoreline: positive on land, negative out at sea.</summary>
+        public static float ShoreDistance(float x, float z) => ShoreZ(x) - z;
 
         private static float Fbm(float x, float z, int octaves = 4)
         {
@@ -90,20 +117,22 @@ namespace UntitledGame.Environment
             float h;
             if (d < 0f)
             {
-                // Lake bed: gentle shelf near the shore, deeper towards the middle.
-                float depth = Mathf.Min(4.8f, -d * 0.24f + Mathf.Max(0f, -d - 6f) * 0.08f);
-                h = -depth + (Fbm(x * 0.12f, z * 0.12f, 2) - 0.5f) * 0.4f * Mathf.Clamp01(-d / 5f);
+                // Sea bed: a sandy shelf near the beach, then deeper and deeper out to sea.
+                float depth = Mathf.Min(16f, -d * 0.2f + Mathf.Max(0f, -d - 12f) * 0.09f);
+                h = -depth + (Fbm(x * 0.12f, z * 0.12f, 2) - 0.5f) * 0.5f * Mathf.Clamp01(-d / 5f);
             }
             else
             {
-                float beach = Mathf.Min(d, 3f) * 0.11f;
-                float land = Mathf.Max(0f, d - 3f) * 0.045f;
+                // A wide sandy beach, then gently rising land.
+                float beach = Mathf.Min(d, 8f) * 0.06f;
+                float land = Mathf.Max(0f, d - 8f) * 0.045f;
                 float hills = (Fbm(x * 0.022f, z * 0.022f) - 0.35f) * 5.5f * Smooth(4f, 26f, d);
                 h = beach + land + Mathf.Max(hills, -0.2f);
             }
 
+            // Hills ring the land behind the beach (never out at sea).
             float r = new Vector2(x, z).magnitude;
-            h += Smooth(58f, 120f, r) * 16f * (0.55f + 0.6f * Fbm(x * 0.03f + 5f, z * 0.03f + 9f, 3));
+            if (d > 0f) h += Smooth(58f, 120f, r) * Smooth(0f, 18f, d) * 16f * (0.55f + 0.6f * Fbm(x * 0.03f + 5f, z * 0.03f + 9f, 3));
 
             // Flatten a cosy clearing for the camp.
             float campDist = Vector2.Distance(new Vector2(x, z), CampCenter);
@@ -124,6 +153,15 @@ namespace UntitledGame.Environment
             // ...and from the camp to the market.
             float marketPath = DistanceToMarketPath(x, z);
             if (d > 0f) h = Mathf.Lerp((CampHeight + MarketHeight) * 0.5f, h, Smooth(1.5f, 4f, marketPath));
+
+            // Last: level the ground just under the cabin floor so no terrain pokes through it
+            // (the floor sits at CampHeight; the hill behind the camp used to show inside the house).
+            float cabinDist = DistanceOutsideCabin(x, z);
+            if (cabinDist < 4f) h = Mathf.Lerp(CampHeight - 0.08f, h, Smooth(0.6f, 4f, cabinDist));
+
+            // The island rises out of the deep sea.
+            float ir = IslandDistance(x, z);
+            if (ir < 30f) h = Mathf.Max(h, IslandProfile(ir) + (Fbm(x * 0.2f, z * 0.2f, 2) - 0.5f) * 0.3f * Mathf.Clamp01(1f - ir / 14f));
             return h;
         }
 

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Text;
 using UntitledGame.Economy;
 using UntitledGame.Fishing;
+using UntitledGame.Progression;
 
 namespace UntitledGame.Companion
 {
@@ -11,10 +12,30 @@ namespace UntitledGame.Companion
         public static string BuildSystemPrompt(ShopDef shop)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"You are {shop.keeperName}, {shop.personality}. You run the {shop.hanzi} at the little market by Willow Lake (柳湖).");
+            var profile = KeeperProfiles.For(shop.id);
+            string personality = profile != null ? profile.personality : shop.personality;
+            sb.AppendLine($"You are {shop.keeperName}, {personality}. You run the {shop.hanzi} at the little market in the seaside village of Willow Bay (柳湾).");
+            if (profile != null) sb.AppendLine($"How you talk: {profile.speakingStyle}.");
             sb.AppendLine("You ONLY speak Mandarin Chinese in Simplified characters. You do not understand English at all.");
-            sb.AppendLine("Your customer is a foreigner who is just starting to learn Mandarin, so speak slowly and simply: one or two very short sentences " +
-                          "with everyday words (HSK 1-2 level). Be friendly and patient; you are happy they are trying.");
+            sb.AppendLine("Your customer is a foreigner learning Mandarin, so speak slowly and simply: one or two very short sentences. " +
+                          "Use ONLY very common words (HSK levels 1-3, the first 600 words a learner meets), apart from the names of your goods. " +
+                          "Be friendly and patient; you are happy they are trying.");
+            if (profile != null)
+            {
+                sb.AppendLine("About you (only share these when the customer asks or the game tells you to; never all at once): " +
+                              string.Join(" ", profile.facts.Select(f => f.chinese)) +
+                              $" 你喜欢：{string.Join("、", profile.likes)}。你不喜欢：{string.Join("、", profile.dislikes)}。");
+                sb.AppendLine("Things you love talking about: " + string.Join("、", profile.topics) + ".");
+                int level = Affinity.Level(shop.id);
+                sb.AppendLine($"How well you know this customer: {Affinity.LevelHanzi[level]} ({Affinity.LevelEnglish[level]}). " +
+                              (level == 0 ? "You have only just met: be polite and friendly." : level >= 3 ? "You are close friends: be warm and cheerful with them." : "You know them a bit: be warm."));
+            }
+            if (shop.id == "gifts")
+            {
+                sb.AppendLine("You know what everyone at the market likes, and you love telling customers so they can pick good gifts: " +
+                    string.Join("；", KeeperProfiles.All.Where(p => p.shopId != "gifts").Select(p =>
+                        $"{Catalog.Shop(p.shopId)?.keeperName}喜欢{string.Join("和", p.likes)}，不喜欢{string.Join("和", p.dislikes)}")) + "。");
+            }
             sb.AppendLine("Write numbers and prices in Chinese characters (一百二十块). Never use English, pinyin, lists, markdown or emoji. Stay in character.");
             sb.AppendLine("Lines in [Game: ...] tell you what just happened in your shop (which item the customer asked for, its price, whether they can " +
                           "afford it, or that a sale was completed). Follow them exactly and describe the result naturally in Mandarin. Never read them out " +
@@ -24,7 +45,12 @@ namespace UntitledGame.Companion
             if (shop.items.Length > 0)
             {
                 sb.AppendLine("What you sell: " + string.Join("；", shop.items.Select(Catalog.Get).Where(i => i != null)
-                    .Select(i => $"{i.hanzi} {Catalog.ChineseNumber(i.price)}块" + (i.packSize > 1 ? $"（一包{Catalog.ChineseNumber(i.packSize)}个）" : ""))) + "。");
+                    .Select(i => $"{i.hanzi} {Catalog.ChineseNumber(Catalog.PriceOf(i))}块" + (i.packSize > 1 ? $"（一包{Catalog.ChineseNumber(i.packSize)}个）" : ""))) + "。");
+            }
+            if (shop.school)
+            {
+                sb.AppendLine("You run the HSK test centre. The game runs your lessons (上课), free practice (练习) and HSK 1-3 tests (考试) itself when " +
+                              "the student asks for them; in between you just chat. Encourage them to study, and keep your Chinese very simple.");
             }
             if (shop.buysFish)
             {
@@ -45,7 +71,7 @@ namespace UntitledGame.Companion
             {
                 sb.AppendLine("Items for sale (id: Chinese = English, price):");
                 foreach (var i in shop.items.Select(Catalog.Get).Where(i => i != null))
-                    sb.AppendLine($"- {i.id}: {i.hanzi} = {i.english}, {i.price} yuan");
+                    sb.AppendLine($"- {i.id}: {i.hanzi} = {i.english}, {Catalog.PriceOf(i)} yuan");
             }
             if (shop.buysFish)
             {
@@ -63,7 +89,7 @@ namespace UntitledGame.Companion
         public static string ClassifierSchema(ShopDef shop)
         {
             var intents = shop.buysFish
-                ? new[] { "sell_fish", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" }
+                ? new[] { "sell_fish", "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" }
                 : new[] { "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" };
             var items = shop.items.Concat(new[] { "unclear", "none" });
             var fish = FishDatabase.All.Select(f => f.id).Concat(new[] { "all", "none" });

@@ -16,8 +16,10 @@ namespace UntitledGame.Fishing
         private static readonly Color SmallBody = new Color32(0xFF, 0x81, 0x44, 0xFF), SmallFin = new Color32(0xFF, 0xB4, 0x49, 0xFF);
         private static readonly Color LargeBody = new Color32(0x6A, 0x6F, 0x87, 0xFF), LargeFin = new Color32(0xE0, 0x5A, 0x4A, 0xFF);
 
-        public static GameObject Spawn(FishSpecies species, float lengthCm)
+        public static GameObject Spawn(FishSpecies species, float weightKg)
         {
+            // Size on screen follows the weight on a log scale (a 50 g sardine to a 250 kg tuna).
+            float sizeT = Mathf.InverseLerp(Mathf.Log(0.03f), Mathf.Log(250f), Mathf.Log(Mathf.Max(0.03f, weightKg)));
             var ga = GameAssets.Instance;
             GameObject prefab;
             float targetSize;
@@ -26,7 +28,7 @@ namespace UntitledGame.Fishing
             {
                 case CatchModel.LargeFish:
                     prefab = ga.fishLargeModel;
-                    targetSize = Mathf.Lerp(0.6f, 1.5f, Mathf.InverseLerp(25f, 200f, lengthCm));
+                    targetSize = Mathf.Lerp(0.55f, 1.7f, sizeT);
                     break;
                 case CatchModel.Bottle:
                     prefab = ga.bottleModel; targetSize = 0.45f; recolor = false; break;
@@ -36,7 +38,7 @@ namespace UntitledGame.Fishing
                     prefab = ga.driftwoodModel; targetSize = 0.8f; recolor = false; break;
                 default:
                     prefab = ga.fishSmallModel;
-                    targetSize = Mathf.Lerp(0.32f, 0.62f, Mathf.InverseLerp(4f, 40f, lengthCm));
+                    targetSize = Mathf.Lerp(0.3f, 0.75f, Mathf.Clamp01(sizeT * 1.6f));
                     break;
             }
 

@@ -6,9 +6,23 @@ using UntitledGame.Fishing;
 
 namespace UntitledGame.Economy
 {
-    public enum BuyResult { Ok, NotEnoughMoney, AlreadyOwned, Unknown }
+    public enum BuyResult { Ok, NotEnoughMoney, AlreadyOwned, Unknown, NoRoom }
 
-    /// <summary>Money, owned items, the fish bucket and equipment (all persisted in the save file).</summary>
+    /// <summary>One bag slot: a stack of one kind of item, or of one kind of fish.</summary>
+    public class BagSlot
+    {
+        public string itemId;      // or null for fish
+        public string speciesId;   // fish
+        public int count;
+        public int value;          // what it's worth (shop price or what Auntie Chen would pay)
+        public string label;
+    }
+
+    /// <summary>
+    /// Money, owned items, the fish bucket and equipment (all persisted in the save file).
+    /// Only fish go in the bag: up to 20 fish of one kind per slot. You start with 4 slots; Old Wang's buckets give 8, 12
+    /// and 16. Every other item is a key item (bait, gifts, books, furniture...) and never takes bag space.
+    /// </summary>
     public static class Inventory
     {
         public static event Action Changed;
@@ -34,7 +48,7 @@ namespace UntitledGame.Economy
         public static int Count(string id) => D.items.FirstOrDefault(i => i.id == id)?.count ?? 0;
 
         public static bool Owns(string id) =>
-            id == Catalog.StarterRod || Count(id) > 0 || (id == "collar" && D.pet.collar) || D.placed.Any(p => p.id == id);
+            id == Catalog.StarterRod || id == "bed_mat" || Count(id) > 0 || (id == "collar" && D.pet.collar) || D.placed.Any(p => p.id == id);
 
         public static void Add(string id, int count)
         {
@@ -67,7 +81,14 @@ namespace UntitledGame.Economy
             if (def.unique) quantity = 1;
             cost = def.price * Math.Max(1, quantity);
             if (def.unique && Owns(itemId)) { reason = BuyResult.AlreadyOwned; return false; }
+            if (def.category == ItemCategory.Upgrade)
+            {
+                // One level at a time, at the current level's price; nothing past the maximum.
+                if (UntitledGame.Progression.PlayerStats.Level(def.stat) >= UntitledGame.Progression.PlayerStats.MaxLevel) { reason = BuyResult.AlreadyOwned; return false; }
+                cost = Catalog.PriceOf(def);
+            }
             if (D.money < cost) { reason = BuyResult.NotEnoughMoney; return false; }
+            if (def.TakesSlot && !HasRoomFor(itemId, Math.Max(1, quantity) * def.packSize)) { reason = BuyResult.NoRoom; return false; }
             return true;
         }
 
@@ -77,7 +98,8 @@ namespace UntitledGame.Economy
             var def = Catalog.Get(itemId);
             if (def.unique) quantity = 1;
             D.money -= cost;
-            if (def.category == ItemCategory.Wearable && itemId == "collar") D.pet.collar = true;
+            if (def.category == ItemCategory.Upgrade) UntitledGame.Progression.PlayerStats.Upgrade(def.stat);
+            else if (def.category == ItemCategory.Wearable && itemId == "collar") D.pet.collar = true;
             else Add(itemId, quantity * def.packSize);
             if (def.category == ItemCategory.Rod) D.equippedRod = itemId;                     // new rods are equipped right away
             if (def.category == ItemCategory.Bait && string.IsNullOrEmpty(D.selectedBait)) D.selectedBait = itemId;
@@ -116,18 +138,123 @@ namespace UntitledGame.Economy
 
         public static bool HasAccessory(string id) => Count(id) > 0;
 
-        // ------------------------------------------------------------------ bucket
+        /// <summary>The strongest line you own (everyone starts with a 3 kg white line).</summary>
+        public static float LineKg => Owned().Where(x => x.def.category == ItemCategory.Line).Select(x => x.def.lineKg)
+            .DefaultIfEmpty(Catalog.StarterLineKg).Max();
 
-        public static int BucketCapacity => HasAccessory("bucket_big") ? 16 : 8;
+        public static string LineName => Owned().Where(x => x.def.category == ItemCategory.Line).OrderByDescending(x => x.def.lineKg)
+            .Select(x => x.def.english).FirstOrDefault() ?? "White Line (3 kg)";
+
+        public static string LineHanzi => Owned().Where(x => x.def.category == ItemCategory.Line).OrderByDescending(x => x.def.lineKg)
+            .Select(x => x.def.hanzi).FirstOrDefault() ?? "白线";
+
+        // ------------------------------------------------------------------ bag slots
+
+        public const int StartingSlots = 4;
+        public const int ItemStack = 99;
+        public const int FishStack = 20;
+
+        public static int SlotCapacity => Owned().Where(x => x.def.bagSlots > 0).Select(x => x.def.bagSlots).DefaultIfEmpty(StartingSlots).Max();
+
+        private static bool InBag(ItemDef def) => def != null && def.TakesSlot && !(def.category == ItemCategory.Book && UntitledGame.Progression.PlayerStats.HasRead(def.id));
+
+        private static int SlotsFor(int count, int stack) => count <= 0 ? 0 : (count + stack - 1) / stack;
+
+        /// <summary>What's in the bag, slot by slot.</summary>
+        public static List<BagSlot> Slots()
+        {
+            var slots = new List<BagSlot>();
+            foreach (var s in D.items)
+            {
+                var def = Catalog.Get(s.id);
+                if (!InBag(def)) continue;
+                int left = s.count;
+                float unit = def.packSize > 1 ? Catalog.PriceOf(def) / (float)def.packSize : Catalog.PriceOf(def);
+                while (left > 0)
+                {
+                    int n = Math.Min(ItemStack, left);
+                    slots.Add(new BagSlot { itemId = s.id, count = n, value = (int)Math.Round(unit * n), label = def.english });
+                    left -= n;
+                }
+            }
+            foreach (var g in D.bucket.Where(b => FishDatabase.Get(b.speciesId) != null).GroupBy(b => b.speciesId))
+            {
+                var fish = g.ToList();
+                var species = FishDatabase.Get(g.Key);
+                for (int i = 0; i < fish.Count; i += FishStack)
+                {
+                    var part = fish.Skip(i).Take(FishStack).ToList();
+                    slots.Add(new BagSlot { speciesId = g.Key, count = part.Count, value = part.Sum(b => Catalog.FishPrice(species, b.length)), label = species.name });
+                }
+            }
+            return slots;
+        }
+
+        public static int SlotsUsed => Slots().Count;
+        public static int SlotsFree => Math.Max(0, SlotCapacity - SlotsUsed);
+
+        /// <summary>Would adding this many of an item still fit in the bag?</summary>
+        public static bool HasRoomFor(string itemId, int count)
+        {
+            var def = Catalog.Get(itemId);
+            if (!InBag(def)) return true;
+            int have = Count(itemId);
+            int extra = SlotsFor(have + count, ItemStack) - SlotsFor(have, ItemStack);
+            return extra <= 0 || SlotsUsed + extra <= SlotCapacity;
+        }
+
+        public static bool HasRoomForFish(FishSpecies species)
+        {
+            int have = D.bucket.Count(b => b.speciesId == species.id);
+            int extra = SlotsFor(have + 1, FishStack) - SlotsFor(have, FishStack);
+            return extra <= 0 || SlotsUsed + extra <= SlotCapacity;
+        }
+
+        /// <summary>
+        /// Passing out: everything in the bag is lost except the most valuable slots. Returns what was lost.
+        /// (Money, equipment, placed furniture and things at home are safe.)
+        /// </summary>
+        public static List<BagSlot> LoseAllBut(int keep)
+        {
+            var slots = Slots().OrderByDescending(s => s.value).ToList();
+            var lost = slots.Skip(keep).ToList();
+            foreach (var s in lost)
+            {
+                if (s.itemId != null)
+                {
+                    var stack = D.items.FirstOrDefault(i => i.id == s.itemId);
+                    if (stack == null) continue;
+                    stack.count -= s.count;
+                    if (stack.count <= 0)
+                    {
+                        D.items.Remove(stack);
+                        if (D.selectedBait == s.itemId) D.selectedBait = "";
+                    }
+                }
+                else
+                {
+                    // The lightest (cheapest) fish of that kind go first.
+                    var fish = D.bucket.Where(b => b.speciesId == s.speciesId).OrderBy(b => b.length).Take(s.count).ToList();
+                    foreach (var f in fish) D.bucket.Remove(f);
+                }
+            }
+            Notify();
+            return lost;
+        }
+
+        // ------------------------------------------------------------------ bucket (the fish in the bag)
+
+        public static int BucketCapacity => SlotCapacity;
         public static int BucketCount => D.bucket.Count;
-        public static bool BucketFull => D.bucket.Count >= BucketCapacity;
+        /// <summary>No free slot left (a fish of a kind you already carry may still fit in its stack).</summary>
+        public static bool BucketFull => SlotsUsed >= SlotCapacity;
 
         public static IEnumerable<(FishSpecies species, float length)> Bucket =>
             D.bucket.Select(b => (FishDatabase.Get(b.speciesId), b.length)).Where(x => x.Item1 != null);
 
         public static bool AddToBucket(FishSpecies species, float length)
         {
-            if (BucketFull) return false;
+            if (!HasRoomForFish(species)) return false;
             D.bucket.Add(new BucketFish { speciesId = species.id, length = length });
             Notify();
             return true;

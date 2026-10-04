@@ -7,8 +7,9 @@ using UntitledGame.Language;
 namespace UntitledGame.Companion
 {
     /// <summary>
-    /// Voice input: hold V to talk to whoever you're facing (a shopkeeper at their counter, otherwise Mei),
-    /// hold B to always talk to Mei. Audio -> SenseVoice (pinned to Mandarin, in-process) -> text -> character.
+    /// Voice input: hold V to talk to whoever you're talking with (the shopkeeper you started a conversation
+    /// with using E, otherwise Mei), hold B to always talk to Mei - during a shop conversation that's a quiet
+    /// side chat about it. Audio -> SenseVoice (pinned to Mandarin, in-process) -> text -> character.
     /// Optional hands-free mode uses simple voice activity detection instead of a key.
     /// </summary>
     public class VoiceChatController : MonoBehaviour
@@ -41,19 +42,8 @@ namespace UntitledGame.Companion
         public string LastTranscript { get; private set; } = "";
         public CompanionBrain Mei => mei;
 
-        /// <summary>Who V (or hands-free speech) is addressed to right now.</summary>
-        public DialogueAgent CurrentTarget
-        {
-            get
-            {
-                if (player != null)
-                {
-                    var keeper = ShopkeeperBrain.Facing(player);
-                    if (keeper != null) return keeper;
-                }
-                return mei;
-            }
-        }
+        /// <summary>Who V (or hands-free speech) is addressed to right now: the shopkeeper you're in a conversation with (E), else Mei.</summary>
+        public DialogueAgent CurrentTarget => ShopConversation.Active != null ? ShopConversation.Active : mei;
 
         /// <summary>Who the in-progress recording will be sent to.</summary>
         public DialogueAgent RecordingTarget => _recordingFor;
@@ -70,23 +60,46 @@ namespace UntitledGame.Companion
             if (mic == null || mei == null) return;
 
             mic.KeepOpen = HandsFree;
+
+            // Holding a talk key (V, or B for Mei - B works in hands-free mode too).
+            if (_pushToTalk)
+            {
+                if (!mic.IsRecording || mic.IsFinishing)
+                {
+                    _pushToTalk = false;
+                }
+                else
+                {
+                    bool released = !Input.GetKey(_heldKey) || InputGate.GameplayBlocked;
+                    if (released || mic.RecordingSeconds > maxRecordSeconds) StopAndSend();
+                    return;
+                }
+            }
+
+            if (!InputGate.GameplayBlocked && Input.GetKeyDown(meiKey))
+            {
+                if (_vadRecording)
+                {
+                    // Hands-free had started listening for someone else: B takes over for Mei.
+                    _vadRecording = false;
+                    mic.CancelRecording();
+                    _recordingFor?.CancelListening();
+                }
+                if (!mic.IsRecording) TryBegin(meiKey, mei);
+                return;
+            }
+
             if (HandsFree)
             {
                 UpdateHandsFree();
                 return;
             }
 
-            if (mic.IsRecording && !mic.IsFinishing)
-            {
-                bool released = !Input.GetKey(_heldKey) || InputGate.GameplayBlocked;
-                if (released || mic.RecordingSeconds > maxRecordSeconds) StopAndSend();
-                return;
-            }
-
-            if (InputGate.GameplayBlocked) return;
+            if (InputGate.GameplayBlocked || mic.IsRecording) return;
             if (Input.GetKeyDown(talkKey)) TryBegin(talkKey, CurrentTarget);
-            else if (Input.GetKeyDown(meiKey)) TryBegin(meiKey, mei);
         }
+
+        private bool _pushToTalk;
 
         private bool SpeechReady(bool toast)
         {
@@ -117,6 +130,7 @@ namespace UntitledGame.Companion
         {
             if (IsTranscribing || target == null || !SpeechReady(true)) return;
             if (!mic.Begin()) return;
+            _pushToTalk = true;
             _heldKey = key;
             _recordingFor = target;
             HushMei(target);
@@ -186,6 +200,7 @@ namespace UntitledGame.Companion
 
         private void StopAndSend()
         {
+            _pushToTalk = false;
             var target = _recordingFor ?? mei;
             target.BeginTranscribing();
             AudioManager.Instance?.PlaySfx("SFX/ui_pluck_002", 0.3f, 0f);
@@ -214,12 +229,13 @@ namespace UntitledGame.Companion
             string text = null, error = null;
             bool done = false;
             float t0 = Time.realtimeSinceStartup;
-            LocalAIServices.Instance.Speech.Transcribe(samples, (t, e) =>
+            var speech = LocalAIServices.Instance.Speech;
+            speech.Transcribe(samples, (t, e) =>
             {
                 text = t;
                 error = e;
                 done = true;
-            });
+            }, (SpeechEngine.AsrMode)SaveSystem.Settings.asrMode);
             while (!done) yield return null;
             LastTranscriptionSeconds = Time.realtimeSinceStartup - t0;
             IsTranscribing = false;
@@ -235,7 +251,7 @@ namespace UntitledGame.Companion
             string rawText = text;
             text = Normalize(text);
             LastTranscript = text ?? "";
-            ChatAudit.Write(who, $"heard \"{text}\" (recognised in {ChatAudit.Seconds(LastTranscriptionSeconds)}; {clip})",
+            ChatAudit.Write(who, $"heard \"{text}\" ({speech.LastEngine}, recognised in {ChatAudit.Seconds(LastTranscriptionSeconds)}; {clip})",
                 rawText != text ? $"recogniser raw: \"{rawText}\"" : null);
             if (string.IsNullOrWhiteSpace(text) || SpeechText.LooksLikeHallucination(text))
             {

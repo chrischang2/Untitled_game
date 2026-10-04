@@ -42,6 +42,9 @@ namespace UntitledGame.EditorTools
                 new View { name = "market", pos = MarketPoint(-11f, 6f, -3f), lookAt = MarketPoint(2f, 0.5f, 0f), fov = 55 },
                 new View { name = "stall", pos = MarketPoint(0.5f, 2.2f, -5.2f), lookAt = MarketPoint(5.5f, 1f, -5f), fov = 55 },
                 KeeperView(1),
+                new View { name = "plaza", pos = MarketPoint(13f, 11f, 0f), lookAt = MarketPoint(-3f, 0f, 0f), fov = 60 },
+                KeeperView(4, "bookshop"),
+                new View { name = "island", pos = new Vector3(WorldShape.IslandCenter.x - 22f, 9f, WorldShape.IslandCenter.y - 26f), lookAt = new Vector3(WorldShape.IslandCenter.x, 1f, WorldShape.IslandCenter.y), fov = 55 },
                 new View { name = "camp", pos = pp - fwd * 4f + Vector3.up * 3f + Vector3.right * 6f, lookAt = pp - fwd * 12f, fov = 55 },
             };
 
@@ -68,13 +71,13 @@ namespace UntitledGame.EditorTools
         }
 
         /// <summary>What a customer standing at stall i sees.</summary>
-        private static View KeeperView(int i)
+        private static View KeeperView(int i, string name = "keeper")
         {
             Vector2 c = WorldShape.CustomerSpot(i), st = WorldShape.StallPosition(i);
             Vector2 back = (c - st).normalized;
             Vector2 eye = c + back * 1.2f;
             float y = WorldShape.TerrainHeight(eye.x, eye.y);
-            return new View { name = "keeper", pos = new Vector3(eye.x, y + 1.7f, eye.y), lookAt = new Vector3(st.x, y + 0.9f, st.y), fov = 50 };
+            return new View { name = name, pos = new Vector3(eye.x, y + 1.7f, eye.y), lookAt = new Vector3(st.x, y + 0.9f, st.y), fov = 50 };
         }
 
         private static Vector3 MarketPoint(float x, float y, float z)

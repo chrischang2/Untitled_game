@@ -47,6 +47,48 @@ namespace UntitledGame.Companion
             { "yarn", new[] { "毛线" } },
             { "scratcher", new[] { "抓板" } },
             { "collar", new[] { "项圈" } },
+            { "book_basics", new[] { "入门", "入门书", "钓鱼书" } },
+            { "book_shore", new[] { "海边", "海边的书" } },
+            { "book_rocks", new[] { "石头", "石头下" } },
+            { "book_open", new[] { "远海" } },
+            { "book_legends", new[] { "传说", "海的传说" } },
+            { "bait_squid", new[] { "鱿鱼条" } },
+            { "bait_crab", new[] { "螃蟹", "蟹" } },
+            { "bait_fish", new[] { "活鱼", "小鱼" } },
+            { "line_red", new[] { "红色的线", "红色的鱼线", "红鱼线" } },
+            { "line_blue", new[] { "蓝色的线", "蓝色的鱼线", "蓝鱼线" } },
+            { "line_black", new[] { "黑色的线", "黑色的鱼线", "黑鱼线" } },
+            { "line_gold", new[] { "金色的线", "金色的鱼线", "金鱼线" } },
+            { "cos_boat_red", new[] { "红船", "红色船" } },
+            { "cos_boat_blue", new[] { "蓝船", "蓝色船" } },
+            { "cos_boat_yellow", new[] { "黄船", "黄色船" } },
+            { "cos_cat_red", new[] { "红帽子", "猫的红帽子" } },
+            { "cos_cat_yellow", new[] { "黄帽子", "猫的黄帽子" } },
+            { "cos_mei_white", new[] { "白帽子" } },
+            { "cos_mei_red", new[] { "美的红帽" } },
+            { "cos_house_red", new[] { "红色的房子", "红房顶" } },
+            { "cos_house_blue", new[] { "蓝色的房子", "蓝房顶" } },
+            { "cos_house_white", new[] { "白色的房子", "白房顶" } },
+            { "up_cast", new[] { "力量", "力气" } },
+            { "up_bar", new[] { "眼睛" } },
+            { "up_grip", new[] { "跑步", "耐力" } },
+            { "up_luck", new[] { "运气" } },
+            { "up_quality", new[] { "技术" } },
+            { "up_bite", new[] { "安静" } },
+            { "boat", new[] { "船", "租船", "划船", "借船" } },
+            { "boat_oars", new[] { "船桨", "桨" } },
+            { "boat_sail", new[] { "帆" } },
+            { "boat_new", new[] { "新的船", "大船" } },
+            { "gift_flowers", new[] { "鲜花", "一束花" } },
+            { "gift_tea", new[] { "茶叶", "绿茶" } },
+            { "gift_sweets", new[] { "糖果" } },
+            { "gift_hat", new[] { "草帽" } },
+            { "gift_umbrella", new[] { "雨伞" } },
+            { "cos_boat_gold", new[] { "金船", "金色船" } },
+            { "cos_cat_green", new[] { "绿帽子", "猫的绿帽子" } },
+            { "cos_cat_gold", new[] { "金帽子", "猫的金帽子" } },
+            { "cos_mei_blue", new[] { "蓝帽子", "美的蓝帽" } },
+
         };
 
         private static readonly string[] Decline = { "不要", "不用", "算了", "不买", "不卖", "太贵", "不了", "别" };
@@ -56,6 +98,26 @@ namespace UntitledGame.Companion
         private static readonly string[] BrowseWords = { "卖什么", "买什么", "有什么", "卖啥", "有啥", "看看", "看一看", "看一下", "都有" };
         private static readonly string[] Thanks = { "谢谢", "多谢", "谢了" };
         private static readonly string[] Goodbyes = { "再见", "拜拜", "走了", "下次见", "明天见" };
+
+        /// <summary>
+        /// Is the customer asking about the shopkeeper themself? Returns "hobby", "like", "dislike", "hometown",
+        /// "family" or null. (你喜欢做什么 is a hobby question, 你喜欢什么 a "likes" one.)
+        /// </summary>
+        public static string FactQuestion(string text)
+        {
+            string s = Clean(text);
+            if (s.Length < 3) return null;
+            bool asking = s.Contains("什么") || s.Contains("吗") || s.Contains("哪") || s.Contains("几") || s.Contains("谁") || s.Contains("怎么");
+            if (s.Contains("爱好") || (s.Contains("喜欢做") && s.Contains("什么")) || (s.Contains("周末") && s.Contains("做")) || s.Contains("有空")) return "hobby";
+            if (s.Contains("不喜欢") && asking) return "dislike";
+            if (s.Contains("讨厌")) return "dislike";
+            if (s.Contains("喜欢") && s.Contains("什么")) return "like";
+            if (s.Contains("哪里人") || s.Contains("哪儿人") || s.Contains("哪国人") || s.Contains("老家") ||
+                ((s.Contains("哪里") || s.Contains("哪儿")) && (s.Contains("来") || s.Contains("长大")))) return "hometown";
+            if ((s.Contains("家") && (s.Contains("几个人") || s.Contains("几口人") || s.Contains("家人") || s.Contains("家里"))) ||
+                s.Contains("孩子") && asking || s.Contains("结婚")) return "family";
+            return null;
+        }
 
         public static Result Parse(ShopDef shop, string text, bool offerPending)
         {
@@ -84,6 +146,8 @@ namespace UntitledGame.Companion
             {
                 if (ContainsAny(s, Decline)) return new Result { intent = "decline" };
                 if (ContainsAny(s, Confirm)) return new Result { intent = "confirm" };
+                // A lone 要 is easily misheard (药, 摇, 咬...): any short answer that sounds like "yao" is a yes.
+                if (s.Length <= 2 && s.Any(c => Syllable(c) == "yao")) return new Result { intent = "confirm" };
             }
             if (shop.buysFish && mentionsFish && !offerPending && (s.Contains("有") || s.Contains("这些") || s.Contains("看看")))
                 return new Result { intent = "sell_fish", fish = FindFish(s) };

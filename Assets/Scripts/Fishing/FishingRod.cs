@@ -34,6 +34,13 @@ namespace UntitledGame.Fishing
         public Vector3 BobberPosition => _bobber != null ? _bobber.position : transform.position;
         public Transform Bobber => _bobber;
 
+        /// <summary>The rod is only in the player's hand while fishing; otherwise it's put away.</summary>
+        public bool Stowed
+        {
+            get => _rodPivot != null && !_rodPivot.gameObject.activeSelf;
+            set { if (_rodPivot != null && _rodPivot.gameObject.activeSelf == value) _rodPivot.gameObject.SetActive(!value); }
+        }
+
         public void SetHand(Transform handBone, Vector3 offset)
         {
             hand = handBone;

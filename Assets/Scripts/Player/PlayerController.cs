@@ -32,6 +32,9 @@ namespace UntitledGame.Player
         public CharacterAnimator Animator => animator;
         public bool OnDock => WorldShape.IsOnDock(transform.position.x, transform.position.z);
 
+        /// <summary>Set while sitting in the rowboat: no walking, gravity or footsteps; the boat moves us.</summary>
+        public Transform Seat { get; set; }
+
         private void Awake()
         {
             _controller = GetComponent<CharacterController>();
@@ -48,6 +51,15 @@ namespace UntitledGame.Player
 
         private void Update()
         {
+            if (Seat != null)
+            {
+                IsMoving = false;
+                Speed = 0f;
+                _lastPos = transform.position;
+                if (animator != null && !animator.IsPlayingOneShot)
+                    animator.Play(string.IsNullOrEmpty(ActionAnimation) ? "sit" : ActionAnimation, 0.2f);
+                return;
+            }
             Vector2 input = Vector2.zero;
             bool sprint = false;
             if (!InputGate.MovementBlocked)
@@ -99,6 +111,7 @@ namespace UntitledGame.Player
 
         public static bool IsWalkable(Vector3 p)
         {
+            if (WorldShape.OnIsland(p.x, p.z)) return WorldShape.TerrainHeight(p.x, p.z) > WorldShape.WaterLevel - 0.3f;
             if (new Vector2(p.x, p.z).magnitude > WorldShape.PlayableRadius) return false;
             if (WorldShape.IsOnDock(p.x, p.z, -0.25f)) return true;
             return WorldShape.TerrainHeight(p.x, p.z) > WorldShape.WaterLevel - 0.3f;

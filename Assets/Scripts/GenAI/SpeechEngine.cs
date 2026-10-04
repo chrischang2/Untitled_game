@@ -61,19 +61,35 @@ namespace UntitledGame.GenAI
     /// </summary>
     public class SpeechEngine : IDisposable
     {
-        public const string VoiceMei = "mei";          // Matcha zh-en: Mei's Mandarin
-        public const string VoiceEnglish = "en";       // Piper Kristin: Mei's English asides
+        public const string VoiceMei = "mei";          // Matcha zh-en: Mei's Mandarin ("classic" voice)
+        public const string VoiceEnglish = "en";       // Piper Kristin: Mei's English asides (classic voice)
         public const string VoiceMale = "zh_male";     // Piper chaowen
         public const string VoiceFemale = "zh_female"; // Piper xiao_ya
+        public const string VoiceNatural = "natural";  // Kokoro v1.1-zh: 100+ speakers, Mandarin + English
+
+        /// <summary>A voice id for one speaker of a multi-speaker voice: "natural:22".</summary>
+        public static string Speaker(string voice, int speakerId) => $"{voice}:{speakerId}";
 
         public class VoiceSpec
         {
             public string id;
             public OfflineTtsConfig config;
+            /// <summary>Slow voices get their own thread so they never hold up the quick shopkeeper voices.</summary>
+            public bool ownThread;
         }
 
         private OfflineRecognizer _asr;
-        private readonly Dictionary<string, OfflineTts> _voices = new Dictionary<string, OfflineTts>();
+        private OfflineRecognizer _qwen;
+
+        /// <summary>Qwen3-ASR 0.6B: better than SenseVoice at English (and mixed) lines, worse at learners' Mandarin, ~8x slower.</summary>
+        public bool QwenReady { get; private set; }
+
+        /// <summary>Which recogniser produced the last result, for the chat log (written on the ASR thread).</summary>
+        public volatile string LastEngine = "";
+
+        public enum AsrMode { Auto = 0, SenseVoice = 1, Qwen = 2 }
+        private readonly ConcurrentDictionary<string, OfflineTts> _voices = new ConcurrentDictionary<string, OfflineTts>();
+        private readonly ConcurrentDictionary<string, Worker> _voiceWorkers = new ConcurrentDictionary<string, Worker>();
         private readonly Dictionary<string, VoiceSpec> _specs = new Dictionary<string, VoiceSpec>();
         private readonly Worker _asrWorker = new Worker("ASR");
         private readonly Worker _ttsWorker = new Worker("TTS");
@@ -118,11 +134,30 @@ namespace UntitledGame.GenAI
                     Debug.LogWarning("[Speech] " + Error);
                 }
 
-                // Voices load on the TTS thread (Mei first so she's ready soonest).
+                // Slow voices load (and later speak) on their own thread, in parallel with the rest.
+                foreach (var v in voices)
+                {
+                    if (!v.ownThread) continue;
+                    var spec = v;
+                    var worker = _voiceWorkers.GetOrAdd(spec.id, id => new Worker("TTS-" + id));
+                    worker.Post(() =>
+                    {
+                        try
+                        {
+                            var sw = System.Diagnostics.Stopwatch.StartNew();
+                            _voices[spec.id] = new OfflineTts(spec.config);
+                            Debug.Log($"[Speech] Voice {spec.id} loaded in {sw.Elapsed.TotalSeconds:0.0}s");
+                        }
+                        catch (Exception e) { Debug.LogWarning($"[Speech] Voice {spec.id} failed to load: {e.Message}"); }
+                    });
+                }
+
+                // The other voices load on the shared TTS thread (Mei first so she's ready soonest).
                 _ttsWorker.Post(() =>
                 {
                     foreach (var v in voices)
                     {
+                        if (v.ownThread) continue;
                         try { _voices[v.id] = new OfflineTts(v.config); }
                         catch (Exception e) { Debug.LogWarning($"[Speech] Voice {v.id} failed to load: {e.Message}"); }
                     }
@@ -132,10 +167,75 @@ namespace UntitledGame.GenAI
             });
         }
 
-        public bool HasVoice(string id) => _voices.ContainsKey(id);
+        /// <summary>True once the voice (or the multi-speaker voice behind a "natural:22" id) has loaded.</summary>
+        public bool HasVoice(string id) => _voices.ContainsKey(SplitSpeaker(id, out _));
 
-        /// <summary>Transcribes 16 kHz mono audio. Callback gets (text, null) or (null, error).</summary>
-        public void Transcribe(float[] samples16k, Action<string, string> callback)
+        /// <summary>Configured (it may still be loading).</summary>
+        public bool HasVoiceConfigured(string id) => _specs.ContainsKey(SplitSpeaker(id, out _));
+
+        private static string SplitSpeaker(string id, out int speaker)
+        {
+            speaker = 0;
+            if (string.IsNullOrEmpty(id)) return id;
+            int colon = id.IndexOf(':');
+            if (colon < 0) return id;
+            int.TryParse(id.Substring(colon + 1), out speaker);
+            return id.Substring(0, colon);
+        }
+
+        /// <summary>Loads Qwen3-ASR on the recognition thread (after SenseVoice, so it never delays the first words).</summary>
+        public void LoadQwen(string dir, int threads)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            _asrWorker.Post(() =>
+            {
+                try
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var cfg = OfflineRecognizerConfig.Default();
+                    cfg.ModelConfig.Qwen3Asr.ConvFrontend = Path.Combine(dir, "conv_frontend.onnx");
+                    cfg.ModelConfig.Qwen3Asr.Encoder = Path.Combine(dir, "encoder.int8.onnx");
+                    cfg.ModelConfig.Qwen3Asr.Decoder = Path.Combine(dir, "decoder.int8.onnx");
+                    cfg.ModelConfig.Qwen3Asr.Tokenizer = Path.Combine(dir, "tokenizer");
+                    cfg.ModelConfig.NumThreads = threads;
+                    cfg.ModelConfig.Provider = "cpu";
+                    cfg.ModelConfig.Debug = 0;
+                    _qwen = new OfflineRecognizer(cfg);
+                    QwenReady = true;
+                    Debug.Log($"[Speech] Qwen3-ASR loaded in {sw.Elapsed.TotalSeconds:0.0}s");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[Speech] Qwen3-ASR failed to load: " + e.Message);
+                }
+            });
+        }
+
+        private static string Decode(OfflineRecognizer rec, float[] samples16k)
+        {
+            using var stream = rec.CreateStream();
+            stream.AcceptWaveform(16000, samples16k);
+            rec.Decode(stream);
+            return stream.Result.Text;
+        }
+
+        private static bool HasEnglish(string text)
+        {
+            int latin = 0;
+            foreach (char c in text ?? "") if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) latin++;
+            return latin >= 3;
+        }
+
+        /// <summary>Qwen3 sometimes runs on (repeating, or reciting) far past what the audio could hold.</summary>
+        private static bool LooksRunaway(string text, float seconds) =>
+            string.IsNullOrWhiteSpace(text) || text.Length > seconds * 9f + 8f;
+
+        /// <summary>
+        /// Transcribes 16 kHz mono audio. Callback gets (text, null) or (null, error).
+        /// Auto: SenseVoice (fast, best for learners' Mandarin); lines with English in them are re-heard by Qwen3-ASR,
+        /// which handles English and mixed sentences much better. Tested on the player's own recordings.
+        /// </summary>
+        public void Transcribe(float[] samples16k, Action<string, string> callback, AsrMode mode = AsrMode.Auto)
         {
             if (!AsrReady)
             {
@@ -145,12 +245,33 @@ namespace UntitledGame.GenAI
             _asrWorker.Post(() =>
             {
                 string text = null, error = null;
+                float seconds = samples16k.Length / 16000f;
                 try
                 {
-                    using var stream = _asr.CreateStream();
-                    stream.AcceptWaveform(16000, samples16k);
-                    _asr.Decode(stream);
-                    text = stream.Result.Text;
+                    if (mode == AsrMode.Qwen && QwenReady)
+                    {
+                        text = Decode(_qwen, samples16k);
+                        LastEngine = "Qwen3-ASR";
+                        if (LooksRunaway(text, seconds))
+                        {
+                            text = Decode(_asr, samples16k);
+                            LastEngine = "SenseVoice (Qwen3 ran away)";
+                        }
+                    }
+                    else
+                    {
+                        text = Decode(_asr, samples16k);
+                        LastEngine = "SenseVoice";
+                        if (mode == AsrMode.Auto && QwenReady && HasEnglish(text))
+                        {
+                            string q = Decode(_qwen, samples16k);
+                            if (!LooksRunaway(q, seconds))
+                            {
+                                LastEngine = $"Qwen3-ASR (English; SenseVoice heard \"{text}\")";
+                                text = q;
+                            }
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -163,19 +284,21 @@ namespace UntitledGame.GenAI
         /// <summary>Synthesises text with a voice; callback gets PCM (or null) on the main thread.</summary>
         public void Synthesize(string voiceId, string text, float speed, SpeechTicket ticket, Action<WavUtility.PcmData?> callback)
         {
-            if (!_voices.ContainsKey(voiceId) || string.IsNullOrWhiteSpace(text))
+            string baseId = SplitSpeaker(voiceId, out int speaker);
+            if (!_voices.TryGetValue(baseId, out var tts) || string.IsNullOrWhiteSpace(text))
             {
                 callback?.Invoke(null);
                 return;
             }
-            _ttsWorker.Post(() =>
+            var worker = _voiceWorkers.TryGetValue(baseId, out var own) ? own : _ttsWorker;
+            worker.Post(() =>
             {
                 WavUtility.PcmData? pcm = null;
                 if (ticket == null || !ticket.Cancelled)
                 {
                     try
                     {
-                        var audio = _voices[voiceId].Generate(text, speed, 0);
+                        var audio = tts.Generate(text, speed, speaker);
                         var samples = audio.Samples;
                         int rate = audio.SampleRate;
                         audio.Dispose();
@@ -194,7 +317,9 @@ namespace UntitledGame.GenAI
         {
             _asrWorker.Dispose();
             _ttsWorker.Dispose();
+            foreach (var w in _voiceWorkers.Values) w.Dispose();
             _asr?.Dispose();
+            _qwen?.Dispose();
             foreach (var v in _voices.Values) v.Dispose();
             _voices.Clear();
         }
@@ -214,6 +339,26 @@ namespace UntitledGame.GenAI
             c.RuleFsts = JoinExisting(dir, "date-zh.fst", "phone-zh.fst", "number-zh.fst");
             c.MaxNumSentences = 1;
             return new VoiceSpec { id = id, config = c };
+        }
+
+        /// <summary>
+        /// Kokoro v1.1-zh: much more natural than Matcha/Piper, but about 0.6x real time on this CPU, so it
+        /// gets its own thread and the caller feeds it short chunks (see <c>CharacterVoice</c>).
+        /// </summary>
+        public static VoiceSpec Kokoro(string id, string dir, int threads)
+        {
+            var c = OfflineTtsConfig.Default();
+            c.Model.Kokoro.Model = Path.Combine(dir, "model.onnx");
+            c.Model.Kokoro.Voices = Path.Combine(dir, "voices.bin");
+            c.Model.Kokoro.Tokens = Path.Combine(dir, "tokens.txt");
+            c.Model.Kokoro.DataDir = Path.Combine(dir, "espeak-ng-data");
+            c.Model.Kokoro.DictDir = Path.Combine(dir, "dict");
+            c.Model.Kokoro.Lexicon = Path.Combine(dir, "lexicon-us-en.txt") + "," + Path.Combine(dir, "lexicon-zh.txt");
+            c.Model.NumThreads = threads;
+            c.Model.Provider = "cpu";
+            c.RuleFsts = JoinExisting(dir, "date-zh.fst", "phone-zh.fst", "number-zh.fst");
+            c.MaxNumSentences = 1;
+            return new VoiceSpec { id = id, config = c, ownThread = true };
         }
 
         public static VoiceSpec Piper(string id, string dir, int threads)
