@@ -61,17 +61,50 @@ namespace UntitledGame.Environment
         // Nine stalls 37.5 degrees apart around the plaza, leaving the west side open as the entrance. In shop order:
         // tackle, fish, furniture, pet, books, gym, colours, gifts, and the test centre straight across from the entrance.
         private static readonly float[] StallAngles = { -75f, -37.5f, 37.5f, 75f, -112.5f, 112.5f, 150f, -150f, 0f };
-        public static int StallCount => StallAngles.Length;
+        /// <summary>The nine plaza stalls, then 海叔's crab stall (stall 9) down the beach.</summary>
+        public static int StallCount => StallAngles.Length + 1;
+        public const int CrabberStall = 9;
 
-        /// <summary>Stall i sits on the east side of the plaza, facing its centre.</summary>
+        // ---- The seafront east of the market: a beach path to 海叔's crab stall, past the three games stalls.
+        public static Vector2 CrabberPosition => new Vector2(MarketCenter.x + 26f, ShoreZ(MarketCenter.x + 26f) - 4.5f);
+        public const float SeafrontHeight = 0.55f;
+        /// <summary>The games stalls (mahjong, jianzi, pitch-pot), in a row facing the beach path.</summary>
+        public static Vector2 GameStallPosition(int k)
+        {
+            float x = MarketCenter.x + 14f + k * 4.6f;
+            return new Vector2(x, ShoreZ(x) - 11.5f);
+        }
+        public static Vector2 GameStallFront => new Vector2(0f, 1f);
+
+        public static float DistanceToSeafrontPath(float x, float z)
+        {
+            Vector2 a = MarketCenter + new Vector2(MarketRadius * 0.8f, 1.5f);
+            Vector2 b = CrabberPosition + new Vector2(0f, -3.2f);
+            return DistanceToSegment(new Vector2(x, z), a, b);
+        }
+
+        /// <summary>Near the seafront stalls (keeps trees and rocks away).</summary>
+        public static bool InSeafront(float x, float z, float margin = 0f)
+        {
+            var p = new Vector2(x, z);
+            if (Vector2.Distance(p, CrabberPosition) < 4.5f + margin) return true;
+            for (int k = 0; k < 3; k++) if (Vector2.Distance(p, GameStallPosition(k)) < 3.6f + margin) return true;
+            return false;
+        }
+
+        /// <summary>Stall i: plaza stalls face the plaza's centre; the crab stall faces inland, its back to the sea.</summary>
         public static Vector2 StallPosition(int i)
         {
+            if (i == CrabberStall) return CrabberPosition;
             float a = StallAngles[i] * Mathf.Deg2Rad;
             return MarketCenter + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * StallRing;
         }
 
+        /// <summary>The way stall i's counter faces (towards its customers).</summary>
+        public static Vector2 StallFront(int i) => i == CrabberStall ? new Vector2(0f, -1f) : (MarketCenter - StallPosition(i)).normalized;
+
         /// <summary>Where a player stands to talk to shop i (in front of the counter).</summary>
-        public static Vector2 CustomerSpot(int i) => Vector2.Lerp(StallPosition(i), MarketCenter, 0.38f);
+        public static Vector2 CustomerSpot(int i) => StallPosition(i) + StallFront(i) * (StallRing * 0.38f);
 
         /// <summary>z of the waterline at x: a gently wavy coast, straight and calm around the dock.</summary>
         public static float ShoreZ(float x)
@@ -154,6 +187,16 @@ namespace UntitledGame.Environment
             float marketPath = DistanceToMarketPath(x, z);
             if (d > 0f) h = Mathf.Lerp((CampHeight + MarketHeight) * 0.5f, h, Smooth(1.5f, 4f, marketPath));
 
+            // The seafront: a level beach path from the market to the crab stall, and flat pads for the stalls.
+            if (d > -1f)
+            {
+                float sea = DistanceToSeafrontPath(x, z);
+                h = Mathf.Lerp(SeafrontHeight, h, Smooth(1.5f, 4f, sea));
+                var p2 = new Vector2(x, z);
+                h = Mathf.Lerp(SeafrontHeight, h, Smooth(3.2f, 5.5f, Vector2.Distance(p2, CrabberPosition)));
+                for (int k = 0; k < 3; k++) h = Mathf.Lerp(SeafrontHeight + 0.1f, h, Smooth(3f, 5f, Vector2.Distance(p2, GameStallPosition(k))));
+            }
+
             // Last: level the ground just under the cabin floor so no terrain pokes through it
             // (the floor sits at CampHeight; the hill behind the camp used to show inside the house).
             float cabinDist = DistanceOutsideCabin(x, z);
@@ -166,7 +209,7 @@ namespace UntitledGame.Environment
         }
 
         /// <summary>Distance to the nearest footpath (camp-dock or camp-market).</summary>
-        public static float DistanceToPath(float x, float z) => Mathf.Min(DistanceToDockPath(x, z), DistanceToMarketPath(x, z));
+        public static float DistanceToPath(float x, float z) => Mathf.Min(Mathf.Min(DistanceToDockPath(x, z), DistanceToMarketPath(x, z)), DistanceToSeafrontPath(x, z));
 
         public static float DistanceToMarketPath(float x, float z)
         {

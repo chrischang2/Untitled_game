@@ -20,7 +20,8 @@ namespace UntitledGame.Language
         public static event Action<VocabEntry> WordUsed;
 
         private static readonly Regex Gloss = new Regex(
-            @"([一-鿿][一-鿿，、？！。…～ ]{0,11})\s*[\[【]([^\]】\n]{1,48})[\]】]", RegexOptions.Compiled);
+            // 汉字 [meaning] is what Mei is asked for; the small model sometimes writes 汉字 (meaning) instead, so take both.
+            @"([一-鿿][一-鿿，、？！。…～ ]{0,11})\s*[\[【(（]([^\]】)）\n]{1,48})[\]】)）]", RegexOptions.Compiled);
 
         private static readonly Dictionary<string, float> LastUsedToast = new Dictionary<string, float>();
 
@@ -33,15 +34,38 @@ namespace UntitledGame.Language
             return sb.ToString();
         }
 
-        /// <summary>Scans a line Mei said for taught words.</summary>
+        /// <summary>Everyday phrases that aren't single HSK words (so the HSK list has no meaning for them).</summary>
+        private static readonly Dictionary<string, string> Everyday = new Dictionary<string, string>
+        {
+            { "你好", "hello" }, { "您好", "hello (polite)" }, { "早上好", "good morning" }, { "晚上好", "good evening" },
+            { "晚安", "good night" }, { "好的", "OK, sure" }, { "加油", "keep going, you can do it" }, { "欢迎光临", "welcome (to a shop)" },
+            { "慢走", "take care (said to someone leaving)" },
+        };
+
+        /// <summary>
+        /// Scans a line Mei said for taught words: 汉字 [meaning] glosses, and (when she forgets the gloss in an English
+        /// line, e.g. "greet him first with 你好") Chinese words that are HSK words, with the HSK list's meaning.
+        /// </summary>
         public static void ObserveTutorLine(string text)
         {
             if (string.IsNullOrEmpty(text)) return;
-            foreach (Match m in Gloss.Matches(text))
+            var found = new List<(string hanzi, string meaning)>();
+            foreach (Match m in Gloss.Matches(text)) found.Add((HanziOnly(m.Groups[1].Value), m.Groups[2].Value.Trim()));
+            if (Regex.IsMatch(text, "[A-Za-z]{3,}"))
             {
-                string hanzi = HanziOnly(m.Groups[1].Value);
-                string meaning = m.Groups[2].Value.Trim();
-                if (hanzi.Length == 0 || meaning.Length == 0 || Pinyin.ContainsHanzi(meaning)) continue;
+                string rest = Gloss.Replace(text, " ");
+                foreach (Match run in Regex.Matches(rest, @"[㐀-鿿]+"))
+                {
+                    var whole = HskVocab.Get(run.Value);
+                    if (whole != null) { found.Add((whole.hanzi, whole.meaning)); continue; }
+                    if (Everyday.TryGetValue(run.Value, out var everyday)) { found.Add((run.Value, everyday)); continue; }
+                    foreach (var (word, _) in HskVocab.Segment(run.Value))
+                        if (word.Length >= 2 && HskVocab.Get(word) is { } w) found.Add((w.hanzi, w.meaning));
+                }
+            }
+            foreach (var (hanzi, meaning) in found)
+            {
+                if (hanzi.Length == 0 || string.IsNullOrEmpty(meaning) || Pinyin.ContainsHanzi(meaning)) continue;
                 var list = SaveSystem.Data.vocab;
                 var entry = list.FirstOrDefault(v => v.hanzi == hanzi);
                 if (entry == null)

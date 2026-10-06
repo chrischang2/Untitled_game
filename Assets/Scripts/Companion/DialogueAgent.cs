@@ -191,6 +191,8 @@ namespace UntitledGame.Companion
             ConversationLog.Add("You", text, true);
             PlayerSaid?.Invoke(text);
             VocabNotebook.ObservePlayerLine(text);
+            // Using HSK words of your own accord counts towards knowing them (lesson answers are counted by the school).
+            if (HskSchool.Current == null) Progression.Hsk.ObserveSpoken(text);
         }
 
         // ------------------------------------------------------------------ core
@@ -298,12 +300,23 @@ namespace UntitledGame.Companion
             return total;
         }
 
-        /// <summary>Drops the oldest exchanges until the prompt fits (always keeps the turn being answered).</summary>
+        /// <summary>
+        /// How much of the conversation room to keep when the history has to be trimmed. Trimming changes the start of the
+        /// conversation, so llama-server can't reuse its prompt cache and re-reads everything (about 3 s at 4096 tokens).
+        /// Dropping one message per turn paid that on every turn once the history was full; trimming down to 40% in one
+        /// go pays it once, and the following turns only read their new message again (about 0.8 s).
+        /// </summary>
+        public const float TrimKeepFraction = 0.4f;
+
+        /// <summary>Drops the oldest exchanges when the prompt won't fit (always keeps the turn being answered).</summary>
         private void FitToContext(int budget = -1)
         {
             if (budget < 0) budget = PromptBudget();
             int before = EstimatePrompt(), removed = 0;
-            while (History.Count > 1 && EstimatePrompt() > budget)
+            if (before <= budget) return;
+            int system = EstimateTokens(_systemPromptCache);
+            int target = system + Mathf.RoundToInt((budget - system) * TrimKeepFraction);
+            while (History.Count > 1 && EstimatePrompt() > target)
             {
                 History.RemoveAt(0);
                 removed++;

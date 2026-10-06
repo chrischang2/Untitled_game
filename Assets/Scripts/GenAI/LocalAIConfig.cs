@@ -14,6 +14,8 @@ namespace UntitledGame.GenAI
         public string llmModel = "models/Qwen3.5-4B-Q4_K_M.gguf";
         public int llmPort = 8765;
         public int contextSize = 4096;       // per conversation slot
+        public string flashAttention = "auto"; // llama-server -fa: "on", "off" or "auto" (computes attention in tiles: less memory, faster prompts)
+        public string kvCacheType = "f16";   // KV cache precision: "f16", or "q8_0" (about half the memory; needs flash attention on)
         public int llmSlots = 3;             // Mei / shopkeepers / intent classifier each keep a warm prompt cache
         public int gpuLayers = -1;           // -1 = let llama.cpp fit automatically
         public int llmThreads = 4;           // leave CPU cores for the game + speech (llama.cpp degrades badly when oversubscribed)

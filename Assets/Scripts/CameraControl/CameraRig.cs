@@ -28,6 +28,8 @@ namespace UntitledGame.CameraControl
         private bool _dragging;
 
         public float Yaw => yaw;
+        public float Pitch => pitch;
+        public float Distance => distance;
         public Transform Target => target;
 
         /// <summary>Additional offset for the look-at point, smoothly applied.</summary>

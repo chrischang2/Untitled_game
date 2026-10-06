@@ -30,7 +30,8 @@ namespace UntitledGame.Progression
 
         public static int BedLevel => Bed?.bedLevel ?? 0;
 
-        public static int ComfortPoints => D.placed.Sum(p => Catalog.Get(p.id)?.comfort ?? 0);
+        /// <summary>Comfort from placed furniture: each kind counts once (a second identical chair adds nothing).</summary>
+        public static int ComfortPoints => D.placed.Select(p => p.id).Distinct().Sum(id => Catalog.Get(id)?.comfort ?? 0);
 
         public static int ComfortLevel
         {

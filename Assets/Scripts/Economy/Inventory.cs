@@ -6,7 +6,7 @@ using UntitledGame.Fishing;
 
 namespace UntitledGame.Economy
 {
-    public enum BuyResult { Ok, NotEnoughMoney, AlreadyOwned, Unknown, NoRoom }
+    public enum BuyResult { Ok, NotEnoughMoney, AlreadyOwned, Unknown, NoRoom, Locked }
 
     /// <summary>One bag slot: a stack of one kind of item, or of one kind of fish.</summary>
     public class BagSlot
@@ -83,8 +83,9 @@ namespace UntitledGame.Economy
             if (def.unique && Owns(itemId)) { reason = BuyResult.AlreadyOwned; return false; }
             if (def.category == ItemCategory.Upgrade)
             {
-                // One level at a time, at the current level's price; nothing past the maximum.
+                // One level at a time, at the next level's price; each tier of five needs its HSK test.
                 if (UntitledGame.Progression.PlayerStats.Level(def.stat) >= UntitledGame.Progression.PlayerStats.MaxLevel) { reason = BuyResult.AlreadyOwned; return false; }
+                if (!UntitledGame.Progression.PlayerStats.CanTrainNext(def.stat)) { reason = BuyResult.Locked; return false; }
                 cost = Catalog.PriceOf(def);
             }
             if (D.money < cost) { reason = BuyResult.NotEnoughMoney; return false; }
@@ -252,15 +253,26 @@ namespace UntitledGame.Economy
         public static IEnumerable<(FishSpecies species, float length)> Bucket =>
             D.bucket.Select(b => (FishDatabase.Get(b.speciesId), b.length)).Where(x => x.Item1 != null);
 
-        public static bool AddToBucket(FishSpecies species, float length)
+        /// <summary>The fish in the bucket with their golden flag.</summary>
+        public static IEnumerable<BucketFish> BucketEntries => D.bucket.Where(b => FishDatabase.Get(b.speciesId) != null);
+
+        public static bool AddToBucket(FishSpecies species, float length, bool golden = false)
         {
             if (!HasRoomForFish(species)) return false;
-            D.bucket.Add(new BucketFish { speciesId = species.id, length = length });
+            D.bucket.Add(new BucketFish { speciesId = species.id, length = length, golden = golden });
             Notify();
             return true;
         }
 
-        public static int BucketValue => Bucket.Sum(b => Catalog.FishPrice(b.species, b.length));
+        /// <summary>What Auntie Chen pays for one fish (golden ones are worth several times as much).</summary>
+        public static int FishValue(BucketFish b)
+        {
+            var s = FishDatabase.Get(b.speciesId);
+            return s == null ? 0 : Catalog.FishPrice(s, b.length) * (b.golden ? Fishing.CatchJournal.GoldenValue : 1);
+        }
+
+        public static int BucketValue => BucketEntries.Sum(FishValue);
+        public static int BucketValueOf(string speciesId) => BucketEntries.Where(b => b.speciesId == speciesId).Sum(FishValue);
 
         /// <summary>Sells every fish in the bucket; returns the money earned.</summary>
         public static int SellAllFish()
@@ -272,11 +284,18 @@ namespace UntitledGame.Economy
             return total;
         }
 
+        /// <summary>Takes these fish out of the bucket (海叔 puts them in his crab pots as bait).</summary>
+        public static void RemoveFish(List<BucketFish> fish)
+        {
+            foreach (var b in fish) D.bucket.Remove(b);
+            Notify();
+        }
+
         /// <summary>Sells only fish of one species; returns (count, money).</summary>
         public static (int count, int money) SellSpecies(string speciesId)
         {
             var sold = D.bucket.Where(b => b.speciesId == speciesId).ToList();
-            int total = sold.Sum(b => Catalog.FishPrice(FishDatabase.Get(b.speciesId), b.length));
+            int total = sold.Sum(FishValue);
             foreach (var b in sold) D.bucket.Remove(b);
             D.money += total;
             Notify();

@@ -110,13 +110,14 @@ namespace UntitledGame.UI
             _subtitle.text = UiText.T($"You have <b>¥{Inventory.Money}</b>", $"你有<b>{Inventory.Money}</b>块", 1) + stats;
 
             int level = Affinity.Level(shop.id);
-            int points = Affinity.Points(shop.id);
-            int next = Affinity.NextThreshold(shop.id);
-            string hearts = $"{level}/{Affinity.Thresholds.Length - 1}";
-            _friendship.text = $"Friendship <color=#E0604E>{hearts}</color>  <b>{Affinity.LevelLabel(level)}</b>\n" +
-                               $"<size=17><color=#8A7563>{(next > 0 ? $"{points}/{next} to {Affinity.LevelHanzi[level + 1]}: chat, answer, bring gifts (see J, Phrasebook)" : "As close as can be!")}</color></size>";
+            int nextLevel = level + 1;
+            int done = nextLevel <= Affinity.MaxLevel ? Affinity.Requirements(shop.id, nextLevel).Count(r => r.done) : 0;
+            int total = nextLevel <= Affinity.MaxLevel ? Affinity.Requirements(shop.id, nextLevel).Count : 0;
+            _friendship.text = $"Friendship <color=#E0604E>{level}/{Affinity.MaxLevel}</color>  <b>{Affinity.LevelLabel(level)}</b>\n" +
+                               $"<size=17><color=#8A7563>{(nextLevel <= Affinity.MaxLevel ? $"{done}/{total} done for {Affinity.LevelHanzi[nextLevel]} (see below)" : "As close as can be!")}</color></size>";
             UpdateQuestion();
 
+            if (!shop.school || HskSchool.Current == null) FriendshipRow(level);
             if (shop.school)
             {
                 if (HskSchool.Current == null) GiftRow();
@@ -124,6 +125,19 @@ namespace UntitledGame.UI
                 return;
             }
             GiftRow();
+            if (shop.crabber)
+            {
+                int pending = CrabPots.Pending;
+                Row($"<b>Your crab pots</b>: {CrabPots.Crabs} crabs a day, about ¥{CrabPots.Daily:0}\n<size=17><color=#8A7563>" +
+                    $"Crabs come in every morning; 海叔 pays you when you come and talk to him. Uncollected crabs keep {CrabPots.KeepDaysNow} day{(CrabPots.KeepDaysNow == 1 ? "" : "s")}." +
+                    (pending > 0 ? $" Waiting now: ¥{pending}." : "") + "</color></size>", null, false);
+                Row($"<b>Fish as bait</b>: give him fish (给你鱼) and tomorrow's haul grows\n<size=17><color=#8A7563>" +
+                    (CrabPots.BaitToday > 0 ? $"Already +¥{CrabPots.BaitToday:0} for tomorrow (up to ¥{CrabPots.BaitCapNow:0})." : $"Up to +¥{CrabPots.BaitCapNow:0} a day.") +
+                    "</color></size>", null, false);
+                foreach (var def in shop.items.Select(Catalog.Get).Where(d => d != null))
+                    ItemRow(def, level);
+                return;
+            }
             if (shop.buysFish)
             {
                 BuildFishRows(level);
@@ -145,7 +159,7 @@ namespace UntitledGame.UI
                 state = friendLocked && hskLocked ? $"{Affinity.LevelHanzi[def.minAffinity]}\n+ HSK {def.minHsk}"
                     : friendLocked ? $"locked: {Affinity.LevelHanzi[def.minAffinity]}" : $"locked: HSK {def.minHsk}";
             else if (def.category == ItemCategory.Upgrade && PlayerStats.Level(def.stat) >= PlayerStats.MaxLevel) state = "max level";
-            else if (def.category == ItemCategory.Upgrade && PlayerStats.Level(def.stat) >= PlayerStats.TrainingCap(level)) state = $"locked: {Affinity.LevelHanzi[Mathf.Min(level + 1, 4)]}";
+            else if (def.category == ItemCategory.Upgrade && !PlayerStats.CanTrainNext(def.stat)) state = $"locked: HSK {PlayerStats.HskNeededForNext(def.stat)}";
             else if (def.category == ItemCategory.Line && Inventory.LineKg >= def.lineKg) state = Inventory.Owns(def.id) ? "owned" : "weaker";
             else if (def.category == ItemCategory.Book && PlayerStats.HasRead(def.id)) state = "read";
             else if (def.unique && Inventory.Owns(def.id)) state = def.category == ItemCategory.Book ? "in your bag" : "owned";
@@ -166,6 +180,22 @@ namespace UntitledGame.UI
             string price = Inventory.Money >= cost ? $"¥{cost}" : $"<color=#E0604E>¥{cost}</color>";
             string name = locked ? $"<color=#8A7563>{def.english}</color>" : $"<b>{def.english}</b>";
             Row($"{name}  {price}\n<size=18><color=#8A7563>{detail}</color></size>", state, locked);
+        }
+
+        /// <summary>What the next friendship level needs: the questions to ask (with pinyin), a gift, and the HSK test.</summary>
+        private void FriendshipRow(int level)
+        {
+            int next = level + 1;
+            if (next > Affinity.MaxLevel) return;
+            var parts = Affinity.Requirements(_keeper.Shop.id, next).Select(r =>
+            {
+                string what = r.kind == "fact"
+                    ? $"ask <b>{Affinity.FactQuestions[r.factId].question}</b> {Pinyin.Of(Affinity.FactQuestions[r.factId].question)} <size=15>({Affinity.FactQuestions[r.factId].english})</size>"
+                    : r.text;
+                return r.done ? $"<color=#2C7F79>done: {what}</color>" : $"- {what}";
+            }).ToList();
+            string text = $"<b>To become {Affinity.LevelHanzi[next]}</b> <size=17>({Affinity.LevelEnglish[next]})</size>\n<size=18>{string.Join("\n", parts)}</size>";
+            Row(text, null, false, 34 + 25 * parts.Count);
         }
 
         /// <summary>How to give this keeper a gift, with the gifts you're carrying.</summary>
@@ -200,8 +230,9 @@ namespace UntitledGame.UI
             ResultRows();
             int next = Hsk.NextTest;
             Line($"<b>Say to Teacher Gao</b> (hold V):");
-            Row("<b>我想上课</b> <size=18>wǒ xiǎng shàngkè</size>\n<size=18><color=#8A7563>Take the next lesson. Passing it the first time pays money.</color></size>", null, false);
-            Row("<b>我想练习</b> <size=18>wǒ xiǎng liànxí</size>\n<size=18><color=#8A7563>Free practice with random words (no money).</color></size>", null, false);
+            Row("<b>我想上课</b> <size=18>wǒ xiǎng shàngkè</size>\n<size=18><color=#8A7563>Take the next lesson.</color></size>", null, false);
+            int due = HskVocab.All.Count(w => w.level <= Mathf.Min(Hsk.Level + 1, Hsk.MaxLevel) && Hsk.Due(w.hanzi));
+            Row($"<b>我想练习</b> <size=18>wǒ xiǎng liànxí</size>\n<size=18><color=#8A7563>Practice the words you're learning: {due} due for review today.</color></size>", null, false);
             Row(next > 0
                 ? $"<b>我想考试</b> <size=18>wǒ xiǎng kǎoshì</size>\n<size=18><color=#8A7563>Take the HSK {next} test: {Hsk.TestQuestions} words, {Hsk.TestPassMark} to pass. Take it as often as you like.</color></size>"
                 : "<b>HSK 3 passed!</b>\n<size=18><color=#8A7563>Every test is done. Lessons and practice are still open.</color></size>", null, false);
@@ -211,7 +242,7 @@ namespace UntitledGame.UI
             {
                 bool open = l <= Hsk.Level + 1;
                 string passed = Hsk.Level >= l ? " <color=#2C7F79>passed</color>" : "";
-                Row($"<b>HSK {l}</b>{passed}  <size=18>lessons {Hsk.LessonsDone(l)}/{Hsk.LessonCounts[l]} · ¥{Hsk.LessonReward[l]} each</size>\n" +
+                Row($"<b>HSK {l}</b>{passed}  <size=18>lessons {Hsk.LessonsDone(l)}/{Hsk.LessonCounts[l]} · words known {Hsk.KnownCount(l)}/{HskVocab.Words(l).Count}</size>\n" +
                     $"<size=16><color=#8A7563>Unlocks {Hsk.Unlocks[l]}.</color></size>", open ? null : $"pass HSK {l - 1}", !open, 104);
             }
         }
@@ -240,7 +271,9 @@ namespace UntitledGame.UI
             for (int n = 1; n <= Hsk.LessonCounts[level]; n++)
             {
                 var (en, zh) = Hsk.LessonTitle(level, n);
-                string name = zh.Length > 0 ? $"{n}. {en} {zh}" : $"{n}";
+                var words = Hsk.LessonWords(level, n);
+                string known = $" <size=15><color=#8A7563>{Hsk.KnownCount(words)}/{words.Count} known</color></size>";
+                string name = (zh.Length > 0 ? $"{n}. {en} {zh}" : $"{n}") + known;
                 parts.Add(Hsk.LessonDone(level, n) ? $"<color=#2C7F79>{name}  passed</color>" : nl == level && nn == n ? $"<b>{name}  (next)</b>" : name);
             }
             var t = UIFactory.Text(_content, "Lessons", $"<b>HSK {level} lessons</b> <size=16><color=#8A7563>(say 第三课 for lesson 3)</color></size>\n<size=17>{string.Join("\n", parts)}</size>", 20, UITheme.Ink, TextAlignmentOptions.TopLeft);
@@ -260,12 +293,18 @@ namespace UntitledGame.UI
                     : $"<size=19><color=#8A7563>Listen and repeat:</color></size>\n<size=44><b>{q.word.hanzi}</b></size>  <size=26>{q.word.pinyin}</size>\n<size=20>{q.word.meaning}</size>";
                 Row(body, null, false, q.recall ? 120 : 150);
             }
+            if (session.retryHeard != null && session.pending == null)
+            {
+                string rpy = Pinyin.ContainsHanzi(session.retryHeard) ? Pinyin.Of(session.retryHeard) : "";
+                Row($"<color=#E0604E><b>Not quite</b></color>  <size=19>I heard: <b>{session.retryHeard}</b> {rpy}</size>\n" +
+                    $"<size=17><color=#8A7563>Try again{(q != null && q.attempts > 1 ? $" (try {q.attempts + 1})" : "")}, or say 跳过 / skip to move on.</color></size>", null, false);
+            }
             if (session.pending != null)
             {
                 string py = Pinyin.ContainsHanzi(session.pending) ? Pinyin.Of(session.pending) : "";
                 Row($"<size=19><color=#8A7563>I heard:</color></size>  <size=34><b>{session.pending}</b></size>  <size=22>{py}</size>\n" +
                     "<size=18><b>[Y]</b> that's what I said: submit  ·  <b>[N]</b> or hold V: say it again</size>", null, false, 110);
-                Line("<size=17><color=#8A7563>不知道 / skip = skip  ·  不考了 = stop  ·  E = leave (ends the test)</color></size>");
+                Line("<size=17><color=#8A7563>不知道 / skip = skip  ·  不学了 = stop  ·  E = leave (ends it)</color></size>");
                 return;
             }
             var last = session.last;
@@ -282,23 +321,30 @@ namespace UntitledGame.UI
 
         private void BuildFishRows(int level)
         {
+            if (DailyRequest.Active || DailyRequest.Done)
+            {
+                string req = DailyRequest.Chinese;
+                Row(DailyRequest.Done
+                        ? "<b>Today's request</b>: <color=#2C7F79>done, thank you!</color>\n<size=17><color=#8A7563>She'll want something new tomorrow.</color></size>"
+                        : $"<b>Today's request</b>  <size=18>(she says)</size>: <b>{req}</b>\n<size=17><color=#8A7563>{Pinyin.Of(req)}  ·  you have {DailyRequest.Matching}/{DailyRequest.Count}  ·  not sure? ask Mei</color></size>",
+                    null, false);
+            }
             if (level > 0) Line($"<color=#8A7563>As a {Affinity.LevelEnglish[level]}, Auntie Chen pays you {level * 5}% more.</color>");
-            Line(Hsk.FishBonus > 0
-                ? $"<color=#2C7F79>HSK {Hsk.Level} passed: every fish sells for {Hsk.FishBonus * 100f:0}% more (prices below include it).</color>"
-                : "<color=#8A7563>Passing HSK tests makes every fish sell for more (+10% / +20% / +35%).</color>");
+            Row($"<b>Her scale</b>: +{FishSale.PerFill * 100f:0}% for every bar filled\n<size=16><color=#8A7563>Fish sold together fill it by rarity and size: 4 good common fish fill the first bar, 8 uncommon the second... " +
+                $"10% + 2% per lesson passed ({FishSale.LessonsPassed}) + 15% per HSK test ({Hsk.Level}).</color></size>", null, false);
             if (Inventory.BucketCount == 0)
             {
                 Line("<color=#8A7563>Your bucket is empty. Auntie Chen buys any fish you catch: bigger and rarer ones pay more.</color>");
                 return;
             }
-            float bonus = 1f + 0.05f * level;
             foreach (var g in Inventory.Bucket.GroupBy(b => b.species.id))
             {
                 var s = g.First().species;
-                int value = Mathf.RoundToInt(g.Sum(x => Catalog.FishPrice(x.species, x.length)) * bonus);
-                Row($"<b>{g.Count()} x {s.name}</b>  ~¥{value}\n<size=18><color=#8A7563>heaviest {Fishing.FishDatabase.WeightText(g.Max(x => x.length))}</color></size>", null, false);
+                var q = FishSale.For(FishSale.Selection(s.id), level);
+                Row($"<b>{g.Count()} x {s.name}</b>  ~¥{q.total}\n<size=18><color=#8A7563>{Fishing.FishDatabase.RarityLabel(s.rarity)} · heaviest {Fishing.FishDatabase.WeightText(g.Max(x => x.length))}</color></size>", null, false);
             }
-            Row($"<b>Everything</b>  ~¥{Mathf.RoundToInt(Inventory.BucketValue * bonus)}\n<size=18><color=#8A7563>{Inventory.BucketCount} catches. Tell Auntie Chen in Chinese that you want to sell.</color></size>", null, false);
+            var all = FishSale.For(FishSale.Selection("all"), level);
+            Row($"<b>Everything</b>  ~¥{all.total}\n<size=18><color=#8A7563>{all.fish.Count} fish fill {all.fills} bar{(all.fills == 1 ? "" : "s")} (x{all.multiplier:0.00}). Tell Auntie Chen in Chinese that you want to sell.</color></size>", null, false);
         }
 
         private void Line(string text)

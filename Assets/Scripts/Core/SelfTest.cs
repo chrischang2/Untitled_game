@@ -11,6 +11,7 @@ using UntitledGame.Fishing;
 using UntitledGame.GenAI;
 using UntitledGame.Home;
 using UntitledGame.Language;
+using UntitledGame.Minigames;
 using UntitledGame.Player;
 using UntitledGame.Progression;
 using UntitledGame.UI;
@@ -63,6 +64,17 @@ namespace UntitledGame.Core
         private IEnumerator RunOnly(string[] sections)
         {
             Log("Scoped self-test: " + string.Join(", ", sections));
+            yield return RunSections(sections);
+            Log(_failures == 0 ? "SELFTEST COMPLETE: all checks passed" : $"SELFTEST COMPLETE: {_failures} check(s) failed");
+            yield return new WaitForSeconds(0.5f);
+            Application.Quit();
+        }
+
+        /// <summary>The newer sections that aren't part of the original run (the full suite runs them at the end).</summary>
+        public static readonly string[] ExtraSections = { "mastery", "requests", "market", "sale", "fish", "balance", "hud", "crabs", "pitchpot", "home" };
+
+        private IEnumerator RunSections(string[] sections)
+        {
             var services = LocalAIServices.Instance;
             var vc = FindFirstObjectByType<VoiceChatController>();
             var player = FindFirstObjectByType<PlayerController>();
@@ -72,10 +84,71 @@ namespace UntitledGame.Core
             yield return new WaitForSeconds(1f);
             foreach (var section in sections.Select(s => s.Trim().ToLowerInvariant()))
             {
+                // Each section starts from a clean slate (after the full run a line may still be out, or a shop open).
+                FindFirstObjectByType<FishingController>()?.ForceStop();
+                if (ShopConversation.Active != null) ShopConversation.Instance.End(sayGoodbye: false);
+                PitchPotGame.Active?.Stop();
+                yield return null;
                 switch (section)
                 {
                     case "parser":
                         ParserChecks();
+                        break;
+                    case "requests":
+                    {
+                        float wait = Time.realtimeSinceStartup + 240f;
+                        while (Time.realtimeSinceStartup < wait && services.LlmStatus == ServiceStatus.Starting) yield return null;
+                        Check(services.LlmStatus == ServiceStatus.Ready, "the shopkeepers' AI is ready");
+                        yield return RequestChecks();
+                        break;
+                    }
+                    case "mastery":
+                        MasteryChecks();
+                        break;
+                    case "balance":
+                        BalanceChecks();
+                        break;
+                    case "pitchpot":
+                        yield return AimChecks(player, cam);
+                        yield return PitchPotChecks(player, cam);
+                        break;
+                    case "crabs":
+                    {
+                        float wait = Time.realtimeSinceStartup + 240f;
+                        while (Time.realtimeSinceStartup < wait && services.LlmStatus == ServiceStatus.Starting) yield return null;
+                        Check(services.LlmStatus == ServiceStatus.Ready, "the shopkeepers' AI is ready");
+                        yield return CrabChecks(player, cam, ui);
+                        break;
+                    }
+                    case "hud":
+                        yield return HudChecks(ui);
+                        break;
+                    case "market":
+                        yield return MarketChecks(player, cam);
+                        break;
+                    case "mei":
+                    {
+                        float wait = Time.realtimeSinceStartup + 240f;
+                        while (Time.realtimeSinceStartup < wait &&
+                               (services.LlmStatus == ServiceStatus.Starting || services.SttStatus == ServiceStatus.Starting || services.TtsStatus == ServiceStatus.Starting))
+                            yield return null;
+                        Check(services.LlmStatus == ServiceStatus.Ready && services.SttStatus == ServiceStatus.Ready, "Mei's AI and speech recognition are ready");
+                        yield return LongConversationChecks();
+                        break;
+                    }
+                    case "sale":
+                    {
+                        float wait = Time.realtimeSinceStartup + 240f;
+                        while (Time.realtimeSinceStartup < wait && services.LlmStatus == ServiceStatus.Starting) yield return null;
+                        Check(services.LlmStatus == ServiceStatus.Ready, "the shopkeepers' AI is ready");
+                        yield return SaleChecks(player, cam, ui);
+                        break;
+                    }
+                    case "fish":
+                        StarterAndReelChecks();
+                        yield return CatchCardShot(ui);
+                        FishUnitChecks();
+                        yield return TrophyChecks(player, cam);
                         break;
                     case "home":
                         yield return StrandedItemChecks(player, cam);
@@ -104,9 +177,667 @@ namespace UntitledGame.Core
                         break;
                 }
             }
-            Log(_failures == 0 ? "SELFTEST COMPLETE: all checks passed" : $"SELFTEST COMPLETE: {_failures} check(s) failed");
+        }
+
+        /// <summary>Every stall has a painted sign; screenshot from the plaza.</summary>
+        private IEnumerator MarketChecks(PlayerController player, CameraRig cam)
+        {
             yield return new WaitForSeconds(0.5f);
-            Application.Quit();
+            int signs = ShopkeeperBrain.Keepers.Count(k => k.transform.parent != null && k.transform.parent.Find("ShopSign") != null);
+            Check(signs == ShopkeeperBrain.Keepers.Count && signs == Catalog.Shops.Count, $"every stall has a sign ({signs}/{Catalog.Shops.Count})");
+            Vector2 c = WorldShape.MarketCenter;
+            player.Teleport(new Vector3(c.x - 3f, WorldShape.TerrainHeight(c.x - 3f, c.y) + 0.05f, c.y), 90f);
+            cam.Configure(player.transform, 90f, 14f, 6f);
+            yield return new WaitForSeconds(5f);
+            yield return Shot("22_market_signs");
+            var fish = ShopkeeperBrain.Keepers.First(k => k.Shop.buysFish);
+            int i = Catalog.Shops.IndexOf(fish.Shop);
+            Vector2 spot = WorldShape.CustomerSpot(i), stall = WorldShape.StallPosition(i);
+            Vector2 dir = (stall - spot).normalized;
+            float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
+            player.Teleport(new Vector3(spot.x, WorldShape.TerrainHeight(spot.x, spot.y) + 0.05f, spot.y), yaw);
+            cam.Configure(player.transform, yaw, 12f, 5f);
+            yield return new WaitForSeconds(1.5f);
+            yield return Shot("23_sushi_stall");
+        }
+
+        /// <summary>Word mastery boxes (spaced repetition) and practice that picks due and weak words first.</summary>
+        private void MasteryChecks()
+        {
+            var d = SaveSystem.Data;
+            d.mastery.Clear();
+            int day = d.day;
+            Hsk.RecordAnswer("苹果", true, recall: false);
+            Check(Hsk.Box("苹果") == 1, $"repeating a word after the teacher marks it as seen (box {Hsk.Box("苹果")})");
+            Hsk.RecordAnswer("苹果", true, recall: true);
+            Hsk.RecordAnswer("苹果", true, recall: true);
+            Check(Hsk.Box("苹果") == 2, $"saying it from English moves it up one box a day, not more (box {Hsk.Box("苹果")})");
+            d.day = day + 1; Hsk.RecordAnswer("苹果", true, true);
+            d.day = day + 2; Hsk.RecordAnswer("苹果", true, true);
+            Check(Hsk.Known("苹果") && Hsk.KnownCount(1) == 1, $"after a few days of right answers it counts as known (box {Hsk.Box("苹果")}; HSK 1 known: {Hsk.KnownCount(1)}/150)");
+            Hsk.RecordAnswer("苹果", false, true);
+            Check(Hsk.Box("苹果") == 2, $"a wrong answer drops it two boxes (box {Hsk.Box("苹果")})");
+            Check(!Hsk.Due("苹果") && Hsk.Seen("苹果"), "it isn't due again the same day");
+            d.day = day + 4;
+            Check(Hsk.Due("苹果"), "...but it is after its interval (2 days for box 2)");
+
+            // Using a word of your own accord counts too (up to 'known').
+            d.day = day + 5;
+            Hsk.RecordAnswer("喝", true, false);
+            Hsk.ObserveSpoken("我想喝茶");
+            Check(Hsk.Box("喝") == 2 && Hsk.Box("茶") == 0, "saying 喝 to someone moves it up; 茶 (never practised) isn't counted yet");
+
+            // Practice: the weak and due words come first.
+            d.day = day + 10;
+            foreach (var w in new[] { "猫", "狗", "飞机" }) Hsk.RecordAnswer(w, false, true);
+            var picks = Hsk.PracticeWords(1, Hsk.PracticeQuestions, new System.Random(3));
+            Check(picks.Count == Hsk.PracticeQuestions && new[] { "猫", "狗", "飞机", "苹果", "喝" }.All(w => picks.Any(p => p.hanzi == w)),
+                $"practice picks the due and weak words first ({string.Join(" ", picks.Select(p => p.hanzi))})");
+            d.day = day;
+            d.mastery.Clear();
+        }
+
+        /// <summary>Auntie Chen's fish of the day, and surprise presents for new words.</summary>
+        private IEnumerator RequestChecks()
+        {
+            var d = SaveSystem.Data;
+            if (!d.discoveredFish.Contains("seabass")) d.discoveredFish.Add("seabass");
+            d.requestDay = -1;
+            DailyRequest.Ensure();
+            Check(DailyRequest.Active && DailyRequest.Fish != null && DailyRequest.Chinese.StartsWith("今天我想要"),
+                $"Auntie Chen has a fish of the day: {DailyRequest.Chinese} ({DailyRequest.Count} x {DailyRequest.Fish?.name})");
+            // Make it two sea bass, bring two, and sell them to her.
+            d.requestFish = "seabass";
+            d.requestCount = 2;
+            d.requestMinKg = 0f;
+            Inventory.SellAllFish();
+            var bass = FishDatabase.Get("seabass");
+            Inventory.AddToBucket(bass, 2f);
+            Check(!DailyRequest.CanFulfil && DailyRequest.Matching == 1, "one sea bass isn't enough for a request of two");
+            Inventory.AddToBucket(bass, 3f);
+            int money = Inventory.Money, items = Inventory.Owned().Sum(x => x.count);
+            var fish = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "fish");
+            fish.HandlePlayerUtterance("阿姨，我想卖鱼。");
+            Check(fish.PendingOffer != null && fish.PendingOffer.selling, "she offers to buy the fish");
+            fish.HandlePlayerUtterance("可以。");
+            fish.Interrupt();
+            int value = Inventory.Money - money;
+            Check(DailyRequest.Done && Inventory.BucketCount == 0 && (Inventory.Owned().Sum(x => x.count) > items || value > 0),
+                $"selling them fulfils her request, and there's a surprise on top (money +¥{value}, items {items} -> {Inventory.Owned().Sum(x => x.count)})");
+            Check(!DailyRequest.Active, "...and there's no second request today");
+
+            // Using a new word with a keeper can earn a little present (forced here; normally 15%, once a day each).
+            var pet = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "pet");
+            var state = Affinity.State("pet");
+            state.surpriseDay = -1;
+            ShopkeeperBrain.ForceSurprise = true;
+            pet.HandlePlayerUtterance("你的猫非常漂亮。");
+            pet.Interrupt();
+            ShopkeeperBrain.ForceSurprise = false;
+            Check(state.wordsHeard.Contains("漂亮") && state.surpriseDay == d.day, "a new word (漂亮) with Xiao Lin earned a little surprise");
+            pet.HandlePlayerUtterance("今天天气很好。");
+            pet.Interrupt();
+            Check(state.surpriseDay == d.day && state.wordsHeard.Contains("天气"), "new words are still noted, but only one surprise a day");
+            yield return null;
+        }
+
+        /// <summary>
+        /// Fishing balance with a simulated human player (0.2 s reaction, a little aiming error): with no training the
+        /// starter fish are easy; with every training level of a tier its commonest fish are trivial and its rarest
+        /// moderately hard; and the next tier's fish are near impossible until you train further.
+        /// </summary>
+        private void BalanceChecks()
+        {
+            var rng = new System.Random(7);
+            (float rate, float time) Run(FishSpecies f, int level, int n = 160)
+            {
+                var p = FishPower.For(f, level, level, level);
+                int caught = 0;
+                float t = 0f;
+                for (int i = 0; i < n; i++)
+                {
+                    var r = ReelSim.SimulateBot(p, f.motion, rng);
+                    if (r.caught) { caught++; t += r.time; }
+                }
+                return (caught / (float)n, caught > 0 ? t / caught : 0f);
+            }
+            // Calibration table: catch rate by power gap for each way of swimming (with its motion bias).
+            foreach (FishMotion m in System.Enum.GetValues(typeof(FishMotion)))
+            {
+                var row = new System.Text.StringBuilder($"   calib {m,-8}");
+                foreach (float d in new[] { -2f, -1.5f, -1.25f, -1f, -0.75f, -0.5f, 0f, 0.5f, 1f, 1.5f })
+                {
+                    int caught = 0;
+                    float b = FishPower.MotionBias(m);
+                    var p = FishPower.FromGaps(d + b, d + b, d + b);
+                    for (int i = 0; i < 200; i++) if (ReelSim.SimulateBot(p, m, rng).caught) caught++;
+                    row.Append($"  {d:+0.00;-0.00}:{caught / 2f,3:0}%");
+                }
+                Log(row.ToString());
+            }
+            var fish = FishDatabase.All.Where(f => f.IsFish).ToList();
+            FishSpecies Commonest(int tier) => fish.Where(f => FishPower.TierOf(f) == tier).OrderBy(FishPower.RarityRank).First();
+            FishSpecies Rarest(int tier) => fish.Where(f => FishPower.TierOf(f) == tier).OrderByDescending(FishPower.RarityRank).First();
+            foreach (var f in fish) Log($"   {f.id,-14} tier {FishPower.TierOf(f)}  rank {FishPower.RarityRank(f):0.00}  power {FishPower.Power(f):0.00}  base ¥{FishPower.BasePrice(f):0}");
+
+            // A beginner against every tier-0 fish (for reference), then the checks.
+            Log("   beginner (no training): " + string.Join("  ", fish.Where(f => FishPower.TierOf(f) == 0).Select(f => $"{f.id} {Run(f, 0, 100).rate:P0}")));
+            Log("   tier 0 trained (level 5): " + string.Join("  ", fish.Where(f => FishPower.TierOf(f) == 0).Select(f => $"{f.id} {Run(f, 5, 100).rate:P0}")));
+            var starters = PlayerStats.StarterFishes.Select(id => (id, r: Run(FishDatabase.Get(id), 0))).ToList();
+            Check(starters.All(s => s.r.rate >= 0.8f), $"no training: the starter fish are easy enough ({string.Join(", ", starters.Select(s => $"{s.id} {s.r.rate:P0}"))})");
+            for (int tier = 0; tier <= 3; tier++)
+            {
+                int full = (tier + 1) * PlayerStats.LevelsPerTier;
+                var c = Commonest(tier); var r = Rarest(tier);
+                var common = Run(c, full); var rare = Run(r, full);
+                Check(common.rate >= 0.97f, $"tier {tier} fully trained (level {full}): its commonest fish, {c.id}, is trivial ({common.rate:P0}, {common.time:0.0} s)");
+                Check(rare.rate >= 0.5f && rare.rate <= 0.95f, $"tier {tier} fully trained: its rarest, {r.id}, is a fair challenge ({rare.rate:P0}, {rare.time:0.0} s)");
+                if (tier < 3)
+                {
+                    var n = Commonest(tier + 1);
+                    var next = Run(n, full);
+                    Check(next.rate <= 0.1f, $"tier {tier} fully trained: the next tier's {n.id} nearly always gets away ({next.rate:P0})");
+                }
+            }
+            // Training prices and HSK locks.
+            int[] prices = Enumerable.Range(1, PlayerStats.MaxLevel).Select(l => { PlayerStats.SetLevel("luck", l - 1); return PlayerStats.NextPrice("luck"); }).ToArray();
+            int luck = 0;
+            PlayerStats.SetLevel("luck", luck);
+            Check(prices.Take(5).SequenceEqual(new[] { 10, 20, 40, 70, 100 }) && prices[5] == 100 && prices[9] == 1000 && prices[19] == 100000,
+                $"training costs 10, 20, 40, 70, 100, then x10 each tier ({string.Join(", ", prices)})");
+            int hsk = SaveSystem.Data.hskLevel;
+            SaveSystem.Data.hskLevel = 0;
+            PlayerStats.SetLevel("luck", 4);
+            bool fifth = PlayerStats.CanTrainNext("luck");
+            PlayerStats.SetLevel("luck", 5);
+            bool sixthLocked = !PlayerStats.CanTrainNext("luck") && PlayerStats.HskNeededForNext("luck") == 1;
+            SaveSystem.Data.hskLevel = 1;
+            bool sixthOpen = PlayerStats.CanTrainNext("luck");
+            Check(fifth && sixthLocked && sixthOpen, "each tier of 5 training levels opens with its HSK test");
+            SaveSystem.Data.hskLevel = hsk;
+            PlayerStats.SetLevel("luck", luck);
+
+            // Eye training: a tier's five levels double its fish's bar, and the next tier starts where the first did.
+            var mullet = FishDatabase.Get("mullet");
+            var octopus = FishDatabase.Get("octopus");
+            float fresh = FishPower.For(mullet, 0, 0, 0).barSize, trained = FishPower.For(mullet, 5, 0, 0).barSize;
+            float nextFresh = FishPower.For(octopus, 5, 0, 0).barSize, nextTrained = FishPower.For(octopus, 10, 0, 0).barSize;
+            float octopusAtStart = FishPower.For(octopus, 0, 0, 0).barSize;
+            Check(trained / fresh > 1.85f && trained / fresh < 2.15f && nextTrained / nextFresh > 1.85f && nextTrained / nextFresh < 2.15f,
+                $"5 eye-training levels double the bar for that tier's fish (mullet {fresh * 100f:0}% -> {trained * 100f:0}%, octopus {nextFresh * 100f:0}% -> {nextTrained * 100f:0}%)");
+            // The commonest fish of tier 0 (goby) and tier 1 (octopus), compared for the same swimming style.
+            var goby = FishDatabase.Get("goby");
+            float gobyFresh = FishPower.FromGaps(FishPower.BarGap(goby, 0), 0, 0).barSize, octopusAfterTier0 = FishPower.FromGaps(FishPower.BarGap(octopus, 5), 0, 0).barSize;
+            Check(Mathf.Abs(octopusAfterTier0 - gobyFresh) < 0.005f && octopusAtStart < nextFresh,
+                $"finishing tier 0's eye training gives the next tier's commonest fish the bar a beginner has on tier 0's ({octopusAfterTier0 * 100f:0}% vs {gobyFresh * 100f:0}%)");
+
+            // Casting: 10 m for everyone; a perfect cast starts the meter 15% fuller.
+            Check(Mathf.Approximately(PlayerStats.CastDistance, 10f), $"everyone casts up to {PlayerStats.CastDistance:0} m (strength no longer adds distance)");
+            var pp = FishPower.For(mullet, 0, 0, 0);
+            var plain = new ReelSim(pp, mullet.motion, new System.Random(1));
+            var perfect = new ReelSim(pp, mullet.motion, new System.Random(1), FishingController.PerfectCastBonus);
+            Check(Mathf.Abs(perfect.Progress - plain.Progress - 0.15f) < 0.001f && FishingController.PerfectCastPower >= 0.97f,
+                $"a 97%+ cast starts the catch meter at {perfect.Progress:P0} instead of {plain.Progress:P0}");
+
+            // Casting further out catches bigger fish: a 50% weight window slides from the bottom half to the top half.
+            float far = FishingController.WindowFar;
+            float Lo(float d) => FishingController.WeightWindow(d);
+            var rolls = new System.Func<float, (float min, float max)>(d =>
+            {
+                float lo = 1f, hi = 0f;
+                for (int i = 0; i < 400; i++)
+                {
+                    float t = Mathf.InverseLerp(mullet.minWeight, mullet.maxWeight, FishDatabase.RollWeight(mullet, 0, Lo(d)));
+                    lo = Mathf.Min(lo, t); hi = Mathf.Max(hi, t);
+                }
+                return (lo, hi);
+            });
+            var near = rolls(1f); var mid = rolls((2f + far) / 2f); var top = rolls(far + 5f);
+            Check(near.max <= 0.51f && top.min >= 0.49f && mid.min >= 0.24f && mid.max <= 0.76f && Mathf.Abs(Lo((2f + far) / 2f) - 0.25f) < 0.01f,
+                $"cast distance sets the weight window: within 2 m {near.min:P0}-{near.max:P0}, halfway {mid.min:P0}-{mid.max:P0}, a 95% cast from the dock end ({far:0.0} m out) {top.min:P0}-{top.max:P0}");
+        }
+
+        /// <summary>Aiming a cast: A/D swing it, a ring shows where it lands, and the bobber lands there.</summary>
+        private IEnumerator AimChecks(PlayerController player, CameraRig cam)
+        {
+            var fishing = FindFirstObjectByType<FishingController>();
+            Vector2 start = WorldShape.DockShorePoint - WorldShape.DockDirection * (WorldShape.DockLength - 0.5f);
+            player.Teleport(new Vector3(start.x, WorldShape.DockDeckHeight + 0.05f, start.y), 0f);
+            cam.Configure(player.transform, 0f, 30f, 8f);
+            yield return new WaitForSeconds(0.8f);
+            fishing.SimulateHold = true;
+            fishing.SimulateClick();
+            yield return null;
+            yield return null;
+            Vector3 straight = fishing.PredictedLanding;
+            fishing.AimOffset = 35f;
+            yield return new WaitForSeconds(0.5f);
+            var reticle = GameObject.Find("CastTarget");
+            Vector3 aimed = fishing.PredictedLanding;
+            Vector3 toA = aimed - player.transform.position, toS = straight - player.transform.position;
+            toA.y = toS.y = 0f;
+            float angle = Vector3.SignedAngle(toS, toA, Vector3.up);
+            yield return Shot("29_cast_aim");
+            Check(reticle != null && reticle.activeSelf && Vector3.Distance(reticle.transform.position, aimed) < 0.3f && angle > 25f && angle < 45f,
+                $"aiming swings the cast {angle:0}° right, and a ring marks where it will land ({(fishing.PredictedOnWater ? "on water" : "on land")})");
+            Vector3 target = fishing.PredictedLanding;
+            fishing.SimulateHold = false;
+            float until = Time.realtimeSinceStartup + 5f;
+            while (Time.realtimeSinceStartup < until && fishing.State != FishingState.Waiting && fishing.State != FishingState.Idle) yield return null;
+            Vector3 bob = fishing.BobberWorld;
+            float off = new Vector2(bob.x - target.x, bob.z - target.z).magnitude;
+            Check(fishing.State == FishingState.Waiting && off < 1f && (reticle == null || !reticle.activeSelf),
+                $"the cast lands where the ring was ({off:0.00} m off) and the ring goes away");
+            fishing.ForceStop();
+            yield return new WaitForSeconds(0.3f);
+        }
+
+        /// <summary>投壶 pitch-pot: opens at HSK 1, aiming and power matter, a round scores hits, and a good one wins a prize.</summary>
+        private IEnumerator PitchPotChecks(PlayerController player, CameraRig cam)
+        {
+            int hsk = SaveSystem.Data.hskLevel;
+            var stall = FindObjectsByType<MinigameStall>(FindObjectsSortMode.None).FirstOrDefault(g => g.gameId == "pitchpot");
+            SaveSystem.Data.hskLevel = 0;
+            yield return null;
+            Check(stall != null && stall.hsk == 1 && !stall.Open, "pitch-pot (投壶) is the HSK 1 game, closed before the test");
+            SaveSystem.Data.hskLevel = 1;
+            yield return null;
+            yield return null;
+            Check(stall.Open && stall.transform.Find("Built/Pot") != null && stall.transform.Find("Built").gameObject.activeSelf, "...and open after HSK 1, with its pot");
+            stall.Interact();
+            yield return new WaitForSeconds(0.5f);
+            var game = PitchPotGame.Active;
+            Check(game != null && Vector3.Distance(player.transform.position, game.ThrowSpot) < 0.3f, "F starts a round at the throwing line");
+            if (game == null) { SaveSystem.Data.hskLevel = hsk; yield break; }
+
+            // Somewhere between too short and too long the arrow drops in; off-line it misses.
+            var hitsAt = Enumerable.Range(0, 201).Select(i => i / 200f).Where(p => game.Predict(p, 0f) == PitchPotGame.Outcome.In).ToList();
+            float best = hitsAt.Count > 0 ? hitsAt[hitsAt.Count / 2] : 0.5f;
+            float window = hitsAt.Count / 200f;
+            bool offLine = game.Predict(best, 6f) != PitchPotGame.Outcome.In && game.Predict(best, -6f) != PitchPotGame.Outcome.In;
+            bool shortLong = game.Predict(0f, 0f) != PitchPotGame.Outcome.In && game.Predict(1f, 0f) != PitchPotGame.Outcome.In;
+            Check(hitsAt.Count > 0 && window > 0.03f && window < 0.25f && offLine && shortLong,
+                $"the power that lands it is a {window * 100f:0}% window around {best:0.00}; 6° off line or full/no power misses");
+
+            // A round: five good throws, three bad ones.
+            int money = Inventory.Money, itemsBefore = SaveSystem.Data.items.Sum(i => i.count);
+            SaveSystem.Data.pitchPotPrizeDay = -1;
+            int bestBefore = SaveSystem.Data.pitchPotBest;
+            for (int n = 0; n < PitchPotGame.Arrows; n++)
+            {
+                game.AimOffset = n < 5 ? 0f : 9f;
+                game.Throw(n < 5 ? best : 0.2f);
+                float until = Time.realtimeSinceStartup + 4f;
+                while (Time.realtimeSinceStartup < until && game.Flying) yield return null;
+                if (n == 2) yield return Shot("30_pitchpot");
+                yield return new WaitForSeconds(0.1f);
+            }
+            yield return new WaitForSeconds(0.3f);
+            bool prize = Inventory.Money > money || SaveSystem.Data.items.Sum(i => i.count) > itemsBefore;
+            Check(PitchPotGame.Active == null && game.Hits == 5 && game.Thrown == 8 && SaveSystem.Data.pitchPotBest == Mathf.Max(bestBefore, 5) && prize,
+                $"a round of eight: {game.Hits} in the pot, best {SaveSystem.Data.pitchPotBest}, and 4+ hits wins today's prize");
+            yield return Shot("31_pitchpot_done");
+            SaveSystem.Data.hskLevel = hsk;
+        }
+
+        /// <summary>
+        /// 海叔's crab pots: the money a maxed tier brings in, HSK-gated upgrades, collecting (the cooler's limit), fish as
+        /// bait, the stall down the beach, and the games stalls (building sites until their HSK test).
+        /// </summary>
+        private IEnumerator CrabChecks(PlayerController player, CameraRig cam, GameUI ui)
+        {
+            var saved = SaveSystem.Data.crabLevels.Select(s => new StatLevel { id = s.id, level = s.level }).ToList();
+            int hsk = SaveSystem.Data.hskLevel;
+            void SetAll(int l) { foreach (var s in CrabPots.Stats) PlayerStats.SetLevel(s, l); }
+
+            // Maxed tier t: a day's crabs are worth about the tier's best fish at its biggest.
+            var rows = new System.Collections.Generic.List<string>();
+            bool matches = true;
+            for (int t = 0; t <= 3; t++)
+            {
+                SetAll(5 * (t + 1));
+                float daily = CrabPots.Daily, target = CrabPots.TierTarget(t);
+                rows.Add($"tier {t}: ¥{daily:0} a day vs ¥{target:0}");
+                matches &= Mathf.Abs(daily / target - 1f) < 0.05f;
+            }
+            SetAll(0);
+            float start = CrabPots.Daily;
+            Check(matches && start > 0f && start < 5f, $"crab pots with every upgrade of a tier earn about one top fish a day ({string.Join("; ", rows)}; at the start ¥{start:0.0})");
+            // Each upgrade on its own helps.
+            bool each = CrabPots.Stats.Where(s => s != "crab_bait" && s != "crab_cooler").All(s =>
+            {
+                PlayerStats.SetLevel(s, 1);
+                bool up = CrabPots.Daily > start;
+                PlayerStats.SetLevel(s, 0);
+                return up;
+            });
+            Check(each, "every income upgrade raises the daily haul");
+            SaveSystem.Data.hskLevel = 0;
+            PlayerStats.SetLevel("crab_pots", 5);
+            bool locked = !PlayerStats.CanTrainNext("crab_pots") && PlayerStats.HskNeededForNext("crab_pots") == 1;
+            Inventory.CanBuy("crab_pots", 1, out var why, out _);
+            SaveSystem.Data.hskLevel = 1;
+            bool opens = PlayerStats.CanTrainNext("crab_pots") && Catalog.PriceOf(Catalog.Get("crab_pots")) == 100;
+            Check(locked && why == BuyResult.Locked && opens, "crab upgrades come 5 per HSK tier (the 6th pot needs HSK 1), priced like training");
+            SetAll(5);
+
+            // Days: one haul each morning; uncollected crabs keep only as long as the cooler allows.
+            int dayBefore = DayNightCycle.Instance.Day;
+            DayNightCycle.Instance.Day = Mathf.Max(10, dayBefore);
+            int today = DayNightCycle.Instance.Day;
+            SaveSystem.Data.crabPending = 0f;
+            SaveSystem.Data.crabBaitDay = -1;
+            SaveSystem.Data.crabLastDay = today - 1;
+            int one = CrabPots.Pending;
+            SaveSystem.Data.crabPending = 0f;
+            SaveSystem.Data.crabLastDay = today - 6;
+            int six = CrabPots.Pending;
+            Check(Mathf.Abs(one - CrabPots.Daily) <= 1f && Mathf.Abs(six - CrabPots.Daily * CrabPots.KeepDaysNow) <= 1f && CrabPots.KeepDaysNow == 2,
+                $"one day brings ¥{one}; six days away keeps only {CrabPots.KeepDaysNow} days' worth (¥{six}) with cooler level 5");
+
+            // Talking to 海叔 pays it out; giving him fish makes tomorrow's haul bigger.
+            var crabber = ShopkeeperBrain.Keepers.First(k => k.Shop.crabber);
+            Vector2 cp = WorldShape.StallPosition(WorldShape.CrabberStall);
+            float marketEast = Enumerable.Range(0, 9).Max(i => WorldShape.StallPosition(i).x);
+            Check(cp.x > marketEast + 10f && WorldShape.ShoreDistance(cp.x, cp.y) > 2f && WorldShape.ShoreDistance(cp.x, cp.y) < 8f,
+                $"海叔's stall is on the beach further along than the market ({cp.x - marketEast:0} m east, {WorldShape.ShoreDistance(cp.x, cp.y):0.0} m from the water)");
+            SaveSystem.Data.crabPending = 0f;
+            SaveSystem.Data.crabLastDay = today - 1;
+            int money = Inventory.Money;
+            yield return GoToShop(player, cam, WorldShape.CrabberStall, crabber);
+            Check(Inventory.Money - money == one && CrabPots.Pending == 0, $"starting to talk to 海叔 collects the crab money (+¥{Inventory.Money - money})");
+            yield return WaitIdle(crabber, 30f);
+            yield return Shot("27_crabber");
+            Inventory.SellAllFish();
+            var goby = FishDatabase.Get("goby");
+            for (int n = 0; n < 3; n++) Inventory.AddToBucket(goby, goby.maxWeight);
+            crabber.HandlePlayerUtterance("海叔，我想给你鱼。");
+            yield return WaitIdle(crabber);
+            Check(crabber.PendingOffer != null && crabber.PendingOffer.crabBait, $"offering him fish gets a crab-bait offer ({crabber.PendingOffer?.english})");
+            int bonus = crabber.PendingOffer?.price ?? 0;
+            crabber.HandlePlayerUtterance("好的，放吧。");
+            yield return WaitIdle(crabber);
+            Check(Inventory.BucketCount == 0 && CrabPots.BaitToday >= bonus - 1 && bonus > 0, $"the fish go in the pots: +¥{CrabPots.BaitToday:0} tomorrow");
+            SaveSystem.Data.crabLastDay = today;
+            DayNightCycle.Instance.Day = today + 1;
+            int tomorrow = CrabPots.Pending;
+            DayNightCycle.Instance.Day = today;
+            Check(Mathf.Abs(tomorrow - (CrabPots.Daily + bonus)) <= 1.5f, $"...and the next morning's haul includes it (¥{tomorrow} = ¥{CrabPots.Daily:0} + ¥{bonus})");
+            SaveSystem.Data.crabPending = 0f;
+            SaveSystem.Data.crabLastDay = today;
+            ShopConversation.Instance.End(sayGoodbye: false);
+
+            // The games stalls: building sites until their test.
+            var games = FindObjectsByType<MinigameStall>(FindObjectsSortMode.None).OrderBy(g => g.hsk).ToList();
+            SaveSystem.Data.hskLevel = 0;
+            yield return null;
+            yield return null;
+            bool sites = games.Count == 3 && games.All(g => !g.Open && g.transform.Find("Construction").gameObject.activeSelf && !g.transform.Find("Built").gameObject.activeSelf);
+            var g0 = games.FirstOrDefault();
+            if (g0 != null)
+            {
+                Vector3 gp = g0.transform.position + g0.transform.forward * 7f;
+                player.Teleport(new Vector3(gp.x, WorldShape.TerrainHeight(gp.x, gp.z) + 0.05f, gp.z), g0.transform.eulerAngles.y + 180f);
+                cam.Configure(player.transform, g0.transform.eulerAngles.y + 160f, 14f, 9f);
+                yield return new WaitForSeconds(1f);
+                yield return Shot("28a_games_construction");
+            }
+            SaveSystem.Data.hskLevel = 2;
+            yield return null;
+            yield return null;
+            bool mixed = games.Count == 3 && games[0].Open && games[1].Open && !games[2].Open && games[0].transform.Find("Built").gameObject.activeSelf;
+            yield return new WaitForSeconds(0.5f);
+            yield return Shot("28b_games_hsk2");
+            Check(sites && mixed, $"the games stalls ({string.Join(", ", games.Select(g => g.hanzi + " HSK " + g.hsk))}) are building sites until their HSK test, then open");
+
+            SaveSystem.Data.hskLevel = hsk;
+            SaveSystem.Data.crabLevels.Clear();
+            SaveSystem.Data.crabLevels.AddRange(saved);
+            DayNightCycle.Instance.Day = dayBefore;
+            SaveSystem.Data.crabLastDay = dayBefore;
+        }
+
+        /// <summary>The HUD's fish grid, furniture comfort counting each kind once, and newest-first transcripts.</summary>
+        private IEnumerator HudChecks(GameUI ui)
+        {
+            Inventory.SellAllFish();
+            foreach (var id in new[] { "goby", "goby", "sardine", "mullet" }) Inventory.AddToBucket(FishDatabase.Get(id), FishDatabase.Get(id).maxWeight * 0.8f);
+            yield return new WaitForSeconds(0.3f);
+            Check(ui.FishGridCells == Inventory.SlotCapacity && ui.FishGridFilled == Inventory.SlotsUsed && ui.FishGridText == $"{Inventory.SlotsUsed}/{Inventory.SlotCapacity}",
+                $"the HUD shows the bag as a grid: {ui.FishGridFilled} of {ui.FishGridCells} slots with fish, labelled {ui.FishGridText}");
+            yield return Shot("26_hud_fish_grid");
+            Inventory.SellAllFish();
+
+            var fishing = FindFirstObjectByType<FishingController>();
+            if (fishing != null && fishing.State == FishingState.Idle)
+            {
+                ui.ShowCatchCard(CatchJournal.Record(FishDatabase.Get("goby"), 0.05f, Vector3.zero));
+                yield return new WaitForSeconds(0.5f);
+                bool shown = ui.CatchCardVisible;
+                fishing.SimulateHold = true;
+                fishing.SimulateClick();
+                yield return null;
+                yield return null;
+                bool charging = fishing.State == FishingState.Charging;
+                Check(shown && charging && !ui.CatchCardVisible, $"starting a cast hides the last catch's card at once (shown {shown}, charging {charging}, still visible {ui.CatchCardVisible})");
+                fishing.SimulateHold = false;
+                float wait = Time.realtimeSinceStartup + 6f;
+                while (Time.realtimeSinceStartup < wait && fishing.State != FishingState.Idle && fishing.State != FishingState.Waiting) yield return null;
+                fishing.ForceStop();
+                Inventory.SellAllFish();
+            }
+            else Check(false, $"the fishing controller is idle for the cast test ({fishing?.State})");
+
+            var frenzy = FishFrenzy.Instance;
+            float frenzyOut = frenzy != null ? -WorldShape.ShoreDistance(frenzy.Position.x, frenzy.Position.z) : -1f;
+            Check(frenzy != null && FishFrenzy.Contains(frenzy.Position) && WorldShape.IsWater(frenzy.Position.x, frenzy.Position.z) && frenzyOut > 3f && frenzyOut < 14f,
+                $"a fish frenzy bubbles in open water within casting reach ({frenzyOut:0.0} m out)");
+
+            var placed = SaveSystem.Data.placed;
+            var before = placed.ToList();
+            placed.Clear();
+            placed.Add(new PlacedItem { id = "chair" });
+            int one = Energy.ComfortPoints;
+            placed.Add(new PlacedItem { id = "chair" });
+            int two = Energy.ComfortPoints;
+            placed.Add(new PlacedItem { id = "table" });
+            int mixed = Energy.ComfortPoints;
+            placed.Clear();
+            placed.AddRange(before);
+            Check(one > 0 && two == one && mixed > two, $"only one of each kind of furniture adds comfort (chair {one}, two chairs {two}, chair + table {mixed})");
+        }
+
+        /// <summary>The starter fish, how lively hooked fish are, and the new body shapes.</summary>
+        private void StarterAndReelChecks()
+        {
+            var catchable = new CatchContext { hour = 9f, shoreDistance = 4f, lineKg = Catalog.StarterLineKg, bait = null };
+            var known = FishDatabase.Available(catchable).Select(f => f.id).ToList();
+            Check(known.Count(id => PlayerStats.StarterFishes.Contains(id)) >= 3,
+                $"at the start, several fish bite from the dock with the plain line and hook ({string.Join(", ", known)})");
+            float easy = FishPower.For(FishDatabase.Get("goby"), 0, 0, 0).moveRate;
+            float hard = FishPower.For(FishDatabase.Get("tuna"), 0, 0, 0).moveRate;
+            float calmed = FishPower.For(FishDatabase.Get("tuna"), 0, 0, PlayerStats.MaxLevel).moveRate;
+            Check(hard > easy * 2f && calmed < hard * 0.5f, $"stronger fish thrash more (goby x{easy:0.00}, tuna x{hard:0.00}); full strength training calms the tuna to x{calmed:0.00}");
+            var hairtail = CatchVisuals.Spawn(FishDatabase.Get("hairtail"), 1f);
+            var puffer = CatchVisuals.Spawn(FishDatabase.Get("pufferfish"), 1f);
+            Bounds B(GameObject g) { var rs = g.GetComponentsInChildren<Renderer>(); var b = rs[0].bounds; foreach (var r in rs) b.Encapsulate(r.bounds); return b; }
+            var hb = B(hairtail); var pb = B(puffer);
+            float hairRatio = Mathf.Max(hb.size.x, hb.size.z) / hb.size.y, pufRatio = Mathf.Max(pb.size.x, pb.size.z) / pb.size.y;
+            Check(hairRatio > pufRatio * 2f, $"fish have their own shapes (hairtail length/height {hairRatio:0.0}, pufferfish {pufRatio:0.0})");
+            Destroy(hairtail);
+            Destroy(puffer);
+        }
+
+        private IEnumerator CatchCardShot(GameUI ui)
+        {
+            var r = CatchJournal.Record(FishDatabase.Get("sailfish"), 42f, Vector3.zero);
+            ui.ShowCatchCard(r);
+            yield return new WaitForSeconds(1.2f);
+            yield return Shot("25_catch_card");
+            Inventory.SellAllFish();
+        }
+
+        /// <summary>The sushi chef's scale: stages, the multiplier, a real sale, and the animation.</summary>
+        private IEnumerator SaleChecks(PlayerController player, CameraRig cam, GameUI ui)
+        {
+            var goby = FishDatabase.Get("goby");
+            var bass = FishDatabase.Get("seabass");
+            float Kg(FishSpecies s, float size) => Mathf.Lerp(s.minWeight, s.maxWeight, size);
+            float common80 = FishSale.Points(goby, Kg(goby, 0.8f)), uncommon80 = FishSale.Points(bass, Kg(bass, 0.8f));
+            Check(FishSale.Fills(common80 * 3f) == 0 && FishSale.Fills(common80 * 4f) == 1 && FishSale.Fills(common80 * 4f + uncommon80 * 7.9f) == 1 &&
+                  FishSale.Fills(common80 * 4f + uncommon80 * 8f) == 2,
+                $"the first bar takes 4 common fish at 80% size, the second 8 uncommon ones ({FishSale.BarCapacity(0):0.0} and {FishSale.BarCapacity(1):0.0} points)");
+            float biggestCommon = FishSale.Points(goby, goby.maxWeight), averageUncommon = FishSale.Points(bass, Kg(bass, 0.5f));
+            Check(Mathf.Abs(biggestCommon - averageUncommon) < 0.01f, $"the biggest common fish counts like an average uncommon one ({biggestCommon:0.00} vs {averageUncommon:0.00} points)");
+            Check(FishSale.BarRecipe(2) == (16, Rarity.Rare) && Mathf.Abs(FishSale.BarCapacity(2) - 16f * FishSale.Points(FishDatabase.Get("conger"), Kg(FishDatabase.Get("conger"), 0.8f))) < 0.01f,
+                "the third bar takes 16 rare fish at 80%");
+            int tier0 = Catalog.FishPrice(goby, Kg(goby, 0.5f)), tier1 = Catalog.FishPrice(FishDatabase.Get("octopus"), Kg(FishDatabase.Get("octopus"), 0.5f));
+            int tier2 = Catalog.FishPrice(FishDatabase.Get("skipjack"), Kg(FishDatabase.Get("skipjack"), 0.5f));
+            Check(tier1 >= tier0 * 8 && tier2 >= tier1 * 8, $"each fish tier sells for about ten times the last (goby ¥{tier0}, octopus ¥{tier1}, skipjack ¥{tier2})");
+            int hsk = SaveSystem.Data.hskLevel;
+            var done = SaveSystem.Data.lessonsDone.ToList();
+            SaveSystem.Data.hskLevel = 0;
+            SaveSystem.Data.lessonsDone.Clear();
+            Check(Mathf.Abs(FishSale.PerFill - 0.10f) < 0.001f, $"a new player gets +10% per bar ({FishSale.PerFill:P0})");
+            SaveSystem.Data.hskLevel = 1;
+            SaveSystem.Data.lessonsDone.AddRange(new[] { "1-1", "1-2", "1-3" });
+            Check(Mathf.Abs(FishSale.PerFill - 0.31f) < 0.001f, $"3 lessons (+2% each) and HSK 1 (+15%) make it +{FishSale.PerFill * 100f:0}% per bar");
+
+            // Sell 12 sea bass at 80% size: 23.4 points fill two bars (5.2 + 15.6) at +31% each = x1.62.
+            Inventory.SellAllFish();
+            for (int n = 0; n < 12; n++) Inventory.AddToBucket(bass, Kg(bass, 0.8f));
+            var quote = FishSale.For(FishSale.Selection("all"), Affinity.Level("fish"));
+            Check(quote.fills == 2 && Mathf.Abs(quote.multiplier - 1.62f) < 0.01f && quote.total > quote.baseValue,
+                $"12 good sea bass fill 2 bars: x{quote.multiplier:0.00}, ¥{quote.baseValue} -> ¥{quote.total}");
+            var chen = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "fish");
+            Check(chen.Shop.hanzi == "寿司店", $"Auntie Chen runs a sushi bar ({chen.Shop.hanzi} {chen.Shop.english})");
+            int i = Catalog.Shops.IndexOf(chen.Shop);
+            Vector2 spot = WorldShape.CustomerSpot(i), stall = WorldShape.StallPosition(i);
+            Vector2 dir = (stall - spot).normalized;
+            float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
+            player.Teleport(new Vector3(spot.x, WorldShape.TerrainHeight(spot.x, spot.y) + 0.05f, spot.y), yaw);
+            cam.Configure(player.transform, yaw, 12f, 5f);
+            yield return new WaitForSeconds(1f);
+            int money = Inventory.Money;
+            chen.HandlePlayerUtterance("阿姨，我想卖鱼。");
+            Check(chen.PendingOffer != null && chen.PendingOffer.price == quote.total, $"she offers the scale price (¥{chen.PendingOffer?.price})");
+            chen.HandlePlayerUtterance("可以。");
+            chen.Interrupt();
+            Check(Inventory.Money - money == quote.total && Inventory.BucketCount == 0, $"the sale pays exactly that (+¥{Inventory.Money - money})");
+            Check(ui.Scale != null && ui.Scale.Playing, "the scale animation plays");
+            // The bar fills gradually with a tone that rises as it goes (and starts again a little higher each bar).
+            float until = Time.realtimeSinceStartup + 20f, firstFillAt = -1f, started = Time.realtimeSinceStartup;
+            int midFrames = 0, rising = 0, falling = 0;
+            float lastPitch = -1f;
+            int lastFills = 0;
+            bool shot = false, toneHeard = false;
+            while (Time.realtimeSinceStartup < until && ui.Scale.Playing && ui.Scale.FillsShown < quote.fills)
+            {
+                float f = ui.Scale.BarShown;
+                if (f > 0.2f && f < 0.8f) midFrames++;
+                if (ui.Scale.ToneOn)
+                {
+                    toneHeard = true;
+                    if (lastPitch > 0f && ui.Scale.FillsShown == lastFills)
+                    {
+                        if (ui.Scale.TonePitch > lastPitch + 0.0001f) rising++;
+                        else if (ui.Scale.TonePitch < lastPitch - 0.0001f) falling++;
+                    }
+                    lastPitch = ui.Scale.TonePitch;
+                }
+                lastFills = ui.Scale.FillsShown;
+                if (firstFillAt < 0f && ui.Scale.FillsShown >= 1) firstFillAt = Time.realtimeSinceStartup - started;
+                if (!shot && f > 0.5f) { shot = true; yield return Shot("24a_scale_filling"); }
+                yield return null;
+            }
+            yield return new WaitForSeconds(0.3f);
+            yield return Shot("24b_scale_done");
+            Check(ui.Scale.FillsShown == quote.fills, $"the animation fills the bar {ui.Scale.FillsShown} times, like the price");
+            Check(firstFillAt >= 0.8f && midFrames >= 20, $"the bar fills gradually (first bar after {firstFillAt:0.0} s, {midFrames} frames part-full)");
+            Check(toneHeard && rising > 10 && falling == 0, $"a tone plays while it fills, rising in pitch within each bar ({rising} rising steps, {falling} falling)");
+            SaveSystem.Data.hskLevel = hsk;
+            SaveSystem.Data.lessonsDone.Clear();
+            SaveSystem.Data.lessonsDone.AddRange(done);
+        }
+
+        /// <summary>Medals by weight, golden fish (worth 5x), and the trophy wall at home.</summary>
+        private IEnumerator TrophyChecks(PlayerController player, CameraRig cam)
+        {
+            var bass = FishDatabase.Get("seabass");
+            float lo = bass.minWeight, hi = bass.maxWeight;
+            Check(CatchJournal.MedalFor(bass, lo) == 1 && CatchJournal.MedalFor(bass, Mathf.Lerp(lo, hi, 0.65f)) == 2 && CatchJournal.MedalFor(bass, Mathf.Lerp(lo, hi, 0.95f)) == 3,
+                "medals by weight: bronze for any sea bass, silver from 60% of its range, gold from 90%");
+            Inventory.SellAllFish();
+            var small = CatchJournal.Record(bass, lo + 0.1f, Vector3.zero);
+            var big = CatchJournal.Record(bass, Mathf.Lerp(lo, hi, 0.95f), Vector3.zero);
+            var again = CatchJournal.Record(bass, Mathf.Lerp(lo, hi, 0.92f), Vector3.zero);
+            Check(small.newMedal == 1 && big.newMedal == 3 && again.newMedal == 0 && CatchJournal.Medal("seabass") == 3,
+                $"catches earn medals once: bronze, then gold, then nothing new ({small.newMedal}, {big.newMedal}, {again.newMedal})");
+            Inventory.SellAllFish();
+            var mack = FishDatabase.Get("mackerel");
+            CatchJournal.Record(mack, 1f, Vector3.zero);
+            int plain = Inventory.BucketValue;
+            Inventory.SellAllFish();
+            FishingController.ForceGolden = true;
+            var gold = CatchJournal.Record(mack, 1f, Vector3.zero, golden: FishingController.ForceGolden);
+            FishingController.ForceGolden = false;
+            Check(gold.golden && Inventory.BucketValue == plain * CatchJournal.GoldenValue && CatchJournal.Get("mackerel").goldenCount == 1,
+                $"a golden mackerel is worth {CatchJournal.GoldenValue}x (¥{plain} -> ¥{Inventory.BucketValue}) and is counted in the journal");
+            Check(FishingController.GoldenChance >= 0.03f && FishingController.GoldenChance < 0.1f, $"golden fish are rare ({FishingController.GoldenChance * 100f:0}% a catch)");
+            Inventory.SellAllFish();
+            var wall = TrophyWall.Instance;
+            Check(wall != null, "the house has a trophy wall");
+            if (wall != null)
+            {
+                wall.Rebuild();
+                var trophies = TrophyWall.Trophies();
+                Check(trophies.Any(t => t.species.id == "seabass" && !t.golden) && trophies.Any(t => t.species.id == "mackerel" && t.golden) && wall.MountCount == trophies.Count,
+                    $"the wall shows the gold-medal sea bass and the golden mackerel ({wall.MountCount} mounted)");
+                var bed = BedInteractable.Instance;
+                if (bed != null)
+                {
+                    player.Teleport(bed.WakeSpot, 0f);
+                    Vector3 to = wall.transform.position - player.transform.position;
+                    float yaw = Mathf.Atan2(to.x, to.z) * Mathf.Rad2Deg;
+                    cam.Configure(player.transform, yaw, 20f, 4f);
+                    yield return new WaitForSeconds(5f); // let the title card fade
+                    yield return Shot("21_trophy_wall");
+                }
+            }
+        }
+
+        /// <summary>Bait is a bonus (not a requirement), except for the oarfish.</summary>
+        private void FishUnitChecks()
+        {
+            var discovered = SaveSystem.Data.discoveredFish;
+            var saved = discovered.ToList();
+            foreach (var f in FishDatabase.All) if (!discovered.Contains(f.id)) discovered.Add(f.id);
+            var seabass = FishDatabase.Get("seabass");
+            var squid = Catalog.Get("bait_squid");          // the sea bass doesn't like squid
+            var shrimp = Catalog.Get("bait_shrimp");        // ...but loves shrimp
+            var wrong = new CatchContext { hour = 9f, shoreDistance = 30f, lineKg = 80f, bait = squid };
+            var liked = new CatchContext { hour = 9f, shoreDistance = 30f, lineKg = 80f, bait = shrimp };
+            Check(!seabass.baits.Contains("bait_squid") && FishDatabase.Missing(seabass, wrong) == null, "a fish bites on a bait it doesn't especially like (sea bass on squid)");
+            // Two evening fish that like different baits: the sea bass (shrimp) and the hairtail (squid).
+            discovered.Clear();
+            discovered.Add("seabass");
+            discovered.Add("hairtail");
+            wrong.hour = liked.hour = 21f;
+            var rng = new System.Random(7);
+            int onWrong = 0, onLiked = 0;
+            for (int i = 0; i < 4000; i++)
+            {
+                if (FishDatabase.Roll(wrong, rng)?.id == "seabass") onWrong++;
+                if (FishDatabase.Roll(liked, rng)?.id == "seabass") onLiked++;
+            }
+            Check(onLiked > onWrong * 2, $"...but its favourite bait makes it far more likely (sea bass vs hairtail, 4000 rolls each: {onLiked} sea bass on shrimp, {onWrong} on squid)");
+            foreach (var f in FishDatabase.All) if (!discovered.Contains(f.id)) discovered.Add(f.id);
+            var oar = FishDatabase.Get("oarfish");
+            var night = new CatchContext { hour = 23f, shoreDistance = 80f, lineKg = 80f, bait = squid };
+            var glow = new CatchContext { hour = 23f, shoreDistance = 80f, lineKg = 80f, bait = Catalog.Get("bait_glow") };
+            Check(FishDatabase.Missing(oar, night) != null && FishDatabase.Missing(oar, glow) == null, "the oarfish still only bites on the glow lure");
+            discovered.Clear();
+            discovered.AddRange(saved);
         }
 
         /// <summary>Furniture left over the water or on the old pier (placed before the coast changed) moves into the house.</summary>
@@ -140,7 +871,8 @@ namespace UntitledGame.Core
             // Sleep any time, and a cast costs 10 energy.
             DayNightCycle.Instance.TimeOfDay = 12f;
             Check(SleepSystem.SleepyTime && BedInteractable.Instance != null && BedInteractable.Instance.Prompt.StartsWith("[F] Sleep"), "you can go to bed at noon");
-            Check(Mathf.Approximately(Energy.CastCost, 10f) && FishingController.BarScale < 1f, $"a cast costs {Energy.CastCost:0} energy; green bars are {FishingController.BarScale * 100f:0}% of their old size");
+            float gobyBar = FishPower.For(FishDatabase.Get("goby"), 0, 0, 0).barSize;
+            Check(Mathf.Approximately(Energy.CastCost, 10f) && gobyBar < 0.3f, $"a cast costs {Energy.CastCost:0} energy; a new player's green bar for a goby is {gobyBar * 100f:0}% of the track");
             var bed = BedInteractable.Instance;
             if (bed != null)
             {
@@ -217,6 +949,70 @@ namespace UntitledGame.Core
             string worms = Catalog.Counted(Catalog.Get("bait_worm"), 2), line = Catalog.Counted(Catalog.Get("line_red"), 1);
             Check(worms == "两包蚯蚓" && line == "一卷红线", $"counting words: {worms}, {line}");
             HskUnitChecks();
+            FriendshipUnitChecks();
+            // Mei's context is 4096 tokens: her standing prompt must leave room for the conversation (details come per turn).
+            int meiPrompt = DialogueAgent.EstimateTokens(CompanionPersona.BuildSystemPrompt(null));
+            Check(meiPrompt < 2000, $"Mei's system prompt stays small (~{meiPrompt} tokens of a 4096 context)");
+            string note = Encyclopedia.NoteFor("Mei, how do I ask Old Wang for worms in Chinese?");
+            Check(note.Contains("蚯蚓") && note.Contains("块"), "asking about Old Wang brings in his goods and prices for that turn");
+            Check(Encyclopedia.NoteFor("Ay what does old wine llike").Contains("LIKES"), "a misheard 'llike' still counts as asking what someone likes");
+            Affinity.State("tackle").facts.RemoveAll(f => f.StartsWith("like:") || f.StartsWith("dislike:")); // that lookup records them; undo it
+            VocabNotebook.ObserveTutorLine("You can say 我要蚯蚓 (I want worms) or 老板，有蚯蚓吗？ [Boss, do you have worms?]");
+            bool round = VocabNotebook.Entries.Any(v => v.hanzi == "我要蚯蚓"), square = VocabNotebook.Entries.Any(v => v.hanzi == "老板有蚯蚓吗");
+            Check(round && square, "the notebook picks up words Mei glosses with [square] or (round) brackets");
+            var gymShop = Catalog.Shop("gym");
+            var misheard = ShopIntentParser.Parse(gymShop, "张面我想买力尿训练", false);
+            var vague = ShopIntentParser.Parse(gymShop, "我想买训练", false);
+            Check(misheard?.item == "up_cast" && (vague == null || vague.item != "up_cast"),
+                $"one misheard syllable in a long item name still finds it (力尿训练 -> {misheard?.item}), but a vague 训练 doesn't pick one");
+            SaveSystem.Data.vocab.RemoveAll(v => v.hanzi == "你好" || v.hanzi == "天气");
+            VocabNotebook.ObserveTutorLine("He might smile if you greet him first with 你好, and talk about 今天的天气.");
+            bool unglossed = VocabNotebook.Entries.Any(v => v.hanzi == "你好" && v.meaning.Length > 0) && VocabNotebook.Entries.Any(v => v.hanzi == "天气");
+            VocabNotebook.ObserveTutorLine("你好！今天天气很好。");
+            Check(unglossed, "...and HSK words she uses without a gloss in an English line (你好, 天气), with the HSK meaning");
+            SaveSystem.Data.vocab.RemoveAll(v => v.hanzi == "我要蚯蚓" || v.hanzi == "老板有蚯蚓吗");
+        }
+
+        /// <summary>Friendship levels: the facts and the gift for each level, and the HSK cap (tested on 小方's state, then reset).</summary>
+        private void FriendshipUnitChecks()
+        {
+            string Q(string line) => ShopIntentParser.FactQuestion(line);
+            Check(Q("你是哪里人？") == "hometown" && Q("你有哥哥姐姐吗？") == "siblings" && Q("你的爱好是什么？") == "hobby" && Q("你喜欢吃什么？") == "food" &&
+                  Q("你结婚了吗？") == "family" && Q("你的生日是几月几号？") == "birthday" && Q("你以后想做什么？") == "dream" &&
+                  Q("你喜欢什么？") == "like" && Q("你喜欢做什么？") == "hobby" && Q("我想买鱼竿") == null,
+                "the seven questions about a keeper (and 你喜欢什么) are recognised");
+            Check(KeeperProfiles.All.All(p => Affinity.FactQuestions.Keys.All(k => p.Fact(k) != null)), $"all {KeeperProfiles.All.Count} keepers have an answer to every question");
+
+            var s = Affinity.State("colours");
+            int hsk = SaveSystem.Data.hskLevel;
+            s.facts.Clear();
+            s.giftLevels.Clear();
+            s.lastGiftDay = -1;
+            SaveSystem.Data.hskLevel = 0;
+            Affinity.Evaluate("colours");
+            Affinity.Learn("colours", "hometown", "self-test");
+            bool factOnly = Affinity.Level("colours") == 0;
+            Affinity.RecordGift("colours", disliked: true);
+            bool dislikedNoCount = Affinity.Level("colours") == 0 && !s.giftLevels.Contains(1);
+            s.lastGiftDay = -1;
+            Affinity.RecordGift("colours", disliked: false);
+            Check(factOnly && dislikedNoCount && Affinity.Level("colours") == 1, "认识 needs his hometown AND a gift (a gift he dislikes doesn't count)");
+            Affinity.Learn("colours", "siblings", "self-test");
+            Affinity.Learn("colours", "hobby", "self-test");
+            Affinity.RecordGift("colours", disliked: false);
+            Check(Affinity.Level("colours") == 1 && Affinity.WaitingForHsk("colours"), "朋友: siblings, hobby and a gift done, but it waits for HSK 1");
+            SaveSystem.Data.hskLevel = 1;
+            Affinity.EvaluateAll();
+            Check(Affinity.Level("colours") == 2, "...and passing HSK 1 makes it 朋友");
+            Affinity.Learn("colours", "food", "self-test");
+            Affinity.Learn("colours", "family", "self-test");
+            Affinity.RecordGift("colours", disliked: false);
+            Check(Affinity.Level("colours") == 2, "好朋友 needs HSK 2 even with everything else done");
+            s.facts.Clear();
+            s.giftLevels.Clear();
+            s.lastGiftDay = -1;
+            SaveSystem.Data.hskLevel = hsk;
+            Affinity.Evaluate("colours");
         }
 
         /// <summary>The HSK word list, the lessons covering it, and how answers are graded.</summary>
@@ -299,11 +1095,12 @@ namespace UntitledGame.Core
         /// </summary>
         private IEnumerator StatsChecks(VoiceChatController vc, PlayerController player, CameraRig cam, GameUI ui)
         {
-            // A new game only knows the sardine (junk can always be fished up).
-            Check(PlayerStats.DiscoveredFishCount == 1 && PlayerStats.IsDiscovered(FishDatabase.Get("sardine")), $"a new game knows only the sardine ({PlayerStats.DiscoveredFishCount} fish known)");
+            // A new game knows the four starter fish.
+            Check(PlayerStats.DiscoveredFishCount == PlayerStats.StarterFishes.Length && PlayerStats.StarterFishes.All(id => PlayerStats.IsDiscovered(FishDatabase.Get(id))),
+                $"a new game knows the starter fish ({PlayerStats.DiscoveredFishCount}: {string.Join(", ", PlayerStats.StarterFishes)})");
             var ctx = new CatchContext { hour = 8f, shoreDistance = 20f, lineKg = 80f, bait = Catalog.Get("bait_worm") };
-            bool onlyKnown = Enumerable.Range(0, 300).Select(_ => FishDatabase.Roll(ctx)).All(f => f != null && f.id == "sardine");
-            Check(onlyKnown, "only discovered fish bite, and only fish (300 rolls: all sardines)");
+            bool onlyKnown = Enumerable.Range(0, 300).Select(_ => FishDatabase.Roll(ctx)).All(f => f != null && PlayerStats.StarterFishes.Contains(f.id));
+            Check(onlyKnown, "only discovered fish bite, and only fish (300 rolls: all starter fish)");
             Check(FishDatabase.All.All(f => f.IsFish), "nothing but fish can be caught (no junk)");
             var sardine = FishDatabase.Get("sardine");
             var weights = Enumerable.Range(0, 200).Select(_ => FishDatabase.RollWeight(sardine)).ToList();
@@ -331,23 +1128,24 @@ namespace UntitledGame.Core
             var thinLine = new CatchContext { hour = 9f, shoreDistance = 10f, lineKg = 1f, bait = Catalog.Get("bait_worm") };
             var night = new CatchContext { hour = 23f, shoreDistance = 10f, lineKg = 3f, bait = Catalog.Get("bait_worm") };
             var ok = new CatchContext { hour = 9f, shoreDistance = 10f, lineKg = 3f, bait = Catalog.Get("bait_worm") };
-            Check(FishDatabase.Missing(mackerel, near) != null && FishDatabase.Missing(mackerel, noBait) != null && FishDatabase.Missing(mackerel, thinLine) != null &&
+            Check(FishDatabase.Missing(mackerel, near) != null && FishDatabase.Missing(mackerel, noBait) == null && FishDatabase.Missing(mackerel, thinLine) != null &&
                   FishDatabase.Missing(mackerel, night) != null && FishDatabase.Missing(mackerel, ok) == null,
-                $"mackerel needs 6 m out, worms or shrimp, a 2 kg line and daylight ({FishDatabase.Missing(mackerel, near)}; {FishDatabase.Missing(mackerel, noBait)}; {FishDatabase.Missing(mackerel, thinLine)})");
+                $"mackerel needs 6 m out, a 2 kg line and daylight; any bait works ({FishDatabase.Missing(mackerel, near)}; {FishDatabase.Missing(mackerel, thinLine)})");
             Check(PlayerStats.Knowledge == 1, "fishing knowledge is 1 book");
 
             var gym = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "gym");
             yield return GoToShop(player, cam, 5, gym);
             Check(ui.Shop.Keeper == gym, "walking to Coach Wu switches the shop window to the trainer");
             yield return WaitIdle(gym, 30f);
-            float castBefore = PlayerStats.CastDistance;
-            yield return Say(vc, gym, SpeechEngine.VoiceMale, "教练，我要力量训练。");
+            float calmBefore = FishPower.ForPlayer(FishDatabase.Get("mackerel")).moveRate;
+            yield return Say(vc, gym, SpeechEngine.VoiceMale, "教练，我想买力量训练。");
             yield return WaitIdle(gym);
             Check(gym.PendingOffer != null && gym.PendingOffer.itemId == "up_cast", "asking for 力量训练 gets a strength-training offer");
             yield return Say(vc, gym, SpeechEngine.VoiceMale, "好的，我要。");
             yield return WaitIdle(gym);
-            Check(PlayerStats.Level("cast") == 1 && PlayerStats.CastDistance > castBefore, $"strength training: cast distance {castBefore:0.#} -> {PlayerStats.CastDistance:0.#} m");
-            Check(Catalog.PriceOf(Catalog.Get("up_cast")) == Catalog.Get("up_cast").price * 2, "the next level costs more");
+            float calmAfter = FishPower.ForPlayer(FishDatabase.Get("mackerel")).moveRate;
+            Check(PlayerStats.Level("cast") == 1 && calmAfter < calmBefore, $"strength training calms fish (mackerel x{calmBefore:0.00} -> x{calmAfter:0.00})");
+            Check(Catalog.PriceOf(Catalog.Get("up_cast")) == 20, $"the next level costs more (¥{Catalog.PriceOf(Catalog.Get("up_cast"))})");
             ShopConversation.Instance.End(sayGoodbye: false);
             yield return FriendshipChecks(vc, player, cam, ui);
         }
@@ -355,14 +1153,6 @@ namespace UntitledGame.Core
         /// <summary>Friendship scoring, the gift shop, giving a liked gift, asking about a keeper, locked goods, and Mei as encyclopedia.</summary>
         private IEnumerator FriendshipChecks(VoiceChatController vc, PlayerController player, CameraRig cam, GameUI ui)
         {
-            // Scoring: harder, longer lines are worth more; repeats are worth nothing.
-            var easy = Affinity.ScoreLine("furniture", "你好", 0);
-            var hard = Affinity.ScoreLine("furniture", "我觉得你的椅子非常漂亮，因为颜色很好看", 0);
-            var again = Affinity.ScoreLine("furniture", "我觉得你的椅子非常漂亮，因为颜色很好看", 0);
-            Check(hard.points > easy.points && easy.points >= 1 && again.points == 0,
-                $"friendship scoring: 你好 +{easy.points} ({easy.why}); a long HSK 3 line about chairs +{hard.points} ({hard.why}); repeating it +{again.points}");
-            Check(ShopIntentParser.FactQuestion("你是哪里人？") == "hometown" && ShopIntentParser.FactQuestion("你喜欢什么？") == "like" &&
-                  ShopIntentParser.FactQuestion("你喜欢做什么？") == "hobby" && ShopIntentParser.FactQuestion("我想买鱼竿") == null, "questions about a keeper are recognised");
 
             // Gift shop: buy tea by voice.
             Inventory.Earn(200);
@@ -384,11 +1174,11 @@ namespace UntitledGame.Core
             yield return Say(vc, tackle, SpeechEngine.VoiceMale, "你是哪里人？");
             yield return WaitIdle(tackle);
             Check(Affinity.Knows("tackle", "hometown"), "asking 你是哪里人 puts Old Wang's hometown in the journal");
-            int before = Affinity.Points("tackle");
             Check(!Affinity.Knows("tackle", "like:茶"), "Old Wang's likes aren't known yet");
+            int teaBefore = Inventory.Count("gift_tea");
             yield return Say(vc, tackle, SpeechEngine.VoiceMale, "老王，这是送给你的茶。");
             yield return WaitIdle(tackle);
-            Check(Inventory.Count("gift_tea") == 0 && Affinity.Points("tackle") >= before + Affinity.GiftLiked, $"giving tea (he likes it) raised friendship {before} -> {Affinity.Points("tackle")}");
+            Check(Inventory.Count("gift_tea") == teaBefore - 1 && Affinity.State("tackle").giftLevels.Contains(1), "giving tea counted as his gift for 认识");
             Check(Affinity.Knows("tackle", "like:茶"), "his delight put 茶 in the journal");
             Check(Affinity.Level("tackle") >= 1, $"friendship with Old Wang is now {Affinity.LevelHanzi[Affinity.Level("tackle")]}");
             yield return Say(vc, tackle, SpeechEngine.VoiceMale, "我想买碳素鱼竿。");
@@ -421,12 +1211,12 @@ namespace UntitledGame.Core
         private IEnumerator SchoolChecks(VoiceChatController vc, PlayerController player, CameraRig cam, GameUI ui)
         {
             var teacher = ShopkeeperBrain.Keepers.FirstOrDefault(k => k.Shop.school);
-            Check(teacher != null && Catalog.Shops.IndexOf(teacher.Shop) == 8 && WorldShape.StallCount == 9, "the test centre is the 9th stall, with 高老师");
+            Check(teacher != null && Catalog.Shops.IndexOf(teacher.Shop) == 8 && WorldShape.StallCount == 10, "the test centre is the 9th stall, with 高老师 (海叔's crab stall is the 10th)");
             if (teacher == null) yield break;
 
             // Before any test: Old Wang won't sell the blue line even to a friend.
             var tackle = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "tackle");
-            Affinity.Add("tackle", 40, "self-test");
+            Affinity.DebugGrant("tackle", Affinity.MaxLevel); // everything learned and given: only the HSK tests hold it back
             Inventory.Earn(2000);
             tackle.HandlePlayerUtterance("老板，我要蓝线。");
             Check(tackle.PendingOffer == null && Hsk.Level == 0, $"no HSK test yet: Old Wang won't sell the blue line, even as {Affinity.LevelHanzi[Affinity.Level("tackle")]}");
@@ -464,14 +1254,23 @@ namespace UntitledGame.Core
                 Log($"   lesson: {q.word.hanzi} ({q.word.pinyin}) heard \"{q.heard}\" -> {(q.correct ? "right" : "wrong")}");
             }
             Check(spokenRight >= 2, $"spoken answers are graded ({spokenRight}/{spoken} words heard right)");
+            HskSchool.ForceSurprise = false;
             int money = Inventory.Money;
+            int at = lesson.index;
+            teacher.HandlePlayerUtterance("错的");
+            Check(lesson.index == at && lesson.retryHeard == "错的", "in a lesson a wrong answer doesn't move on: say it again (or skip)");
             while (HskSchool.Current == lesson)
             {
                 teacher.HandlePlayerUtterance(lesson.Current.word.hanzi);
+                if (lesson.pending != null)
+                {
+                    Check(lesson.Current.recall, "only the quiz part asks to confirm what was heard");
+                    HskSchool.SubmitPending(); // Y
+                }
                 yield return null;
             }
             yield return WaitIdle(teacher, 20f);
-            Check(Hsk.LessonDone(1, 1) && Inventory.Money == money + Hsk.LessonReward[1], $"passed lesson 1 (quiz {lesson.RecallRight}/{lesson.RecallAsked}) and got ¥{Inventory.Money - money}");
+            Check(Hsk.LessonDone(1, 1) && Inventory.Money == money, $"passed lesson 1 (quiz {lesson.RecallRight}/{lesson.RecallAsked}); no fixed pay (surprises only, switched off here)");
             Check(ConversationLog.Entries.Any(e => e.speaker == teacher.DisplayName && e.text.Contains("跟我说")), "the teacher's lesson lines are in the journal's transcript");
 
             // Free practice: no money; wrong answers come back later.
@@ -524,8 +1323,9 @@ namespace UntitledGame.Core
             teacher.Interrupt();
             Check(UiText.Plain("Day 2", "第2天", 1) == "第2天 Day 2" && UiText.Plain("Fish", "鱼", 0) == "鱼" && UiText.Plain("Bag", "包", 3) == "Bag",
                 "after HSK 1: HSK 1 labels show both languages, easier ones only Chinese, HSK 3 ones stay English");
-            int bonus = Catalog.FishPrice(sea, 3f);
-            Check(Mathf.Abs(Catalog.FishHskBonus - 0.1f) < 0.001f && bonus > plain, $"after HSK 1 fish sell for 10% more, automatically (a 3 kg sea bass: ¥{plain} -> ¥{bonus})");
+            float expected = FishSale.BasePerFill + FishSale.PerLesson * FishSale.LessonsPassed + FishSale.PerTest * Hsk.Level;
+            Check(Mathf.Abs(FishSale.PerFill - expected) < 0.001f && FishSale.PerFill >= 0.25f,
+                $"after HSK 1 (and {FishSale.LessonsPassed} lessons) each bar on Auntie Chen's scale is worth +{FishSale.PerFill * 100f:0}%");
 
             // Unlocked: the blue line (friend + HSK 1).
             tackle.HandlePlayerUtterance("老板，我要蓝线。");
@@ -826,7 +1626,7 @@ namespace UntitledGame.Core
             Log($"Mei's first-token latency: {mei.LastResponseLatency:0.00}s");
 
             // Ask Mei for help in English, then try some Mandarin.
-            yield return Say(vc, mei, SpeechEngine.VoiceEnglish, "Mei, how do I ask Old Wang for a fishing rod in Chinese?");
+            yield return Say(vc, mei, SpeechEngine.VoiceEnglish, "Mei, how do I ask Old Wang for worms in Chinese?");
             yield return new WaitForSeconds(1f);
             yield return Shot("03_mei_teaches");
             yield return WaitIdle(mei);
@@ -966,6 +1766,9 @@ namespace UntitledGame.Core
             Log($"Conversation log ({ConversationLog.Entries.Count} lines):");
             foreach (var e in ConversationLog.Entries) Log($"   {e.speaker}: {e.text}");
             yield return LongConversationChecks();
+            Log("--- newer sections: " + string.Join(", ", ExtraSections) + " ---");
+            yield return RunSections(ExtraSections);
+            DayNightCycle.Instance.TimeOfDay = 10f;
             yield return DayChecks(player, cam);
             yield return SaveLoadChecks();
             Log(_failures == 0 ? "SELFTEST COMPLETE: all checks passed" : $"SELFTEST COMPLETE: {_failures} check(s) failed");
@@ -1004,6 +1807,14 @@ namespace UntitledGame.Core
             string reply = ConversationLog.Entries.Count > before ? ConversationLog.Entries[ConversationLog.Entries.Count - 1].text : "";
             Check(reply.Length > 0 && !reply.Contains("Could you say that again"), $"Mei still answers after a very long conversation: \"{reply}\"");
             Check(ReadShared(ChatAudit.SessionFile).Contains("to fit the context"), "the oldest messages were forgotten to fit the context");
+            // Trimming happens in one chunk (down to ~40% of the room), so the next turns can reuse the server's prompt cache.
+            var trim = System.Text.RegularExpressions.Regex.Matches(ReadShared(ChatAudit.SessionFile), @"Mei +forgot the \d+ oldest messages to fit the context \(~(\d+) -> ~(\d+) tokens, budget (\d+)\)");
+            if (trim.Count > 0)
+            {
+                var g = trim[trim.Count - 1].Groups;
+                int after = int.Parse(g[2].Value), budget = int.Parse(g[3].Value);
+                Check(after < budget * 0.75f, $"the history was trimmed in one chunk, well under the budget ({g[1].Value} -> {after} tokens, budget {budget})");
+            }
 
             // Feeding by voice, with cat food and no bowl.
             var cat = UntitledGame.Home.PetController.Instance;

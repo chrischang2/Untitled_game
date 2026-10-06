@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using UnityEngine;
 using UntitledGame.Companion;
 using UntitledGame.Core;
@@ -10,19 +9,55 @@ using UntitledGame.Language;
 namespace UntitledGame.Progression
 {
     /// <summary>
-    /// Friendship with each shopkeeper (0-100 points, five levels). Points come from talking to them in Chinese:
-    /// more ambitious lines (higher HSK words, longer sentences) are worth more, talking about their interests and
-    /// answering their questions earn a bonus, and gifts they like are worth a lot. Higher levels unlock better
-    /// goods and more personal facts. Talk points are capped per keeper per day so it can't be ground out.
+    /// Friendship with each shopkeeper: five levels (陌生人 → 老朋友). Every shopkeeper works the same way, so the player
+    /// practises the same questions with each of them. To reach a level you must:
+    /// <list type="bullet">
+    /// <item>learn the things about them for that level by asking (level 1: where they're from; level 2: brothers and
+    /// sisters, and their hobby; level 3: favourite food, and whether they're married / have children; level 4: their
+    /// birthday, and their dream for the future),</item>
+    /// <item>give them one gift at the level before (any gift they don't dislike), and</item>
+    /// <item>have passed the HSK test one below it (level 2 needs HSK 1, level 3 HSK 2, level 4 HSK 3).</item>
+    /// </list>
+    /// Higher levels unlock better goods (ItemDef.minAffinity).
     /// </summary>
     public static class Affinity
     {
-        public static readonly int[] Thresholds = { 0, 15, 35, 60, 90 };
+        public const int MaxLevel = 4;
         public static readonly string[] LevelHanzi = { "陌生人", "认识", "朋友", "好朋友", "老朋友" };
         public static readonly string[] LevelEnglish = { "stranger", "acquaintance", "friend", "good friend", "old friend" };
-        public const int MaxPoints = 100;
-        public const int TalkCapPerDay = 15;
-        public const int GiftLiked = 15, GiftNeutral = 5, GiftDisliked = -8;
+
+        /// <summary>What has to be learned about every shopkeeper to reach each level (index = level).</summary>
+        public static readonly string[][] FactsFor =
+        {
+            new string[0],
+            new[] { "hometown" },
+            new[] { "siblings", "hobby" },
+            new[] { "food", "family" },
+            new[] { "birthday", "dream" },
+        };
+
+        /// <summary>The question that finds each thing out (the same for every shopkeeper), and what it's about in English.</summary>
+        public static readonly Dictionary<string, (string question, string english)> FactQuestions = new Dictionary<string, (string, string)>
+        {
+            { "hometown", ("你是哪里人？", "where they're from") },
+            { "siblings", ("你有哥哥姐姐吗？", "brothers and sisters") },
+            { "hobby", ("你的爱好是什么？", "their hobby") },
+            { "food", ("你喜欢吃什么？", "their favourite food") },
+            { "family", ("你结婚了吗？", "married? children?") },
+            { "birthday", ("你的生日是几月几号？", "their birthday") },
+            { "dream", ("你以后想做什么？", "their dream for the future") },
+        };
+
+        /// <summary>The friendship level at which a shopkeeper will tell you this (one below the level it's needed for).</summary>
+        public static int ShareLevel(string factId)
+        {
+            for (int l = 1; l <= MaxLevel; l++)
+                if (FactsFor[l].Contains(factId)) return l - 1;
+            return 0; // likes and dislikes: any time
+        }
+
+        /// <summary>The HSK test needed for a friendship level (level 1: none).</summary>
+        public static int HskNeeded(int level) => Mathf.Max(0, level - 1);
 
         /// <summary>(shop id, old level, new level)</summary>
         public static event Action<string, int, int> LevelChanged;
@@ -39,103 +74,75 @@ namespace UntitledGame.Progression
                 s = new KeeperState { shopId = shopId };
                 list.Add(s);
             }
+            s.giftLevels ??= new List<int>();
+            s.facts ??= new List<string>();
             return s;
         }
 
-        public static int Points(string shopId) => State(shopId).points;
-
-        public static int Level(string shopId) => LevelFor(Points(shopId));
-
-        public static int LevelFor(int points)
+        /// <summary>The friendship level now: every level up to it has its facts, its gift and its HSK test.</summary>
+        public static int Level(string shopId)
         {
             int lvl = 0;
-            for (int i = 0; i < Thresholds.Length; i++) if (points >= Thresholds[i]) lvl = i;
+            for (int l = 1; l <= MaxLevel; l++)
+            {
+                if (!Requirements(shopId, l).All(r => r.done)) break;
+                lvl = l;
+            }
             return lvl;
         }
 
         public static string LevelLabel(int level) => $"{LevelHanzi[level]} {Pinyin.Of(LevelHanzi[level])} ({LevelEnglish[level]})";
 
-        /// <summary>Points needed for the next level, or 0 at the top.</summary>
-        public static int NextThreshold(string shopId)
+        public class Requirement
         {
-            int lvl = Level(shopId);
-            return lvl + 1 < Thresholds.Length ? Thresholds[lvl + 1] : 0;
+            public string kind;     // "fact", "gift" or "hsk"
+            public string factId;
+            public string text;     // English, with the Chinese question for facts
+            public bool done;
         }
 
-        /// <summary>Adds (or removes) points; returns the change in level.</summary>
-        public static int Add(string shopId, int points, string reason)
+        /// <summary>What reaching <paramref name="level"/> takes, and which parts are done.</summary>
+        public static List<Requirement> Requirements(string shopId, int level)
+        {
+            var list = new List<Requirement>();
+            if (level < 1 || level > MaxLevel) return list;
+            var s = State(shopId);
+            foreach (var f in FactsFor[level])
+            {
+                var (q, en) = FactQuestions[f];
+                list.Add(new Requirement { kind = "fact", factId = f, text = $"learn {en}: {q}", done = s.facts.Contains(f) });
+            }
+            list.Add(new Requirement { kind = "gift", text = "give a gift", done = s.giftLevels.Contains(level) });
+            int hsk = HskNeeded(level);
+            if (hsk > 0) list.Add(new Requirement { kind = "hsk", text = $"pass HSK {hsk}", done = Hsk.Level >= hsk });
+            return list;
+        }
+
+        /// <summary>Checks for a level change (after learning something, a gift, or a passed test) and announces it.</summary>
+        public static void Evaluate(string shopId)
         {
             var s = State(shopId);
-            int before = LevelFor(s.points);
-            s.points = Mathf.Clamp(s.points + points, 0, MaxPoints);
-            int after = LevelFor(s.points);
-            ChatAudit.Write("FRIENDSHIP", $"{shopId} {(points >= 0 ? "+" : "")}{points} ({reason}) -> {s.points} points, level {after} {LevelHanzi[after]}");
+            int before = s.level;
+            int now = Level(shopId);
+            if (now == before) return;
+            s.level = now;
+            ChatAudit.Write("FRIENDSHIP", $"{shopId}: level {before} -> {now} {LevelHanzi[now]}");
             Changed?.Invoke();
-            if (after != before) LevelChanged?.Invoke(shopId, before, after);
-            return after - before;
+            LevelChanged?.Invoke(shopId, before, now);
         }
 
-        // ------------------------------------------------------------------ talking
-
-        public class LineScore
+        public static void EvaluateAll()
         {
-            public int points;
-            public string why = "";
-            public int hskWords;
-            public int maxLevel;
+            foreach (var k in SaveSystem.Data.keepers.ToList()) Evaluate(k.shopId);
         }
 
-        /// <summary>
-        /// Scores a line the player said to a keeper: 1-3 for the hardest HSK level used, +1 for 4+ different HSK words,
-        /// +1 more for 7+, +1 for talking about the keeper's interests, + 2x the question's level when answering their question.
-        /// Repeats and very short lines score nothing, and talk points are capped per day.
-        /// </summary>
-        public static LineScore ScoreLine(string shopId, string text, int questionLevel)
+        /// <summary>True when everything for the next level is done except the HSK test.</summary>
+        public static bool WaitingForHsk(string shopId)
         {
-            var result = new LineScore();
-            var sb = new StringBuilder();
-            foreach (char c in text) if (Pinyin.IsHanzi(c)) sb.Append(c);
-            string clean = sb.ToString();
-            var s = State(shopId);
-            if (clean.Length < 2) { result.why = "too short"; return result; }
-            if (s.recentLines.Contains(clean)) { result.why = "said that already"; return result; }
-            var words = HskVocab.Segment(clean).GroupBy(w => w.word).Select(g => g.First()).ToList();
-            result.hskWords = words.Count;
-            if (words.Count == 0) { result.why = "no HSK 1-3 words recognised"; return result; }
-            result.maxLevel = words.Max(w => w.level);
-
-            int pts = result.maxLevel;
-            var why = new List<string> { $"HSK {result.maxLevel}" };
-            if (words.Count >= 4) { pts++; why.Add($"{words.Count} words"); }
-            if (words.Count >= 7) pts++;
-            var profile = KeeperProfiles.For(shopId);
-            if (profile != null && (profile.topics.Any(clean.Contains) || profile.likes.Any(clean.Contains)))
-            {
-                pts++;
-                why.Add("about their interests");
-            }
-            if (questionLevel > 0 && clean.Length >= 3)
-            {
-                pts += questionLevel * 2;
-                why.Add($"answered their HSK {questionLevel} question");
-            }
-
-            // Daily cap per keeper.
-            if (s.talkDay != Today)
-            {
-                s.talkDay = Today;
-                s.talkPointsToday = 0;
-            }
-            int allowed = Mathf.Max(0, TalkCapPerDay - s.talkPointsToday);
-            if (pts > allowed) why.Add(allowed == 0 ? "daily limit reached" : "near the daily limit");
-            pts = Mathf.Min(pts, allowed);
-            s.talkPointsToday += pts;
-            s.recentLines.Add(clean);
-            if (s.recentLines.Count > 30) s.recentLines.RemoveAt(0);
-
-            result.points = pts;
-            result.why = string.Join(", ", why);
-            return result;
+            int next = Level(shopId) + 1;
+            if (next > MaxLevel) return false;
+            var req = Requirements(shopId, next);
+            return req.Where(r => r.kind != "hsk").All(r => r.done) && req.Any(r => r.kind == "hsk" && !r.done);
         }
 
         // ------------------------------------------------------------------ facts
@@ -150,6 +157,7 @@ namespace UntitledGame.Progression
             s.facts.Add(factId);
             ChatAudit.Write("JOURNAL", $"learned {shopId}/{factId} ({source})");
             Changed?.Invoke();
+            Evaluate(shopId);
             return true;
         }
 
@@ -157,7 +165,35 @@ namespace UntitledGame.Progression
 
         public static bool GaveGiftToday(string shopId) => State(shopId).lastGiftDay == Today;
 
-        public static void MarkGift(string shopId) => State(shopId).lastGiftDay = Today;
+        /// <summary>
+        /// A gift was given today. Unless they dislike it, it counts for the next friendship level (one gift per level).
+        /// Returns true if it counted.
+        /// </summary>
+        public static bool RecordGift(string shopId, bool disliked)
+        {
+            var s = State(shopId);
+            s.lastGiftDay = Today;
+            int next = Level(shopId) + 1;
+            bool counts = !disliked && next <= MaxLevel && !s.giftLevels.Contains(next);
+            if (counts) s.giftLevels.Add(next);
+            ChatAudit.Write("FRIENDSHIP", $"{shopId}: gift {(disliked ? "disliked" : "accepted")}{(counts ? $", counts for level {next}" : "")}");
+            Changed?.Invoke();
+            Evaluate(shopId);
+            return counts;
+        }
+
+        /// <summary>Self-test / debug: learns everything and gives the gifts up to a level (HSK still caps it).</summary>
+        public static void DebugGrant(string shopId, int level)
+        {
+            var s = State(shopId);
+            for (int l = 1; l <= Mathf.Min(level, MaxLevel); l++)
+            {
+                foreach (var f in FactsFor[l]) if (!s.facts.Contains(f)) s.facts.Add(f);
+                if (!s.giftLevels.Contains(l)) s.giftLevels.Add(l);
+            }
+            Changed?.Invoke();
+            Evaluate(shopId);
+        }
 
         // ------------------------------------------------------------------ questions
 

@@ -237,13 +237,7 @@ namespace UntitledGame.UI
             _placed.Clear();
             if (player != null)
             {
-                foreach (var k in ShopkeeperBrain.Keepers)
-                {
-                    float d = Vector3.Distance(player.position, k.transform.position);
-                    if (d > 22f) continue;
-                    string py = SaveSystem.Settings.pinyin == PinyinMode.Off ? "" : $"\n<size=17><color=#9FE3DA><i>{Pinyin.Of(k.Shop.hanzi)}</i></color></size>";
-                    Show(ref n, ui, k.transform.position + Vector3.up * 2.9f, $"<size=30><b>{k.Shop.hanzi}</b></size>{py}", new Vector2(170, py.Length > 0 ? 78 : 52));
-                }
+                // (Shop names are painted signs on the stalls now: Environment.ShopSign.)
                 // (No price bubbles over the goods: they were clutter. Prices are in the shop window when you talk.)
             }
             for (int i = n; i < _pool.Count; i++) _pool[i].rt.gameObject.SetActive(false);

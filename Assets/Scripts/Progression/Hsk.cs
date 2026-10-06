@@ -27,9 +27,9 @@ namespace UntitledGame.Progression
         public static readonly string[] Unlocks =
         {
             "",
-            "fish sell for 10% more, blue line, squid & crab bait, good oars, huge bucket, Fish under the Rocks, double bed, sofa, radio, new cosmetics",
-            "fish sell for 20% more, black line, live baitfish, sail, giant bucket, Fish of the Open Sea, big bed, new cosmetics",
-            "fish sell for 35% more, gold line, glow lure, new boat (the island), Legends of the Sea, golden cosmetics",
+            "+15% per bar on 陈阿姨's scale, blue line, squid & crab bait, good oars, huge bucket, Fish under the Rocks, double bed, sofa, radio, new cosmetics",
+            "+15% per bar on 陈阿姨's scale, black line, live baitfish, sail, giant bucket, Fish of the Open Sea, big bed, new cosmetics",
+            "+15% per bar on 陈阿姨's scale, gold line, glow lure, new boat (the island), Legends of the Sea, golden cosmetics",
         };
 
         /// <summary>How much more Auntie Chen pays for fish at each HSK level (automatic: no card to buy).</summary>
@@ -104,6 +104,7 @@ namespace UntitledGame.Progression
             Data.hskLevel = Mathf.Clamp(level, 0, MaxLevel);
             ChatAudit.Write("HSK", $"passed the HSK {level} test");
             Changed?.Invoke();
+            Affinity.EvaluateAll(); // friendships waiting for this test move up now
         }
 
         /// <summary>Words the player got wrong come back more often in free practice.</summary>
@@ -118,6 +119,111 @@ namespace UntitledGame.Progression
         }
 
         public static IReadOnlyList<string> MissedWords => Missed;
+
+        // ------------------------------------------------------------------ mastery (spaced repetition)
+
+        /// <summary>Days before a word in each box is due for practice again.</summary>
+        public static readonly int[] BoxInterval = { 0, 1, 2, 4, 7, 14 };
+        public const int MaxBox = 5, KnownBox = 3;
+
+        private static List<WordMastery> Mastery => Data.mastery ??= new List<WordMastery>();
+
+        public static WordMastery MasteryOf(string word) => Mastery.FirstOrDefault(m => m.word == word);
+        public static int Box(string word) => MasteryOf(word)?.box ?? 0;
+        public static bool Seen(string word) => MasteryOf(word) != null;
+        public static bool Known(string word) => Box(word) >= KnownBox;
+        public static int KnownCount(int level) => HskVocab.Words(level).Count(w => Known(w.hanzi));
+        public static int KnownCount(IEnumerable<HskVocab.Word> words) => words.Count(w => Known(w.hanzi));
+
+        /// <summary>Seen before and its interval has passed (or it's still in box 0).</summary>
+        public static bool Due(string word)
+        {
+            var m = MasteryOf(word);
+            return m != null && (m.box == 0 || Data.day - m.lastDay >= BoxInterval[Mathf.Clamp(m.box, 0, MaxBox)]);
+        }
+
+        private static WordMastery Entry(string word)
+        {
+            var m = MasteryOf(word);
+            if (m == null)
+            {
+                m = new WordMastery { word = word };
+                Mastery.Add(m);
+            }
+            return m;
+        }
+
+        /// <summary>
+        /// An answer in a lesson, practice or test. Saying a word from English (recall) moves it up a box (once a day);
+        /// repeating it after the teacher only marks it as seen; a wrong answer drops it two boxes.
+        /// </summary>
+        public static void RecordAnswer(string word, bool right, bool recall)
+        {
+            NoteAnswer(word, right);
+            var m = Entry(word);
+            if (right)
+            {
+                m.right++;
+                if (recall && m.promotedDay != Data.day)
+                {
+                    m.box = Mathf.Min(MaxBox, m.box + 1);
+                    m.promotedDay = Data.day;
+                }
+                else if (!recall) m.box = Mathf.Max(m.box, 1);
+            }
+            else
+            {
+                m.wrong++;
+                m.box = Mathf.Max(0, m.box - 2);
+            }
+            m.lastDay = Data.day;
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// The player used HSK words of their own accord (to Mei or a shopkeeper): each one they've met before moves up a
+        /// box, at most once a day and no higher than "known" (tests and practice take it further).
+        /// </summary>
+        public static void ObserveSpoken(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            bool any = false;
+            foreach (var w in HskVocab.Segment(Pinyin.ToSimplified(text)).Select(x => x.word).Distinct())
+            {
+                var m = MasteryOf(w);
+                if (m == null || m.box >= KnownBox || m.promotedDay == Data.day) continue;
+                m.box++;
+                m.right++;
+                m.promotedDay = m.lastDay = Data.day;
+                any = true;
+            }
+            if (any) Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// Words for free practice, aimed at about 75% success: mostly words that are due or weak (seen before, low box,
+        /// longest ago first), plus a few easy wins, topped up with new words from the next lesson.
+        /// </summary>
+        public static List<HskVocab.Word> PracticeWords(int topLevel, int count, System.Random rng = null)
+        {
+            double R() => rng?.NextDouble() ?? UnityEngine.Random.value;
+            var pool = HskVocab.All.Where(w => w.level <= topLevel).ToList();
+            var seen = pool.Where(w => Seen(w.hanzi)).ToList();
+            var weak = seen.Where(w => Due(w.hanzi) || Box(w.hanzi) <= 2)
+                .OrderBy(w => Box(w.hanzi)).ThenBy(w => MasteryOf(w.hanzi).lastDay).ThenBy(_ => R()).Take((int)(count * 0.7f + 0.5f)).ToList();
+            var easy = seen.Where(w => !weak.Contains(w) && Box(w.hanzi) > 2).OrderBy(_ => R()).Take(count - weak.Count).ToList();
+            var chosen = weak.Concat(easy).ToList();
+            if (chosen.Count < count)
+            {
+                var (nl, nn) = NextLesson();
+                foreach (var w in LessonWords(nl, nn).Concat(pool.OrderBy(_ => R())))
+                {
+                    if (chosen.Count >= count) break;
+                    if (!chosen.Contains(w) && w.level <= topLevel) chosen.Add(w);
+                }
+            }
+            return chosen.OrderBy(_ => R()).ToList();
+        }
 
         // ------------------------------------------------------------------ curriculum
 

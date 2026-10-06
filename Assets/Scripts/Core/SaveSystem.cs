@@ -54,6 +54,8 @@ namespace UntitledGame.Core
         public int count;
         public float bestLength;
         public int firstDay;
+        public int medal;          // 0 none, 1 bronze, 2 silver, 3 gold (best weight within the species' range)
+        public int goldenCount;    // rare golden ones caught
     }
 
     [Serializable]
@@ -68,6 +70,25 @@ namespace UntitledGame.Core
     {
         public string speciesId;
         public float length;
+        public bool golden;        // a rare golden one: sells for much more
+    }
+
+    /// <summary>How well the player knows one HSK word (a Leitner box: 0 new ... 5 solid).</summary>
+    [Serializable]
+    public class WordMastery
+    {
+        public string word;
+        public int box;
+        public int right, wrong;
+        public int lastDay = -1;      // last day it was practised
+        public int promotedDay = -1;  // last day it moved up a box (at most once a day)
+    }
+
+    [Serializable]
+    public class StatLevel
+    {
+        public string id;
+        public int level;
     }
 
     [Serializable]
@@ -136,6 +157,10 @@ namespace UntitledGame.Core
         public List<string> facts = new List<string>();          // learned facts: "hometown", "like:茶", ...
         public List<string> recentLines = new List<string>();    // no points for repeating yourself
         public List<string> askedQuestions = new List<string>();
+        public List<int> giftLevels = new List<int>();            // friendship levels a gift has been given for
+        public List<string> wordsHeard = new List<string>();      // HSK words the player has used with this keeper
+        public int surpriseDay = -1;                               // last day they gave a little surprise
+        public int level;                                          // last known friendship level (to announce changes)
     }
 
     [Serializable]
@@ -163,6 +188,15 @@ namespace UntitledGame.Core
 
         // Stats (see Progression.PlayerStats): five levels each, trained with Coach Wu.
         public int statCast, statBar, statGrip, statLuck, statQuality, statBite;
+        // 海叔's crab pots (Economy.CrabPots): upgrade levels, money waiting, and fish bait for the next haul.
+        public List<StatLevel> crabLevels = new List<StatLevel>();
+        public int crabLastDay = -1;
+        // 投壶 pitch-pot (Minigames.PitchPotGame): best round, and the day its prize was last won.
+        public int pitchPotBest;
+        public int pitchPotPrizeDay = -1;
+        public float crabPending;
+        public int crabBaitDay = -1;
+        public float crabBaitBonus;
         public int strength = 1; // old (lake) saves: becomes cast-distance levels
         public List<string> booksRead = new List<string>();
         public List<string> discoveredFish;
@@ -174,8 +208,16 @@ namespace UntitledGame.Core
         // HSK lessons and tests at the test centre (see Progression.Hsk).
         public int hskLevel;                                   // highest HSK test passed (0-3)
         public List<string> lessonsDone = new List<string>();  // "level-lesson", e.g. "1-3"
-        public int lastTestDay = -1;                           // one test a day
+        public int lastTestDay = -1;                           // (unused: tests can be taken any time)
+
+        // Auntie Chen's fish of the day (Economy.DailyRequest).
+        public int requestDay = -1;
+        public string requestFish = "";
+        public int requestCount;
+        public float requestMinKg;
+        public bool requestDone;
         public List<string> hskMissed = new List<string>();    // words answered wrong (come back in practice)
+        public List<WordMastery> mastery = new List<WordMastery>(); // how well each HSK word is known (spaced repetition)
 
         // Where you were standing.
         public bool hasPlayerPos;
@@ -360,6 +402,7 @@ namespace UntitledGame.Core
             d.items ??= new List<ItemStack>();
             d.bucket ??= new List<BucketFish>();
             d.placed ??= new List<PlacedItem>();
+            d.crabLevels ??= new List<StatLevel>();
             d.pet ??= new PetState();
             d.vocab ??= new List<VocabEntry>();
             d.conversation ??= new List<SavedLine>();

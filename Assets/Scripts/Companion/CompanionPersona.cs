@@ -68,27 +68,14 @@ namespace UntitledGame.Companion
             sb.AppendLine();
             sb.AppendLine(Rules);
             sb.AppendLine();
-            sb.AppendLine("The market (a short walk southeast of the cabin):");
-            foreach (var shop in Catalog.Shops)
-            {
-                sb.Append($"- {shop.keeperName} ({shop.keeperEnglish}) runs the {shop.hanzi} [{shop.english.ToLower()}]");
-                if (shop.buysFish) sb.Append(": buys the player's fish; rarer and bigger fish pay more");
-                if (shop.items.Length > 0)
-                {
-                    sb.Append(": ");
-                    sb.Append(string.Join("; ", shop.items.Select(Catalog.Get).Where(i => i != null)
-                        .Select(i => $"{i.hanzi} [{i.english.ToLower()}] {Catalog.ChineseNumber(Catalog.PriceOf(i))}块" + (i.packSize > 1 ? $" (pack of {i.packSize})" : ""))));
-                }
-                sb.AppendLine();
-            }
+            sb.AppendLine("The market (a short walk southeast of the cabin); when the player mentions a shopkeeper you're told their goods and prices:");
+            sb.AppendLine(Encyclopedia.MarketSummary());
             sb.AppendLine("Fish the player knows about (the only ones they can catch): " +
                 string.Join("、", Progression.PlayerStats.Discovered.Select(f => $"{f.hanzi} [{f.name.ToLower()}]")) + ".");
             sb.AppendLine("There are more kinds of fish in the sea, but the player only learns about them by reading fishing books from 周老师's 书店 [bookshop]. " +
                 "Big fish are heavy: the player trains strength with 武教练 at the 健身房 [gym] so they can reel them in. Don't name undiscovered fish.");
             sb.AppendLine(Encyclopedia.GameGuide());
             sb.AppendLine("When you teach Chinese, keep to everyday words up to about HSK 3 (the first 600 words learners meet), apart from item names.");
-            sb.AppendLine("Controls, if asked: hold the left mouse to cast, click when the bobber dives, hold to reel but let go when the fish pulls. At a stall press E to talk to the shopkeeper, then hold V to speak; hold B to talk to Mei. " +
-                "To feed 汤圆: walk up to her and press F (cat food or treats, no bowl needed), or say 喂汤圆 when she's close. A bowl at camp lets her eat by herself.");
             var notes = SaveSystem.Data.companionNotes;
             if (notes.Count > 0) sb.AppendLine("You remember about the player: " + string.Join("; ", notes.Skip(System.Math.Max(0, notes.Count - 6))));
             // Last, so the small model weighs it most.

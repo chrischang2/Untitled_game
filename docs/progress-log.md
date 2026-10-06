@@ -395,3 +395,225 @@ Built:
 - **Phrasebook** (a new journal tab): how friendship works, with the real numbers; phrases for asking about people, giving gifts and chatting; and each keeper's favourite topics, in Chinese and pinyin only.
 - **Gifts made obvious:** every shop window shows how to give a gift (这是送给你的…) and what you're carrying. Gift reactions name the gift in Chinese only.
 - **Tested** (scoped: `-only parser,home,school`), all passing. The full suite wasn't run.
+
+## Session 8: lessons wait for the right answer; friendship rework
+- **Cast energy** is only spent when the cast lands in the water. Casting onto land is free.
+- **Lessons don't move on until the word is right.** A wrong repeat gets 再说一次; a wrong quiz answer gets 不对，再试一次 (the answer isn't revealed). 跳过 / 不知道 / "skip" moves on and counts as missed. The quiz part has the Y/N confirm step, like tests. The pass mark counts quiz words gotten right without skipping (6/8). Practice and tests still move on after every answer.
+- **Friendship rework** (`Progression/Affinity.cs`). Points are gone: each level needs facts, one gift and an HSK test, the same for every keeper.
+  - 认识: hometown (你是哪里人？) and a gift.
+  - 朋友: siblings (你有哥哥姐姐吗？), hobby (你的爱好是什么？), a gift, and HSK 1.
+  - 好朋友: favourite food (你喜欢吃什么？), married/children (你结婚了吗？), a gift, and HSK 2.
+  - 老朋友: birthday (你的生日是几月几号？), dream (你以后想做什么？), a gift, and HSK 3.
+- **How it works:**
+  - A keeper shares a level's facts once you've reached the level before it.
+  - A gift they dislike doesn't count, and you can still give one gift a day.
+  - Passing an HSK test re-checks every friendship (`Affinity.EvaluateAll`).
+  - Level-ups show a banner with what's unlocked and what's needed next.
+- **All 9 keepers** got the seven facts (`KeeperProfiles`), written in HSK 1-3 Chinese, with favourite foods matching the gifts they like. The old "secret" facts became dreams.
+- **The parser** recognises the seven questions (`ShopIntentParser.FactQuestion`).
+- **The UI:**
+  - The shop window shows a checklist for the next level, with each question in Chinese and pinyin.
+  - The People page shows what's left for each keeper.
+  - The phrasebook explains the rules and lists the questions level by level.
+  - Mei only knows facts the player has already learned, and helps them ask for the rest.
+- **Old saves:** friendship is recalculated from the new rules, so old points no longer count. The facts and gifts in the save carry over.
+- **Tested** (scoped: `-only parser,home,school`, 83 checks), all passing. There are new unit checks for the level rules. The spoken friendship checks (asking Old Wang, the tea gift) are only in the full suite, which wasn't run.
+
+## Session 9: bait as a bonus; medals, golden fish, requests, surprises, word mastery
+The design came from the Deci, Koestner & Ryan (1999) meta-analysis (expected, contingent rewards undermine intrinsic motivation; unexpected rewards don't; informational feedback helps) and a Reddit thread on fun (learning, challenge and progress; random rewards for actions that are already fun; several visible goals). The plan is in `~/.claude/plans/soft-napping-snowglobe.md`.
+- **Bait is a bonus:**
+  - Any bait works; a liked bait makes a fish 4× as likely (`FishDatabase.LikedBaitBonus`).
+  - Only the oarfish keeps its glow lure as a requirement (`FishSpecies.needsBait`).
+  - The journal shows "Likes:".
+- **Medals** (`CatchJournal.MedalFor`):
+  - bronze for any catch, silver from 60% of the weight range, gold from 90%
+  - stored on `CaughtRecord.medal`
+  - a banner for gold, a toast for silver
+  - shown on the journal cards and in the header
+- **Golden fish:**
+  - Chance is 3% + 1% per luck level (`FishingController.GoldenChance`).
+  - Worth 5× (`Inventory.FishValue`), counted in `goldenCount`.
+  - The catch shows a gold model with glow, a banner and a "GOLDEN!" badge.
+  - `BucketFish.golden` is saved.
+- **The trophy wall** (`Home/TrophyWall.cs`):
+  - a wooden board on the right of the house's back wall
+  - a mounted fish for each gold medal and each kind caught golden (up to 12)
+  - F opens the journal
+- **Auntie Chen's fish of the day** (`Economy/DailyRequest.cs`):
+  - a seeded daily pick from known fish (common ones more often), 1-3 of them, sometimes "big" (the top half of the weight range)
+  - she says it in her greeting, and the shop window shows the Chinese with pinyin and progress
+  - selling the fish fulfils it, with a banner and a surprise present (`Surprise.Give`: money, bait or a gift)
+- **Surprises instead of fixed pay:**
+  - Lessons no longer pay ¥40-70. Teacher Gao praises up to 3 words you got right first time, and sometimes gives a present: 60% the first pass, 30% after.
+  - Keepers note every HSK word you use with them, and sometimes (15%, once a day each) give a small present for a new one.
+- **Word mastery** (`Hsk.RecordAnswer` / `ObserveSpoken` / `PracticeWords`; save `mastery`):
+  - Leitner boxes 0-5 with intervals of 0/1/2/4/7/14 days. Box 3 or higher counts as known.
+  - Repeating a word only marks it as seen. Recall moves it up one box a day. A miss drops it two boxes.
+  - Using a word in conversation counts too, up to known.
+  - Practice picks about 70% due or weak words plus easy wins, then fills with next-lesson words.
+  - The test centre window shows words known for each level and each lesson, and the number due today.
+- **Tested** (scoped: `-only parser,fish,requests,mastery,school,home`, 108 checks), all passing. There are new sections `fish`, `requests` and `mastery`. The full suite wasn't run.
+
+### Session 9, full test run (210/210)
+- **Mei's prompt had outgrown her 4096-token context.** About 3000 tokens of standing prompt meant she forgot history from her second turn, which hurt her teaching (no 汉字 [meaning] glosses, leaked "since you didn't ask..."). Her standing prompt is now about 1450 tokens: a one-line-per-shop market summary and a short overview. Shop price lists (`Encyclopedia.ShopGoods`) and guide topics (`Encyclopedia.TopicNotes`: friendship, lessons, fishing, energy, bag, boat, cosmetics, controls) are added only to turns that mention them. A parser check keeps the prompt under 2000 tokens.
+- **The notebook** also takes 汉字 (meaning) glosses. Mei sometimes uses round brackets.
+- **Likes detection** tolerates recogniser stretching ("llike").
+- **Self-test fixes:**
+  - Mei is asked about worms (rods aren't sold).
+  - 教练，我想买力量训练 replaces 我要, which the test voice made sound like 不要.
+  - The gift check compares counts, since surprise presents can add gifts.
+  - The `llike` check undoes its journal side effect.
+- **Full suite:** all 210 checks pass.
+
+## Session 10: Mei's context, flash attention and prompt caching
+Benchmarked with the player's real conversation: 72 turns to Mei from their chat logs, replayed exactly as the game sent them, against a standalone llama-server with the game's settings (3 slots, 4 threads). The script is `llm_bench.py` in the session scratchpad.
+- **Flash attention is already on.** Our llama.cpp build (b11242) runs on Vulkan, and `-fa auto` already uses the flash-attention kernels. All 33/33 layers of Qwen3.5-4B fit on the RTX 3050.
+- **8-bit KV cache (`-ctk/-ctv q8_0`):** no measurable gain (memory and speed within noise). The KV cache is small for this model.
+- **The real bottleneck was trimming.** Once Mei's history filled up, the game dropped one old message per turn. That changes the start of the prompt, so llama-server re-read nearly everything every turn: about 3 s at 4096 tokens, 6.5 s at 8192. **Fix:** `DialogueAgent.FitToContext` now trims down to 40% of the room in one go (`TrimKeepFraction`), so most turns only read the new message.
+
+  Results (mean wait before she answers / generation / exchanges remembered):
+  - before, 4096: 3.03 s / 14.3 tok/s / 7.9
+  - **chunked, 4096 (the new default): 1.02 s / 15.4 tok/s / 5.1**
+  - chunked, 8192 with q8 KV: 1.28 s / 12.2 tok/s / 14.8. The first reply after loading a save takes 7.8 s instead of 4 s.
+- **New `LocalAIConfig` settings:** `flashAttention` (default "auto") and `kvCacheType` (default "f16"). To try the long memory, set `"contextSize": 8192, "flashAttention": "on", "kvCacheType": "q8_0"` in `LocalAI/localai.json`.
+- **Self-test:** a new `mei` scoped section runs the long-conversation test, with a check that the history is trimmed in one chunk. The `parser` and `mei` sections pass.
+
+## Session 11: signs, livelier fish, starter fish, sushi chef and her scale
+- **Shop signs** (`Environment/ShopSign.cs`):
+  - Each stall has a wooden sign over its front with the name in Chinese, plus pinyin filled in once the dictionary loads (`SignPinyin`).
+  - The floating name bubbles are gone (`WorldLabels` no longer draws shops).
+- **Livelier fish:**
+  - `FishingController.MoveRate` runs from 0.8 (easiest) to 2.2 (hardest) × `PlayerStats.FishCalmMultiplier` (strength/力量: −8% a level).
+  - It speeds up retargeting, spring and jump size, and adds a constant Perlin wander.
+  - The fish icon vibrates and wiggles in proportion (`Vibration`).
+- **Catch card:**
+  - the name in its rarity colour (Common is now a darker green, so it reads on the card)
+  - the weight in large type, then the rarity and the Chinese name with pinyin
+  - stays up 4 s after landing
+- **New starter fish** (known from day 1, catchable from the dock with the 3 kg line):
+  - goby 虾虎鱼
+  - horse mackerel 竹荚鱼
+  - mullet 鲻鱼
+
+  `PlayerStats.StarterFishes`; saves get them on load.
+- **Fish shapes:** `FishSpecies.shape` stretches the two Kenney models along length/height/width (flounder flat, hairtail and oarfish ribbons, puffer round...).
+- **Auntie Chen is a sushi chef:**
+  - Her stall is now the 寿司店 Sushi Bar, with a plate of sushi and a scale on the counter.
+  - Her persona, profile and dream were rewritten to match.
+- **The scale** (`Economy/FishSale.cs`, `UI/SaleScaleView.cs`):
+  - Each sale's total weight fills stages at 1, 5, 10, 20, 50, 100, 200, 500... kg.
+  - Multiplier = 1 + fills × (10% + 2% per lesson passed + 15% per HSK test). Friendship +5% per level and golden ×5 still apply.
+  - It replaces the flat HSK fish bonus.
+  - Her offer is the quote, and the sale pays exactly it.
+  - The animation: fish drop onto the tray, weight and price count up, and the bar fills and flashes per stage with the multiplier.
+  - Assumption: the request said "tests increase multiplier by 2%, the tests by 15%"; read as lessons +2%, tests +15%.
+- **Tested** (scoped: `-only parser,fish,market,sale,requests`), all passing. New sections: `market` (signs and screenshots) and `sale` (stage maths, a real sale and the animation). The full suite wasn't run.
+
+## Session 12: fish tiers, 20 training levels, a rarity-based scale, and fight logging
+- **The fishing minigame is now a shared simulation** (`Fishing/ReelSim.cs`):
+  - The physics moved out of `FishingController` so the game and a simulated player run the same code.
+  - `FishPower` gives each fish a power: its tier base {-1.5, 2, 5.5, 9} plus a rank of 0-1 within its tier. The rank averages its rarity and its difficulty among tier-mates.
+  - The tier is the HSK level of the book that teaches the fish (0 for starters and the first two books).
+  - Each reeling stat (eye/bar, stamina/grip, strength/cast) has a power: 0.1 per level up to level 5, then 0.7 per level.
+  - The gap (fish power minus stat power) sets the bar size, fill and drain rates, and move rate. These are the curves tuned in `reel_tune.py`.
+  - A per-motion bias (dart -0.25, sinker +0.95, floater +1.05, smooth +1.75) makes every swimming style about 75% caught at gap -1. It was measured in-game: smooth fish were much easier than darting ones at the same gap.
+- **Training** (`PlayerStats`):
+  - 20 levels per stat, in four tiers of five. Tier t needs HSK t; the friendship cap is gone.
+  - Price: 10, 20, 40, 70, 100, ×10 per tier (`NextPrice`). Shop rows show "locked: HSK n", and Coach Wu explains when asked.
+  - Other stats were rescaled for 20 levels: cast +2.5 m/level for 5 levels then +0.5; bonus fish 2.5%/level; golden 3% + 0.25%/level; bite 3%/level; quality bias 1.8/(1 + 0.1q).
+- **Fish prices** (`Catalog.FishPrice`): ¥10 for a tier's commonest fish up to ¥40 for its rarest, ×10 per tier, ×0.7-1.8 by size.
+- **The scale** (`FishSale`, `SaleScaleView`):
+  - Bars fill by points, not kg. Points = 1.5^(rarity above common) × (0.5 + size), so the biggest common fish counts about the same as an average uncommon one.
+  - Bar k holds 4·2^k fish of rarity k (capped at legendary) at 80% size, filled one bar after another.
+  - No weight is shown.
+  - The bar fills smoothly at about 1.2 s per bar. A generated tone rises an octave across each bar (each new bar starts 2 semitones higher), with a generated chime and coins at each fill.
+- **Fight logging:** every hook and its outcome (caught/escaped/cut) goes in chat.log as FISHING lines: species, tier, power, gap, stat levels, minigame parameters, time, % in bar.
+  - Earlier logs had no fight timings, so this batch's balance was judged with the simulated player plus the earlier "too easy" feedback. Future tuning can use these lines.
+- **HUD:**
+  - A grid of bag slots (fish icon and count) replaces the "鱼 x/y" text.
+  - The cast power bar shows the distance.
+  - While waiting, the bobber shows its distance and how far it is from shore.
+- **Smaller changes:**
+  - The transcript (journal) and the Conversations panel are newest-first.
+  - Comfort counts each furniture kind once.
+  - Lesson surprises are small: size 1, with money ×0.4, so ¥4-12.
+- **Tested** (scoped: `-only balance,hud,fish,parser,sale,school`), all passing.
+  - New sections: `balance` (calibration table, per-tier checks, prices, HSK locks) and `hud` (fish grid, comfort).
+  - The full suite wasn't run.
+
+## Session 13: casting, eye training per tier, and fixes from play
+- **From the first FISHING logs** (session 2026-10-05 20:53):
+  - 15 fights at tier 0 with eye 1-5: one escape; catches took 2.6-11.3 s with 52-100% in the bar.
+  - That matches the simulated player at these gaps.
+  - The sale that "didn't continue to the next bar" was 5 fish = 5.0 points against the first bar's 5.2. It stopped at 96%, which looked full.
+- **Scale:** the caption shows the current bar's % ("bar 1: 96%"), and the track is darker so a nearly full bar reads as not full.
+- **HUD grid:** the panel is exactly as wide as the bag's slots, with a "used/total" label. Before, empty panel space looked like a fifth slot. The catch card's "bucket 5/4" (fish vs slots) now reads "bag x/y slots".
+- **Catch card:** it hides the moment a new cast starts charging (`CatchCard.HideNow`).
+- **Casting:**
+  - Max distance is 10 m for everyone; strength training only calms fish now.
+  - **Perfect cast:** 97%+ power gives a 15% head start on the catch meter (`ReelSim` startBonus). The power bar shows PERFECT, and there's a toast.
+  - **Weight window** (`FishingController.WeightWindow`, `FishDatabase.RollWeight(..., windowLow)`):
+    - Weights come from a window 50% of the range wide.
+    - Within 2 m of the shore it's 0-50%; at 16.7 m (dock end plus a 95% cast) it's 50-100%; it slides linearly in between.
+    - Quality training biases within the window.
+- **Eye training per tier** (`FishPower.BarGap`):
+  - The bar depends on eye levels relative to the fish's tier (L - 5×tier). Five levels double it (`BarPerLevel`).
+  - Every tier starts from the same bar: finishing tier 0 gives tier-1 commons the 20% bar a beginner has on tier-0 commons.
+- **Rebalance:**
+  - Halving the beginner bar made the starter fish too hard (48% for a goby).
+  - The rarity spread within a tier grew: stamina/strength `RarityWeight` 1.6, bar `BarRarityWeight` 2.47. Tier bases are now {-2, 1.54, 5.04, 8.54}.
+  - **Beginner:** starters 89-100%, mackerel ~64%, uncommons ~0-2%.
+  - **Tier fully trained:** commons 100%, rarest 68-78%, next tier 0%.
+- **Tested** (scoped: `-only balance,hud,fish,sale,parser`), all passing. New checks:
+  - the eye-training doubling and the next tier's starting bar
+  - 10 m cast and the perfect-cast bonus
+  - the weight window
+  - the card hiding on cast
+  - the grid label
+
+## Session 14: 海叔's crab pots, the games stalls, fish frenzies and streaks
+- **Crab pots** (`Economy/CrabPots.cs`): 海叔 (Uncle Hai), stall 9 (`WorldShape.CrabberStall`), on the beach about 18 m east of the market's last stall.
+  - **Daily haul** = pots (1 + L) × pot size (3 + L) × fill (50% + 2.5%/L) × crab value × helper (+3%/L).
+  - **Crab value** is solved per tier so that all five income upgrades at 5(t+1) give `TierTarget(t)` (the tier's best fish at max weight: 72, 720, 7200, 72000), growing geometrically in between.
+  - **Accrual:** one haul per new day (`crabLastDay`, -1 = not started). The cooler caps what waits at 1 + L/4 days.
+  - **Collecting:** `ShopkeeperBrain.BeginConversation` calls `CrabPots.Claim()`, with a banner.
+  - **Fish bait:** say 给你鱼 / 放鱼 at his stall (parser rule) to get a crab-bait offer. It adds fish value × (1.2 + 0.04L) to the next morning, capped at (30% + 5%L) of a day.
+  - **Upgrades** are ItemCategory.Upgrade with `crab_*` stats stored in `SaveData.crabLevels` (`PlayerStats.Level` and `SetLevel` fall through to them), so pricing and HSK gating are shared with training.
+  - The shop window shows the pots, money waiting, and bait. He has a keeper profile, persona and Mei topic note.
+- **Seafront** (`WorldShape`): a flattened beach path from the market to the crab stall, pads for the stalls, and trees kept clear (`InSeafront`). The stall's facing is now `StallFront(i)` (crab stall: inland). Signs face the keeper's forward.
+- **Games stalls** (`Environment/MinigameStall.cs`, built by `SceneBuilder.BuildGameStalls`):
+  - 麻将 (HSK 1), 毽子 (HSK 2), 投壶 (HSK 3), in a row facing the beach path.
+  - Before their test, each is a fenced site with scaffolding and a red 施工中 board; after, the stall with tiles, shuttlecocks or a pot.
+  - F says the game is coming soon.
+- **Extras:**
+  - **Fish frenzy** (`Fishing/FishFrenzy.cs`): ripples and splashes 4-13 m out within cast range, moving every 2 minutes. Inside it bites come ×2 faster and the weight window gets +0.2.
+  - **Catch streak** (`FishingController.Streak`): toasts at 3, 5 and every 5 after 10; golden chance +2% at 5+; an escape or cut line resets it.
+  - Both are logged in FISHING lines.
+- **Tested** (scoped: `-only crabs,hud,balance,fish,sale,parser`), all passing. New `crabs` section:
+  - maxed tiers match their targets exactly
+  - every upgrade helps; HSK gating
+  - one day vs six days with the cooler
+  - collect on talking; the fish-bait offer and the next morning's haul
+  - stall placement
+  - games stalls (closed, then partly open at HSK 2)
+  - screenshots 27, 28a and 28b
+
+## Session 15: aiming casts, pitch-pot, and the full suite
+- **Cast aiming** (`FishingController`):
+  - While charging, A/D or ←/→ change `AimOffset` (±75°, 70°/s) from the camera's yaw.
+  - A `CastTarget` ring marks `PredictedLanding`: white on water, gold in a frenzy, red on land. A label over the power bar says "lands N m out".
+  - The cast goes exactly along `AimDirection`.
+- **Pitch-pot** (`Minigames/PitchPotGame.cs`): the games stalls were reordered so 投壶 is the HSK 1 game (then 毽子 HSK 2, 麻将 HSK 3).
+  - **The pot:** the stall has a real pot ("Built/Pot": mouth radius 0.13 m at 0.86 m) and a throwing line 3.4 m out.
+  - **Controls:** F starts a round; movement and gameplay are blocked and the camera sits behind you.
+  - **Each arrow:** starts ±6° off line; A/D aim at 12°/s; hold the mouse for a ping-pong power bar (0.6/s); release to throw at 42° and 4.6-6.4 m/s.
+  - **Scoring:** ballistic flight. Through the mouth is 中了, the rim or side of the pot is 差一点, the ground is 没中, with pinyin.
+  - **Rounds:** 8 arrows. 4+ hits wins one `Surprise` prize a day (`pitchPotPrizeDay`), and the best round is kept (`pitchPotBest`). E stops early.
+  - The hit window is about 14% of the power bar.
+- **Your save:** it is still at HSK level 0 (5 HSK 1 lessons passed, but not the test), so the pitch-pot stall opens once you pass the HSK 1 test.
+- **Full suite:** the original run now also runs every newer section at the end (`SelfTest.ExtraSections`: mastery, requests, market, sale, fish, balance, hud, crabs, pitchpot, home). New scoped section: `pitchpot`, covering aiming and the game.
+- **Fixes from the full runs:**
+  - **Clean start:** each newer section begins with fishing stopped, any shop conversation ended, and pitch-pot closed. Three failures came from a line left in the water.
+  - **Starter-fish check:** it no longer assumes no books have been read.
+  - **Unglossed words:** Mei sometimes teaches a word without its [meaning] gloss (the run where she taught 你好 and 我想买蚯蚓 that way failed "Mei taught words"). The notebook now also records HSK words in her English lines, with the HSK meaning, plus a few everyday phrases outside the HSK list (你好, 早上好, 好的, 加油...).
+  - **Misheard item names:** speech recognition heard 力量训练 as 力尿训练, so Coach Wu offered nothing. `ShopIntentParser.FindItem` now allows one misheard syllable in names of 4+ characters, as long as half match exactly and only one item fits best (`FuzzyScore`).

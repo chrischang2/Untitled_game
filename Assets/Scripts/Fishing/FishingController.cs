@@ -30,14 +30,43 @@ namespace UntitledGame.Fishing
         public FishingState State { get; private set; } = FishingState.Idle;
         public float Power { get; private set; }
         // Reeling minigame (all 0..1 along the vertical track, 0 = bottom).
-        public float FishPos { get; private set; }
-        public float BarPos { get; private set; }
-        public float BarSize { get; private set; }
-        /// <summary>Every fish's green bar is this much of its listed size before upgrades (the base bars were too easy).</summary>
-        public const float BarScale = 0.7f;
-        public float Progress { get; private set; }
-        public bool FishInBar { get; private set; }
-        public bool Perfect { get; private set; }
+        public float FishPos => _reel?.FishPos ?? 0.5f;
+        public float BarPos => _reel?.BarPos ?? 0f;
+        public float BarSize => _reel?.P.barSize ?? 0.2f;
+        public float Progress => _reel?.Progress ?? 0f;
+        public bool FishInBar => _reel != null && _reel.FishInBar;
+        public bool Perfect => _reel != null && !_reel.LeftBarAfterGrace;
+        /// <summary>The fish's fight against your training (see FishPower).</summary>
+        public ReelParams Reel => _reel?.P;
+        /// <summary>How far the last cast went (m), and how far the bobber is from you now.</summary>
+        public float LastCastDistance { get; private set; }
+        public float ChargeDistance => Mathf.Lerp(minCast, Progression.PlayerStats.CastDistance, Power);
+        /// <summary>A cast released at 97% power or more: the fight starts with the catch meter 15% fuller.</summary>
+        public const float PerfectCastPower = 0.97f, PerfectCastBonus = 0.15f;
+        public bool PerfectCast { get; private set; }
+        public bool ChargeIsPerfect => Power >= PerfectCastPower;
+
+        /// <summary>
+        /// Casting far out catches bigger fish: the weight comes from a window half the species' range wide. Within
+        /// 2 m of the shore it's the bottom half; a 95% cast from the end of the dock (or anything further) gets the top
+        /// half; in between the window slides evenly. Returns where the window starts (0 to 0.5).
+        /// </summary>
+        public static float WeightWindow(float shoreDistance) =>
+            0.5f * Mathf.InverseLerp(WindowNear, WindowFar, shoreDistance);
+        public const float WindowNear = 2f;
+        public static float WindowFar => WorldShape.DockLength + Mathf.Lerp(3.5f, Progression.PlayerStats.CastDistance, 0.95f);
+        public Vector3 BobberWorld => rod.BobberPosition;
+        /// <summary>How far out from the shoreline the bobber is (fish need a minimum distance).</summary>
+        public float ShoreDistance => Mathf.Max(0f, -WorldShape.ShoreDistance(rod.BobberPosition.x, rod.BobberPosition.z));
+        public float BobberDistance
+        {
+            get
+            {
+                var d = rod.BobberPosition - player.transform.position;
+                d.y = 0f;
+                return d.magnitude;
+            }
+        }
         public bool FishPulling => !FishInBar;
         public float BiteTimeLeft { get; private set; }
         public CatchResult LastCatch { get; private set; }
@@ -66,7 +95,14 @@ namespace UntitledGame.Fishing
         private float _nextNibble;
         private FishSpecies _species;
         private float _length; // weight in kg
-        private float _fishVel, _fishTarget, _barVel, _retarget, _grace;
+        private ReelSim _reel;
+        private float _reelStart, _window;
+        private bool _inFrenzy;
+
+        /// <summary>Fish landed in a row without one getting away (or the line being cut).</summary>
+        public static int Streak { get; private set; }
+        /// <summary>A streak of 5 or more makes golden fish a little more likely.</summary>
+        public const int HotStreak = 5;
         private bool _nothingToast;
         private GameObject _heldCatch;
         private float _landingTimer;
@@ -177,33 +213,109 @@ namespace UntitledGame.Fishing
             {
                 _chargeTime = 0f;
                 Power = 0f;
+                AimOffset = 0f;
                 SetState(FishingState.Charging);
                 AudioManager.Instance?.PlaySfx("SFX/rpg_cloth1", 0.4f);
             }
         }
 
+        // ---------------------------------------------------------------- Aiming
+        /// <summary>A/D (or the arrow keys) swing the cast left and right of where the camera looks, while charging.</summary>
+        public float AimOffset { get; set; }
+        public const float AimSpeed = 70f, AimLimit = 75f;
+        /// <summary>Which way the cast will go (flat, normalised).</summary>
+        public Vector3 AimDirection
+        {
+            get
+            {
+                float yaw = (cameraRig != null ? cameraRig.Yaw : player.transform.eulerAngles.y) + AimOffset;
+                return Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
+            }
+        }
+        /// <summary>Where a cast released now would land.</summary>
+        public Vector3 PredictedLanding
+        {
+            get
+            {
+                Vector3 target = player.transform.position + AimDirection * ChargeDistance;
+                target.y = Mathf.Max(WorldShape.TerrainHeight(target.x, target.z), WorldShape.WaterLevel);
+                if (WorldShape.IsOnDock(target.x, target.z)) target.y = WorldShape.DockDeckHeight;
+                return target;
+            }
+        }
+        public bool PredictedOnWater
+        {
+            get
+            {
+                var t = PredictedLanding;
+                return WorldShape.IsWater(t.x, t.z) && !WorldShape.IsOnDock(t.x, t.z, 0.2f) && WorldShape.WaterDepth(t.x, t.z) > 0.25f;
+            }
+        }
+        public float PredictedShoreDistance => Mathf.Max(0f, -WorldShape.ShoreDistance(PredictedLanding.x, PredictedLanding.z));
+
+        private GameObject _reticle;
+        private MaterialPropertyBlock _reticleMpb;
+
+        /// <summary>A ring on the water where the cast will land: white on water, gold in a frenzy, red over land.</summary>
+        private void UpdateReticle(bool show)
+        {
+            if (_reticle == null)
+            {
+                if (!show || GameAssets.Instance == null) return;
+                _reticle = new GameObject("CastTarget");
+                _reticleMpb = new MaterialPropertyBlock();
+                for (int k = 0; k < 2; k++)
+                {
+                    var part = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    Destroy(part.GetComponent<Collider>());
+                    part.name = k == 0 ? "Ring" : "Dot";
+                    part.transform.SetParent(_reticle.transform, false);
+                    part.transform.localScale = k == 0 ? new Vector3(0.9f, 0.01f, 0.9f) : new Vector3(0.22f, 0.02f, 0.22f);
+                    var r = part.GetComponent<Renderer>();
+                    r.sharedMaterial = GameAssets.Instance.bobberWhite;
+                    r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
+            }
+            _reticle.SetActive(show);
+            if (!show) return;
+            Vector3 p = PredictedLanding;
+            _reticle.transform.position = p + Vector3.up * 0.03f;
+            float pulse = 1f + 0.08f * Mathf.Sin(Time.time * 8f);
+            _reticle.transform.localScale = Vector3.one * pulse * (ChargeIsPerfect ? 1.25f : 1f);
+            Color c = !PredictedOnWater ? new Color(0.88f, 0.33f, 0.28f) : FishFrenzy.Contains(p) ? new Color(1f, 0.8f, 0.25f) : Color.white;
+            _reticleMpb.SetColor("_BaseColor", c);
+            foreach (var r in _reticle.GetComponentsInChildren<Renderer>()) r.SetPropertyBlock(_reticleMpb);
+        }
+
         private void UpdateCharging(bool held, bool up)
         {
             player.ActionAnimation = "holding-right";
-            if (cameraRig != null)
-            {
-                Vector3 aim = Quaternion.Euler(0f, cameraRig.Yaw, 0f) * Vector3.forward;
-                player.FaceTowards(player.transform.position + aim);
-            }
+            bool canAim = !InputGate.GameplayBlocked;
+            float turn = (canAim && (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) ? 1f : 0f)
+                       - (canAim && (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) ? 1f : 0f);
+            AimOffset = Mathf.Clamp(AimOffset + turn * AimSpeed * Time.deltaTime, -AimLimit, AimLimit);
+            player.FaceTowards(player.transform.position + AimDirection);
             _chargeTime += Time.deltaTime;
             Power = Mathf.PingPong(_chargeTime * 0.85f, 1f);
             rod.TargetPitch = Mathf.Lerp(80f, 125f, Power);
+            UpdateReticle(true);
 
             if (up || !held)
             {
-                float dist = Mathf.Lerp(minCast, Progression.PlayerStats.CastDistance, Power);
-                Vector3 fwd = player.transform.forward;
-                fwd.y = 0f;
-                fwd.Normalize();
+                float dist = ChargeDistance;
+                LastCastDistance = dist;
+                PerfectCast = ChargeIsPerfect;
+                UpdateReticle(false);
+                if (PerfectCast)
+                {
+                    GameEvents.Toast("Perfect cast! The fight starts 15% ahead.", 2.5f);
+                    AudioManager.Instance?.PlaySfx("SFX/rpg_handleCoins", 0.35f);
+                }
+                Vector3 fwd = AimDirection; // exactly where the reticle showed
+                player.FaceTowards(player.transform.position + fwd, instant: true);
                 Vector3 target = player.transform.position + fwd * dist;
                 target.y = Mathf.Max(WorldShape.TerrainHeight(target.x, target.z), WorldShape.WaterLevel);
                 if (WorldShape.IsOnDock(target.x, target.z)) target.y = WorldShape.DockDeckHeight;
-                Progression.Energy.Spend(Progression.Energy.CastCost);
                 _castStart = rod.TipPosition;
                 _castTarget = target;
                 _castT = 0f;
@@ -236,6 +348,8 @@ namespace UntitledGame.Fishing
                 Effects.Splash(rest, 0.35f);
                 WaterRipples.Spawn(rest, 0.7f);
                 AudioManager.Instance?.PlayAt("SFX/plop", rest, 0.8f);
+                Progression.Energy.Spend(Progression.Energy.CastCost); // only a cast that lands in the water costs energy
+                if (FishFrenzy.Contains(rest)) GameEvents.Toast("Right in the frenzy! Fish bite fast here, and they're bigger.", 3f);
                 ScheduleBite(false);
                 _nothingToast = false;
                 SetState(FishingState.Waiting);
@@ -272,6 +386,7 @@ namespace UntitledGame.Fishing
             if (spooked) t += Random.Range(2.5f, 5f);
             var bait = Inventory.Bait;
             if (bait != null) t /= Mathf.Max(0.5f, bait.biteSpeed);
+            if (FishFrenzy.Contains(rod.BobberPosition)) t /= FishFrenzy.BiteSpeedUp; // a feeding shoal
             _biteTimer = t;
             _nextNibble = t - Random.Range(0.8f, Mathf.Min(4f, t - 0.5f));
         }
@@ -318,12 +433,15 @@ namespace UntitledGame.Fishing
                     if (!_nothingToast)
                     {
                         _nothingToast = true;
-                        GameEvents.Toast("Nothing seems to be biting here. Your journal shows what each fish needs (bait, distance, line, time).", 4.5f);
+                        GameEvents.Toast("Nothing seems to be biting here. Your journal shows where and when each fish swims and what line it needs.", 4.5f);
                     }
                     ScheduleBite(false);
                     return;
                 }
-                _length = FishDatabase.RollWeight(_species, Progression.PlayerStats.QualityLevel);
+                _window = WeightWindow(ctx.shoreDistance);
+                _inFrenzy = FishFrenzy.Contains(rod.BobberPosition);
+                if (_inFrenzy) _window = Mathf.Min(0.5f, _window + FishFrenzy.WeightBoost);
+                _length = FishDatabase.RollWeight(_species, Progression.PlayerStats.QualityLevel, _window);
                 if (ctx.bait != null && _species.IsFish) Inventory.ConsumeBait(); // the fish took the bait
                 BiteTimeLeft = biteWindow * Mathf.Lerp(1.1f, 0.8f, _species.difficulty / 100f) * (Inventory.HasAccessory("bobber_fancy") ? 1.35f : 1f);
                 var b = rod.BobberPosition;
@@ -374,17 +492,11 @@ namespace UntitledGame.Fishing
 
         private void StartReeling()
         {
-            BarSize = Mathf.Clamp(_species.barSize * BarScale * Progression.PlayerStats.BarMultiplier, 0.07f, 0.7f);
-            FishPos = Random.Range(0.25f, 0.6f);
             // Like Stardew: the bar starts around the fish, so the fight begins fairly.
-            BarPos = Mathf.Clamp(FishPos - BarSize * 0.5f, 0f, 1f - BarSize);
-            _barVel = 0f;
-            _fishVel = 0f;
-            _fishTarget = FishPos;
-            _retarget = 0.6f;
-            _grace = 0.8f;
-            Progress = Progression.PlayerStats.StartProgress;
-            Perfect = true;
+            _reel = new ReelSim(FishPower.ForPlayer(_species), _species.motion, new System.Random(Random.Range(0, int.MaxValue)),
+                PerfectCast ? PerfectCastBonus : 0f);
+            _reelStart = Time.time;
+            LogFight("hooked");
             AudioManager.Instance?.PlaySfx("SFX/reel", 0.5f);
             SetState(FishingState.Reeling);
         }
@@ -394,58 +506,48 @@ namespace UntitledGame.Fishing
         /// its own way (FishMotion), faster the harder it is. Inside the bar the catch meter fills; outside it drains
         /// (slower with the escape-allowance stat). Full = caught, empty = it got away.
         /// </summary>
+        /// <summary>How lively the hooked fish is: stronger fish move more, strength training calms them (1 = calm).</summary>
+        public float MoveRate => _reel?.P.moveRate ?? 1f;
+        /// <summary>How much the fish icon shakes in the reel meter (fraction of the track).</summary>
+        public float Vibration => 0.006f + 0.01f * MoveRate;
+
+        /// <summary>How lively a fish would be against your current training.</summary>
+        public static float FishMoveRate(FishSpecies s) => FishPower.ForPlayer(s).moveRate;
+
+        /// <summary>
+        /// Every fight goes in the chat log (FISHING lines), so the difficulty can be tuned from real play: the fish,
+        /// its tier and power gap, the minigame it got, your training, and how it went.
+        /// </summary>
+        private void LogFight(string result)
+        {
+            if (_reel == null || _species == null) return;
+            var p = _reel.P;
+            string stats = $"bar {Progression.PlayerStats.Level("bar")} grip {Progression.PlayerStats.Level("grip")} strength {Progression.PlayerStats.Level("cast")}";
+            string what = result == "hooked"
+                ? $"hooked {_species.id} ({_species.rarity}, tier {FishPower.TierOf(_species)}, power {FishPower.Power(_species):0.00}, gap {p.gap:+0.00;-0.00}) {FishDatabase.WeightText(_length)}" +
+                  $" · cast {LastCastDistance:0.0} m{(PerfectCast ? " PERFECT" : "")}{(_inFrenzy ? " FRENZY" : "")}, {ShoreDistance:0.0} m out, weight window {_window * 100f:0}-{_window * 100f + 50f:0}%, streak {Streak}"
+                : $"{result} {_species.id} after {Time.time - _reelStart:0.0} s, in bar {_reel.TimeInBar / Mathf.Max(0.01f, _reel.Time) * 100f:0}%, meter {_reel.Progress:0.00}";
+            ChatAudit.Write("FISHING", what, result == "hooked"
+                ? $"{stats} · bar size {p.barSize:0.000} move x{p.moveRate:0.00} gain {p.gain:0.000}/s drain {p.drain:0.000}/s · {_species.motion}"
+                : null);
+        }
+
         private void UpdateReeling(bool reel)
         {
             player.ActionAnimation = "holding-right";
-            float diff = Mathf.Clamp01(_species.difficulty / 100f);
             // Fighting a fish is tiring: the heavier it is, the faster your energy goes.
             Progression.Energy.Spend(Progression.Energy.ReelDrainPerSecond(_length) * Time.deltaTime);
             if (State != FishingState.Reeling) return; // passed out
 
-            // The bar: holding accelerates it up, gravity pulls it down, a little bounce off the bottom.
-            _barVel += (reel ? 2.6f : -2.2f) * Time.deltaTime;
-            _barVel = Mathf.Clamp(_barVel, -1.5f, 1.5f);
-            BarPos += _barVel * Time.deltaTime;
-            if (BarPos < 0f) { BarPos = 0f; _barVel = -_barVel * 0.3f; }
-            if (BarPos > 1f - BarSize) { BarPos = 1f - BarSize; _barVel = 0f; }
-
-            // The fish: picks a new spot every so often, depending on how it swims.
-            _retarget -= Time.deltaTime;
-            if (_retarget <= 0f)
-            {
-                float jump = Mathf.Lerp(0.15f, 0.75f, diff);
-                switch (_species.motion)
-                {
-                    case FishMotion.Smooth: _fishTarget = Mathf.Clamp01(FishPos + Random.Range(-jump, jump) * 0.6f); _retarget = Random.Range(1.2f, 2.4f) - diff * 0.6f; break;
-                    case FishMotion.Sinker: _fishTarget = Mathf.Clamp01(Random.Range(0f, 0.7f) * Random.value + Random.Range(-0.05f, 0.1f)); _retarget = Random.Range(0.8f, 1.8f) - diff * 0.5f; break;
-                    case FishMotion.Floater: _fishTarget = Mathf.Clamp01(1f - Random.Range(0f, 0.7f) * Random.value); _retarget = Random.Range(0.8f, 1.8f) - diff * 0.5f; break;
-                    case FishMotion.Dart: _fishTarget = Mathf.Clamp01(FishPos + (Random.value < 0.5f ? -1f : 1f) * Random.Range(jump * 0.6f, jump * 1.2f)); _retarget = Random.Range(0.35f, 1.1f) - diff * 0.25f; break;
-                    default: _fishTarget = Random.Range(0.02f, 0.98f); _retarget = Random.Range(0.7f, 1.7f) - diff * 0.5f; break;
-                }
-                _retarget = Mathf.Max(0.18f, _retarget);
-            }
-            float spring = Mathf.Lerp(6f, 28f, diff) * (_species.motion == FishMotion.Dart ? 1.6f : 1f);
-            _fishVel += (_fishTarget - FishPos) * spring * Time.deltaTime;
-            _fishVel *= Mathf.Exp(-Mathf.Lerp(5f, 3f, diff) * Time.deltaTime);
-            FishPos = Mathf.Clamp01(FishPos + _fishVel * Time.deltaTime);
-
-            // Catch meter.
-            FishInBar = FishPos >= BarPos && FishPos <= BarPos + BarSize;
-            _grace -= Time.deltaTime;
-            if (FishInBar) Progress += Time.deltaTime * Mathf.Lerp(0.34f, 0.24f, diff);
-            else if (_grace <= 0f)
-            {
-                Progress -= Time.deltaTime * Mathf.Lerp(0.16f, 0.3f, diff) * Progression.PlayerStats.DrainMultiplier;
-                Perfect = false;
-            }
-            Progress = Mathf.Clamp01(Progress);
+            _reel.Step(Time.deltaTime, reel);
+            float diff = _reel.Wildness;
 
             // The rod and bobber show the fight.
             var b = rod.BobberPosition;
             rod.SetBobberRest(new Vector3(b.x, WorldShape.WaterLevel, b.z), FishInBar ? 0.05f : 0.14f);
             player.FaceTowards(b);
             rod.Tension = 1f - Progress;
-            rod.Shake = Mathf.Clamp01(Mathf.Abs(_fishVel) * 0.8f + (FishInBar ? 0.1f : 0.4f));
+            rod.Shake = Mathf.Clamp01(Mathf.Abs(_reel.FishVel) * 0.8f + (FishInBar ? 0.1f : 0.4f));
             rod.TargetPitch = Mathf.Lerp(40f, 60f, Progress);
             if (reel && Time.frameCount % 9 == 0) AudioManager.Instance?.PlaySfx("SFX/ui_click_002", 0.12f, 0.2f);
             if (!FishInBar && Random.value < Time.deltaTime * 1.5f)
@@ -456,13 +558,17 @@ namespace UntitledGame.Fishing
 
             if (Progress >= 1f)
             {
+                LogFight("caught");
                 Land();
                 return;
             }
             if (Progress <= 0f)
             {
+                LogFight("escaped");
+                if (Streak >= 3) GameEvents.Toast($"Your streak of {Streak} ends here.", 2.5f);
+                Streak = 0;
                 AudioManager.Instance?.PlaySfx("SFX/escape", 0.6f);
-                GameEvents.Toast(diff > 0.7f ? "It got away! Big fish fight hard: Coach Wu's training helps." : "It got away... next time!", 3.5f);
+                GameEvents.Toast(_reel.P.gap > 0.5f ? "It got away! That fish is stronger than your training: Coach Wu can help." : "It got away... next time!", 3.5f);
                 FishEscaped?.Invoke("escaped");
                 BeginRetrieve();
             }
@@ -473,6 +579,7 @@ namespace UntitledGame.Fishing
         public void CutLine()
         {
             if (State != FishingState.Reeling && State != FishingState.Bite) return;
+            if (State == FishingState.Reeling) { LogFight("cut"); Streak = 0; }
             AudioManager.Instance?.PlaySfx("SFX/escape", 0.5f);
             GameEvents.Toast("You cut the line and let it go.", 2.5f);
             FishEscaped?.Invoke("cut");
@@ -482,6 +589,7 @@ namespace UntitledGame.Fishing
         /// <summary>Drop everything at once (passing out).</summary>
         public void ForceStop()
         {
+            UpdateReticle(false);
             if (_heldCatch != null) Destroy(_heldCatch);
             _heldCatch = null;
             rod.HideBobber();
@@ -500,18 +608,26 @@ namespace UntitledGame.Fishing
             rod.Tension = 0f;
             rod.Shake = 0f;
             rod.TargetPitch = 95f;
-            LastCatch = CatchJournal.Record(_species, _length, player.transform.position);
+            if (_species.IsFish && State == FishingState.Reeling)
+            {
+                Streak++;
+                if (Streak == 3 || Streak == HotStreak || (Streak >= 10 && Streak % 5 == 0))
+                    GameEvents.Toast(Streak >= HotStreak ? $"{Streak} in a row! You're on a hot streak: golden fish are more likely." : $"{Streak} in a row!", 3f);
+            }
+            bool golden = _species.IsFish && (ForceGolden || Random.value < GoldenChance);
+            LastCatch = CatchJournal.Record(_species, _length, player.transform.position, golden);
             LastCatch.perfect = Perfect && State == FishingState.Reeling;
             if (LastCatch.perfect) GameEvents.Toast("Perfect catch!", 2f);
+            AnnounceCatch(LastCatch);
             // Luck training: sometimes a second fish of the same kind comes up on the hook too.
             if (_species.IsFish && Random.value < Progression.PlayerStats.BonusFishChance)
             {
-                float extra = FishDatabase.RollWeight(_species, Progression.PlayerStats.QualityLevel);
+                float extra = FishDatabase.RollWeight(_species, Progression.PlayerStats.QualityLevel, _window);
                 var bonus = CatchJournal.Record(_species, extra, player.transform.position);
                 bonus.bonus = true;
                 GameEvents.Toast($"Bonus! A second {_species.name.ToLower()} ({FishDatabase.WeightText(extra)}) came up too.", 3.5f);
             }
-            _heldCatch = CatchVisuals.Spawn(_species, _length);
+            _heldCatch = CatchVisuals.Spawn(_species, _length, golden);
             _landingTimer = 0f;
             player.ActionAnimation = "holding-both";
             player.Animator?.Play("holding-both", 0.1f);
@@ -523,6 +639,27 @@ namespace UntitledGame.Fishing
             FishCaught?.Invoke(LastCatch);
             if (!LastCatch.inBucket)
                 GameEvents.Toast($"Your bag is full ({Inventory.SlotsUsed}/{Inventory.SlotCapacity} slots), so it swims free. Sell fish at the market, or buy a bigger bucket!", 4f);
+        }
+
+        /// <summary>A rare golden fish: 3%, plus 0.25% per level of luck training (8% at level 20).</summary>
+        public static float GoldenChance => 0.03f + 0.0025f * Progression.PlayerStats.Level("luck") + (Streak >= HotStreak ? 0.02f : 0f);
+        /// <summary>Self-test: the next catches are golden.</summary>
+        public static bool ForceGolden;
+
+        /// <summary>Golden fish and new medals get a moment of their own (what was achieved, not a demand).</summary>
+        public static void AnnounceCatch(CatchResult r)
+        {
+            if (r == null || !r.species.IsFish) return;
+            string weight = FishDatabase.WeightText(r.length);
+            if (r.golden)
+                GameEvents.Banner($"A golden {r.species.name.ToLower()}!", $"{r.species.hanzi} {r.species.pinyin}, {weight}. Rare and shining: it's worth {CatchJournal.GoldenValue}× as much." +
+                                  (r.newMedal == 3 ? "\nAnd it's a gold-medal weight too!" : ""), true);
+            else if (r.newMedal == 3)
+                GameEvents.Banner($"Gold medal: {r.species.name}!", $"{weight}, one of the biggest {r.species.name.ToLower()} there is. It's on your trophy wall at home now.", true);
+            else if (r.newMedal == 2)
+                GameEvents.Toast($"Silver medal: your best {r.species.name.ToLower()} yet ({weight}). Gold is for the biggest ones.", 4f);
+            else if (r.newMedal == 1 && !r.isNewSpecies)
+                GameEvents.Toast($"Bronze medal: {r.species.name}.", 2.5f);
         }
 
         private void UpdateLanding(bool dismiss)

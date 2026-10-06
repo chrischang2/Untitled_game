@@ -74,6 +74,7 @@ namespace UntitledGame.Economy
         public string personality;
         public bool buysFish;
         public bool school;             // 高老师's test centre: lessons, practice and HSK tests (no goods)
+        public bool crabber;            // 海叔's crab pots: passive income, collected at his stall (CrabPots)
         public string[] items;
     }
 
@@ -219,19 +220,36 @@ namespace UntitledGame.Economy
             new ItemDef { id = "cos_cat_gold", minHsk = 3, minAffinity = 3, english = "Tangyuan's Golden Crown", hanzi = "小金帽", category = ItemCategory.Cosmetic, price = 800, unique = true, cosmeticFor = "cat", colorHex = "#E8B83A", description = "A golden hat fit for a king of cats." },
             new ItemDef { id = "cos_house_white", minHsk = 2, minAffinity = 2, english = "White Roof", hanzi = "白房子", category = ItemCategory.Cosmetic, price = 400, unique = true, cosmeticFor = "house", colorHex = "#EDEAE4", description = "A clean white roof, like a seaside cottage." },
 
-            // ---- Coach Wu's training: stat upgrades, five levels each (price = level x base). Friends can train higher.
-            new ItemDef { id = "up_cast", english = "Strength Training", hanzi = "力量训练", category = ItemCategory.Upgrade, price = 60, stat = "cast",
-                description = "Cast 2.5 m further per level." },
-            new ItemDef { id = "up_bar", english = "Eye Training", hanzi = "眼睛训练", category = ItemCategory.Upgrade, price = 80, stat = "bar",
-                description = "A wider green bar when reeling (+12% of each fish's bar per level)." },
-            new ItemDef { id = "up_grip", english = "Stamina Training", hanzi = "跑步训练", category = ItemCategory.Upgrade, price = 70, stat = "grip",
-                description = "Fish get away more slowly when they leave the green bar." },
-            new ItemDef { id = "up_luck", english = "Luck Training", hanzi = "运气训练", category = ItemCategory.Upgrade, price = 100, stat = "luck",
-                description = "+6% chance per level of catching a bonus fish." },
-            new ItemDef { id = "up_quality", english = "Technique Training", hanzi = "技术训练", category = ItemCategory.Upgrade, price = 90, stat = "quality",
+            // ---- Coach Wu's training: 20 levels per stat in four tiers of five (each tier needs that HSK test).
+            //      Price per level: 10, 20, 40, 70, 100, then ten times as much each tier (PlayerStats.NextPrice).
+            new ItemDef { id = "up_cast", english = "Strength Training", hanzi = "力量训练", category = ItemCategory.Upgrade, price = 10, stat = "cast",
+                description = "Hooked fish thrash less." },
+            new ItemDef { id = "up_bar", english = "Eye Training", hanzi = "眼睛训练", category = ItemCategory.Upgrade, price = 10, stat = "bar",
+                description = "A wider green bar when reeling: each set of five levels doubles it for that tier's fish." },
+            new ItemDef { id = "up_grip", english = "Stamina Training", hanzi = "跑步训练", category = ItemCategory.Upgrade, price = 10, stat = "grip",
+                description = "The catch meter fills faster and fish get away more slowly." },
+            new ItemDef { id = "up_luck", english = "Luck Training", hanzi = "运气训练", category = ItemCategory.Upgrade, price = 10, stat = "luck",
+                description = "+2.5% chance per level of a bonus fish, and golden fish come a little more often." },
+            new ItemDef { id = "up_quality", english = "Technique Training", hanzi = "技术训练", category = ItemCategory.Upgrade, price = 10, stat = "quality",
                 description = "Bigger fish: each kind comes in heavier, within its normal weight range." },
-            new ItemDef { id = "up_bite", english = "Calm Training", hanzi = "安静训练", category = ItemCategory.Upgrade, price = 60, stat = "bite",
-                description = "Sit quietly: fish bite 10% sooner per level." },
+            new ItemDef { id = "up_bite", english = "Calm Training", hanzi = "安静训练", category = ItemCategory.Upgrade, price = 10, stat = "bite",
+                description = "Sit quietly: fish bite 3% sooner per level." },
+
+            // ---- 海叔's crab pots: 20 levels each, five per HSK tier, priced like Coach Wu's training (CrabPots).
+            new ItemDef { id = "crab_pots", english = "More Crab Pots", hanzi = "蟹笼", category = ItemCategory.Upgrade, price = 10, stat = "crab_pots",
+                description = "One more pot in the water per level." },
+            new ItemDef { id = "crab_size", english = "Bigger Pots", hanzi = "大蟹笼", category = ItemCategory.Upgrade, price = 10, stat = "crab_size",
+                description = "Each pot holds one more crab per level." },
+            new ItemDef { id = "crab_lure", english = "Crab Lures", hanzi = "诱饵", category = ItemCategory.Upgrade, price = 10, stat = "crab_lure",
+                description = "Better lures: the pots fill up more each day." },
+            new ItemDef { id = "crab_deep", english = "Deep-Water Ropes", hanzi = "长绳子", category = ItemCategory.Upgrade, price = 10, stat = "crab_deep",
+                description = "Longer ropes reach deeper water, where bigger and rarer crabs live: each crab is worth more." },
+            new ItemDef { id = "crab_bait", english = "Fish-Bait Know-how", hanzi = "鱼饵", category = ItemCategory.Upgrade, price = 10, stat = "crab_bait",
+                description = "Fish you give 海叔 for the pots bring in more crabs the next day." },
+            new ItemDef { id = "crab_cooler", english = "Cooler", hanzi = "冰箱", category = ItemCategory.Upgrade, price = 10, stat = "crab_cooler",
+                description = "Crabs you haven't collected keep for longer (one more day every 4 levels)." },
+            new ItemDef { id = "crab_helper", english = "Market Helper", hanzi = "帮手", category = ItemCategory.Upgrade, price = 10, stat = "crab_helper",
+                description = "A helper sells the crabs for a better price: +3% per level." },
         };
 
         public static readonly List<ShopDef> Shops = new List<ShopDef>
@@ -241,9 +259,9 @@ namespace UntitledGame.Economy
                 personality = "a gruff but kind old fisherman who loves to brag about big catches and gives honest advice about rods and bait",
                 items = new[] { "bait_worm", "bait_dough", "bait_shrimp", "bait_squid", "bait_crab", "bait_fish", "bait_glow",
                     "line_red", "line_blue", "line_black", "line_gold", "boat", "boat_oars", "boat_sail", "boat_new", "bucket_big", "bucket_huge", "bucket_giant", "bobber_fancy" } },
-            new ShopDef { id = "fish", english = "Fish Market", hanzi = "鱼店", keeperName = "陈阿姨", keeperEnglish = "Auntie Chen",
+            new ShopDef { id = "fish", english = "Sushi Bar", hanzi = "寿司店", keeperName = "陈阿姨", keeperEnglish = "Auntie Chen",
                 voice = "zh_female", pitch = 0.94f, buysFish = true,
-                personality = "a warm, chatty auntie who buys fish from local anglers, fusses over customers and shares cooking tips",
+                personality = "a warm, chatty sushi chef who buys fish from local anglers for her little sushi bar, weighs every catch on her old scale and fusses over customers",
                 items = new string[0] },
             new ShopDef { id = "furniture", english = "Furniture Shop", hanzi = "家具店", keeperName = "李师傅", keeperEnglish = "Master Li",
                 voice = "zh_male", pitch = 1.05f,
@@ -276,6 +294,11 @@ namespace UntitledGame.Economy
                 voice = "zh_female", pitch = 1.02f, school = true,
                 personality = "a strict but warm Chinese teacher who runs the HSK test centre, loves good pronunciation and believes everyone can learn",
                 items = new string[0] },
+            // Stall 9: down the beach, 海叔's crab pots (passive income; collect it at his stall).
+            new ShopDef { id = "crabber", english = "Crab Pots", hanzi = "螃蟹摊", keeperName = "海叔", keeperEnglish = "Uncle Hai",
+                voice = "zh_male", pitch = 0.88f, crabber = true,
+                personality = "a sunburnt, easy-going crab fisherman who keeps pots off the beach, looks after the player's pots too and pays them for the catch",
+                items = new[] { "crab_pots", "crab_size", "crab_lure", "crab_deep", "crab_bait", "crab_cooler", "crab_helper" } },
         };
 
         /// <summary>The gift item with this Chinese name (what keepers like and dislike), if it's sold.</summary>
@@ -289,30 +312,24 @@ namespace UntitledGame.Economy
 
         public const float StarterLineKg = 3f;
 
-        /// <summary>What an item costs right now (stat upgrades get dearer with each level).</summary>
+        /// <summary>What an item costs right now (stat upgrades: the next level's price).</summary>
         public static int PriceOf(ItemDef item) =>
-            item.category == ItemCategory.Upgrade ? item.price * (UntitledGame.Progression.PlayerStats.Level(item.stat) + 1) : item.price;
+            item.category == ItemCategory.Upgrade ? UntitledGame.Progression.PlayerStats.NextPrice(item.stat) : item.price;
         public static ShopDef Shop(string id) => Shops.FirstOrDefault(s => s.id == id);
 
-        /// <summary>What the fishmonger pays for a catch: by rarity, and more for a heavier one of its kind.</summary>
+        /// <summary>
+        /// What the sushi chef pays for a catch: ten times as much for each fish tier (the HSK level of the book about
+        /// it), ¥10 to ¥40 within a tier by rarity, and more for a heavier one of its kind (x0.7 smallest, x1.8 biggest).
+        /// </summary>
         public static int FishPrice(FishSpecies s, float weightKg)
         {
-            int baseValue = s.rarity switch
-            {
-                Rarity.Junk => 3,
-                Rarity.Common => 10,
-                Rarity.Uncommon => 32,
-                Rarity.Rare => 100,
-                Rarity.Legendary => 450,
-                _ => 5,
-            };
-            if (!s.IsFish) return baseValue;
+            if (!s.IsFish) return 3;
             float t = Mathf.InverseLerp(s.minWeight, s.maxWeight, weightKg);
-            return Mathf.Max(1, Mathf.RoundToInt(baseValue * Mathf.Lerp(0.7f, 1.8f, t) * (1f + FishHskBonus)));
+            return Mathf.Max(1, Mathf.RoundToInt(FishPower.BasePrice(s) * Mathf.Lerp(0.7f, 1.8f, t)));
         }
 
-        /// <summary>Extra money for fish from passing HSK tests (automatic: +10% / +20% / +35%).</summary>
-        public static float FishHskBonus => UntitledGame.Progression.Hsk.FishBonus;
+        /// <summary>(Replaced by the sushi chef's scale: lessons and tests raise its multiplier per bar fill, see FishSale.)</summary>
+        public static float FishHskBonus => 0f;
 
         /// <summary>The measure word for counting an item: 一根鱼竿, 两包蚯蚓, 一个猫碗, 一把椅子...</summary>
         public static string MeasureWord(ItemDef item)

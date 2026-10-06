@@ -24,6 +24,7 @@ namespace UntitledGame.Home
             foreach (var p in placed.Where(p => !Stranded(p))) Spawn(p);
             RescueStranded();
             RefreshBowl();
+            TrophyWall.Ensure();
         }
 
         /// <summary>Moves every stranded placed item into the house (and respawns it there). Returns how many moved.</summary>

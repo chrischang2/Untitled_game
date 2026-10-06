@@ -54,8 +54,14 @@ namespace UntitledGame.Companion
             }
             if (shop.buysFish)
             {
-                sb.AppendLine("You buy fish that local anglers catch. The price depends on the kind of fish and its size; the game tells you the total. " +
-                              "You also love chatting about how to cook fish.");
+                sb.AppendLine("You are a sushi chef with a little sushi bar (寿司店). You buy the fish local anglers catch and weigh it all on your old scale; " +
+                              "the more they bring at once, the more you pay per fish (the game tells you the total). You love talking about which fish make the best sushi.");
+            }
+            if (shop.crabber)
+            {
+                sb.AppendLine("You keep crab pots (螃蟹笼) in the sea off the beach, including the customer's own pots. Every morning you empty them and sell the crabs; " +
+                              "the customer comes down to collect the money (the game tells you how much). Fish they give you go in the pots as bait, so there are more crabs the next day. " +
+                              "You also sell upgrades for their pots.");
             }
             sb.AppendLine("Regulars: Mei (美) often comes by with the customer. The customer's cat is called 汤圆.");
             return sb.ToString().Trim();
@@ -73,6 +79,11 @@ namespace UntitledGame.Companion
                 foreach (var i in shop.items.Select(Catalog.Get).Where(i => i != null))
                     sb.AppendLine($"- {i.id}: {i.hanzi} = {i.english}, {Catalog.PriceOf(i)} yuan");
             }
+            if (shop.crabber)
+            {
+                sb.AppendLine("Here, giving or selling fish (给你鱼 / 放鱼 / 卖鱼) means putting them in the crab pots as bait: intent sell_fish. Use fish \"all\" unless they name one kind.");
+                sb.AppendLine("Fish: " + string.Join(", ", FishDatabase.All.Select(f => $"{f.id} = {f.hanzi} ({f.name})")));
+            }
             if (shop.buysFish)
             {
                 sb.AppendLine("This shop BUYS fish from the customer (intent sell_fish). Use fish \"all\" unless they name one kind.");
@@ -88,7 +99,7 @@ namespace UntitledGame.Companion
 
         public static string ClassifierSchema(ShopDef shop)
         {
-            var intents = shop.buysFish
+            var intents = shop.buysFish || shop.crabber
                 ? new[] { "sell_fish", "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" }
                 : new[] { "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" };
             var items = shop.items.Concat(new[] { "unclear", "none" });

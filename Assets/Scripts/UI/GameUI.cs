@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -33,7 +34,17 @@ namespace UntitledGame.UI
         private RectTransform _hud;
         private Camera _cam;
 
-        private TextMeshProUGUI _clock, _clockSub, _money, _bucket;
+        private TextMeshProUGUI _clock, _clockSub, _money, _powerText, _castLabelText, _fishGridLabel;
+        private RectTransform _fishGrid, _castLabel;
+        private Image _fishGridPanel;
+        private readonly List<(Image cell, Image icon, TextMeshProUGUI count)> _fishCells = new List<(Image, Image, TextMeshProUGUI)>();
+        private string _fishGridKey;
+        /// <summary>The HUD's fish grid: one cell per bag slot (the self-test reads it).</summary>
+        public int FishGridCells => _fishCells.Count(c => c.cell.gameObject.activeSelf);
+        public int FishGridFilled => _fishCells.Count(c => c.cell.gameObject.activeSelf && c.icon.gameObject.activeSelf);
+        public string PowerText => _powerText != null ? _powerText.text : "";
+        public string FishGridText => _fishGridLabel != null ? _fishGridLabel.text : "";
+        public string CastLabel => _castLabel != null && _castLabel.gameObject.activeSelf ? _castLabelText.text : "";
         private Image _sunIcon;
         private TextMeshProUGUI _aiText;
         private Image[] _aiDots;
@@ -130,6 +141,7 @@ namespace UntitledGame.UI
 
             GameEvents.ToastRequested += ShowToast;
             GameEvents.BannerRequested += ShowBanner;
+            Progression.Affinity.LevelChanged += OnFriendshipLevel;
             FishingController.FishCaught += OnFishCaught;
             ShopkeeperBrain.TransactionDone += OnTransaction;
             VocabNotebook.WordLearned += OnWordLearned;
@@ -142,6 +154,8 @@ namespace UntitledGame.UI
         {
             GameEvents.ToastRequested -= ShowToast;
             GameEvents.BannerRequested -= ShowBanner;
+            _scale?.Dispose();
+            Progression.Affinity.LevelChanged -= OnFriendshipLevel;
             FishingController.FishCaught -= OnFishCaught;
             ShopkeeperBrain.TransactionDone -= OnTransaction;
             VocabNotebook.WordLearned -= OnWordLearned;
@@ -184,6 +198,7 @@ namespace UntitledGame.UI
             tl.childAlignment = TextAnchor.UpperCenter;
             tl.childForceExpandWidth = false;
             BuildBanner();
+            _scale = new SaleScaleView(_hud);
 
             _card = new CatchCard(_root);
             _journal = new JournalPanel(_root);
@@ -209,9 +224,7 @@ namespace UntitledGame.UI
             var wallet = UIFactory.Panel(_hud, "Wallet", small: true);
             wallet.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(34, -134), new Vector2(300, 56));
             _money = UIFactory.Text(wallet.transform, "Money", "¥50", 28, UITheme.Ink, TextAlignmentOptions.MidlineLeft, title: true);
-            _money.rectTransform.Stretch(22, 150, 4, 4);
-            _bucket = UIFactory.Text(wallet.transform, "Bucket", "Bag 0/4", 21, UITheme.InkSoft, TextAlignmentOptions.MidlineRight);
-            _bucket.rectTransform.Stretch(120, 20, 4, 4);
+            _money.rectTransform.Stretch(22, 20, 4, 4);
 
             // Energy: fishing uses it; at zero you pass out.
             var energy = UIFactory.Panel(_hud, "Energy", small: true);
@@ -224,6 +237,59 @@ namespace UntitledGame.UI
             _energyFill.rectTransform.offsetMin = _energyFill.rectTransform.offsetMax = Vector2.zero;
             _energyText = UIFactory.Text(energy.transform, "Text", "Energy", 19, UITheme.Ink, TextAlignmentOptions.Center);
             _energyText.rectTransform.Stretch(16, 16, 4, 4);
+
+            // The bag: a grid of slots under the energy bar, each showing its fish and how many.
+            _fishGridPanel = UIFactory.Panel(_hud, "FishGrid", small: true);
+            _fishGrid = _fishGridPanel.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(34, -250), new Vector2(300, 60));
+            _fishGridLabel = UIFactory.Text(_fishGrid, "Slots", "", 20, UITheme.InkSoft, TextAlignmentOptions.MidlineRight, title: true);
+            _fishGridLabel.rectTransform.Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(-10, 0), new Vector2(64, 30));
+            _fishGridLabel.rectTransform.pivot = new Vector2(1, 0.5f);
+        }
+
+        private const int FishGridColumns = 6;
+        private const float FishCell = 44f, FishGap = 4f, FishPad = 8f;
+
+        /// <summary>Rebuilds the fish grid when the bag changes (one cell per slot; empty slots are faint).</summary>
+        private void UpdateFishGrid()
+        {
+            var slots = Inventory.Slots();
+            int cap = Mathf.Max(Inventory.SlotCapacity, slots.Count);
+            string key = cap + "|" + Inventory.BucketFull + "|" + string.Join(",", slots.Select(s => (s.speciesId ?? s.itemId) + ":" + s.count));
+            if (key == _fishGridKey) return;
+            _fishGridKey = key;
+            while (_fishCells.Count < cap)
+            {
+                var cell = UIFactory.Image(_fishGrid, "Slot", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
+                cell.raycastTarget = false;
+                var icon = UIFactory.Image(cell.transform, "Fish", Color.white, GameAssets.Instance.fishIcon, sliced: false);
+                icon.raycastTarget = false;
+                icon.rectTransform.Stretch(2, 2, 4, 4);
+                var count = UIFactory.Text(cell.transform, "Count", "", 19, UITheme.Ink, TextAlignmentOptions.BottomRight, title: true);
+                count.rectTransform.Stretch(2, 4, 0, 0);
+                _fishCells.Add((cell, icon, count));
+            }
+            int rows = Mathf.Max(1, (cap + FishGridColumns - 1) / FishGridColumns), cols = Mathf.Min(cap, FishGridColumns);
+            // Exactly as wide as the slots (plus the "used/total" label), so empty panel space never looks like a slot.
+            _fishGrid.sizeDelta = new Vector2(FishPad * 2 + 4f + cols * FishCell + (cols - 1) * FishGap + 66f, FishPad * 2 + rows * FishCell + (rows - 1) * FishGap);
+            _fishGridLabel.text = $"{slots.Count}/{Inventory.SlotCapacity}";
+            _fishGridLabel.color = Inventory.BucketFull ? UITheme.Red : UITheme.InkSoft;
+            for (int i = 0; i < _fishCells.Count; i++)
+            {
+                var (cell, icon, count) = _fishCells[i];
+                cell.gameObject.SetActive(i < cap);
+                if (i >= cap) continue;
+                int r = i / FishGridColumns, c = i % FishGridColumns;
+                cell.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1),
+                    new Vector2(FishPad + 2f + c * (FishCell + FishGap), -FishPad - r * (FishCell + FishGap)), new Vector2(FishCell, FishCell));
+                bool used = i < slots.Count;
+                cell.color = used ? UITheme.Hex("#D8C8AD") : UITheme.Hex("#E6DCCB");
+                icon.gameObject.SetActive(used);
+                count.text = used && slots[i].count > 1 ? slots[i].count.ToString() : "";
+                if (!used) continue;
+                var species = slots[i].speciesId != null ? FishDatabase.Get(slots[i].speciesId) : null;
+                icon.color = species != null ? species.body : UITheme.InkSoft;
+            }
+            _fishGridPanel.color = Inventory.BucketFull ? UITheme.Hex("#F3C9BE") : UITheme.Cream;
         }
 
         private Image _energyFill;
@@ -302,9 +368,22 @@ namespace UntitledGame.UI
             _power = p.rectTransform;
             _power.anchorMin = _power.anchorMax = new Vector2(0.5f, 0.5f);
             _power.pivot = new Vector2(0.5f, 0.5f);
-            _power.sizeDelta = new Vector2(220, 36);
+            _power.sizeDelta = new Vector2(300, 40);
             var track = UIFactory.Image(p.transform, "Track", UITheme.CreamDark, GameAssets.Instance.roundedRectSmall);
-            track.rectTransform.Stretch(8, 8, 8, 8);
+            track.rectTransform.Stretch(8, 88, 9, 9);
+            _powerText = UIFactory.Text(p.transform, "Distance", "", 22, UITheme.Ink, TextAlignmentOptions.MidlineRight, title: true);
+            _powerText.rectTransform.Stretch(214, 12, 2, 2);
+
+            // How far the bobber went (and how far out from the shore that is: fish need distance).
+            var cl = UIFactory.Panel(_hud, "CastDistance", small: true);
+            _castLabel = cl.rectTransform;
+            _castLabel.anchorMin = _castLabel.anchorMax = new Vector2(0.5f, 0.5f);
+            _castLabel.pivot = new Vector2(0.5f, 0f);
+            _castLabel.sizeDelta = new Vector2(220, 34);
+            _castLabelText = UIFactory.Text(cl.transform, "Text", "", 19, UITheme.Ink, TextAlignmentOptions.Center);
+            _castLabelText.rectTransform.Stretch(8, 8, 2, 2);
+            cl.raycastTarget = false;
+            _castLabel.gameObject.SetActive(false);
             _powerFill = UIFactory.Image(track.transform, "Fill", UITheme.Orange, GameAssets.Instance.roundedRectSmall);
             _powerFill.rectTransform.anchorMin = Vector2.zero;
             _powerFill.rectTransform.anchorMax = new Vector2(0, 1);
@@ -401,6 +480,8 @@ namespace UntitledGame.UI
         }
 
         private void OnFishCaught(CatchResult r) => _card.Show(r);
+        /// <summary>Shows the catch card (the self-test uses it to check the presentation).</summary>
+        public void ShowCatchCard(CatchResult r) => _card.Show(r);
 
         private void OnTransaction(ShopkeeperBrain k, string english, string chinese) => ShowToast(english, 3.5f);
 
@@ -414,6 +495,9 @@ namespace UntitledGame.UI
 
         // ------------------------------------------------------------------ banner (big results, e.g. "HSK 1 PASSED!")
 
+        private SaleScaleView _scale;
+        /// <summary>Auntie Chen's scale animation (the self-test watches it).</summary>
+        public SaleScaleView Scale => _scale;
         private Image _banner;
         private TextMeshProUGUI _bannerTitle, _bannerText;
         private CanvasGroup _bannerGroup;
@@ -444,6 +528,21 @@ namespace UntitledGame.UI
             _bannerGroup.alpha = 1f;
             _bannerUntil = Time.time + 8f;
             AudioManager.Instance?.PlaySfx(good ? "SFX/rpg_handleCoins" : "SFX/ui_error_004", 0.6f);
+        }
+
+        private void OnFriendshipLevel(string shopId, int before, int now)
+        {
+            if (now <= before) return;
+            var shop = Catalog.Shop(shopId);
+            if (shop == null) return;
+            var unlocked = shop.items.Select(Catalog.Get).Where(i => i != null && i.minAffinity == now && i.minHsk <= Progression.Hsk.Level).Select(i => i.english).ToList();
+            string next = now < Progression.Affinity.MaxLevel
+                ? $"\nNext, for {Progression.Affinity.LevelHanzi[now + 1]}: " + string.Join(", ", Progression.Affinity.Requirements(shopId, now + 1)
+                    .Select(r => r.kind == "fact" ? Progression.Affinity.FactQuestions[r.factId].question : r.text))
+                : "";
+            ShowBanner($"{shop.keeperName} and you: {Progression.Affinity.LevelHanzi[now]}!",
+                $"{shop.keeperEnglish} is now your {Progression.Affinity.LevelEnglish[now]}." +
+                (unlocked.Count > 0 ? $"\nNew in the {shop.english.ToLower()}: {string.Join(", ", unlocked)}" : "") + next, true);
         }
 
         private void UpdateBanner()
@@ -517,6 +616,7 @@ namespace UntitledGame.UI
             if (_cam == null) _cam = Camera.main;
             HandleHotkeys();
             UpdateBanner();
+            _scale?.Update();
             UpdateClock();
             UpdateAiStatus();
             UpdateHint();
@@ -530,6 +630,7 @@ namespace UntitledGame.UI
             UpdatePromptAndOffer();
             _shop?.Update(ShopConversation.Active, HudHidden);
             UpdateToasts();
+            if (fishing != null && fishing.State == FishingState.Charging) _card.HideNow();
             _card.Update(fishing != null && fishing.State == FishingState.Landing);
             _chat.Update();
 
@@ -603,8 +704,7 @@ namespace UntitledGame.UI
             _clockSub.text = $"{UiText.Plain($"Day {dn.Day}", $"第{dn.Day}天", 0)} · {weather}";
             _sunIcon.color = dn.Darkness > 0.5f ? UITheme.Hex("#BFD3F2") : (dn.Phase == DayPhase.Evening || dn.Phase == DayPhase.Dawn ? UITheme.Orange : UITheme.Yellow);
             _money.text = hsk >= 1 ? $"{Inventory.Money}块" : $"¥{Inventory.Money}";
-            _bucket.text = $"{UiText.Plain("Bag", "鱼", 0)} {Inventory.SlotsUsed}/{Inventory.SlotCapacity}";
-            _bucket.color = Inventory.BucketFull ? UITheme.Red : UITheme.InkSoft;
+            UpdateFishGrid();
             float ef = Progression.Energy.Fraction;
             _energyFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(ef), 1);
             _energyFill.color = ef > 0.4f ? UITheme.Green : ef > 0.15f ? UITheme.Yellow : UITheme.Red;
@@ -674,10 +774,15 @@ namespace UntitledGame.UI
             }
             string toMei = UiText.T("Talk to Mei", "和美说话", 2), type = UiText.T("Type", "写", 2);
             string talk = SaveSystem.Settings.handsFree ? $"{UiText.T("Just talk (to Mei)", "和美说话", 2)}   <b>[T]</b> {type}" : $"<b>[V]</b> {toMei}   <b>[T]</b> {type}";
+            if (Minigames.PitchPotGame.Active != null)
+            {
+                _hint.text = "投壶 tóuhú  ·  <b>[A]/[D]</b> aim  ·  hold <b>LMB</b>, let go to throw  ·  <b>[E]</b> stop";
+                return;
+            }
             string text = fishing == null ? talk : fishing.State switch
             {
                 FishingState.Idle => $"<b>[Hold LMB]</b> {UiText.T("Cast", "钓鱼", 2)}   {talk}   <b>[I]</b> {UiText.T("Bag", "包", 3)}   <b>[N]</b> {UiText.T("Words", "词语", 3)}   <b>[J]</b> Journal   <b>[Esc]</b> {UiText.T("Menu", "菜单", 3)}",
-                FishingState.Charging => "Release to cast! Aim with the camera (hold <b>RMB</b> to look around)",
+                FishingState.Charging => "Release to cast!   <b>[A]/[D]</b> aim left/right (or turn the camera with <b>RMB</b>): the ring shows where it lands",
                 FishingState.Casting => "Wheee...",
                 FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> Reel in   {talk}",
                 FishingState.Bite => $"<b>{UiText.T("CLICK NOW!", "快！", 1)}</b>",
@@ -687,6 +792,10 @@ namespace UntitledGame.UI
             };
             _hint.text = text;
         }
+
+        public bool CatchCardVisible => _card.Visible;
+        /// <summary>The HUD layer (minigames add their panels here).</summary>
+        public RectTransform HudRoot => _hud;
 
         public bool ToCanvas(Vector3 world, out Vector2 local, out bool behind)
         {
@@ -750,7 +859,22 @@ namespace UntitledGame.UI
                 _power.anchoredPosition = p;
                 _powerFill.rectTransform.anchorMax = new Vector2(fishing.Power, 1);
                 _powerFill.color = Color.Lerp(UITheme.Yellow, UITheme.Orange, fishing.Power);
+                bool perfect = fishing.ChargeIsPerfect;
+                _powerText.text = perfect ? "<color=#E0604E>PERFECT</color>" : $"{fishing.ChargeDistance:0.0} m";
+                _castLabel.gameObject.SetActive(true);
+                _castLabelText.text = fishing.PredictedOnWater ? $"lands {fishing.PredictedShoreDistance:0} m out" : "<color=#E0604E>that's land!</color>";
+                _castLabel.anchoredPosition = p + new Vector2(0f, 28f);
+                if (perfect) _powerFill.color = UITheme.Hex("#E0604E");
             }
+
+            bool showCast = st == FishingState.Waiting || st == FishingState.Bite;
+            if (st != FishingState.Charging) _castLabel.gameObject.SetActive(showCast);
+            if (showCast && ToCanvas(fishing.BobberWorld + Vector3.up * 0.7f, out var cp, out bool behind) && !behind)
+            {
+                _castLabel.anchoredPosition = cp;
+                _castLabelText.text = $"{fishing.BobberDistance:0.0} m  ·  {fishing.ShoreDistance:0} m out";
+            }
+            else if (showCast) _castLabel.gameObject.SetActive(false);
 
             _bite.gameObject.SetActive(st == FishingState.Bite);
             if (st == FishingState.Bite && ToCanvas(playerAnchor.position + Vector3.up * 2.2f, out var b, out _))
@@ -766,8 +890,12 @@ namespace UntitledGame.UI
                 _tensionFill.rectTransform.anchorMin = new Vector2(0, fishing.BarPos);
                 _tensionFill.rectTransform.anchorMax = new Vector2(1, fishing.BarPos + fishing.BarSize);
                 _tensionFill.color = (fishing.FishInBar ? UITheme.Green : UITheme.Hex("#A8D48A")).WithAlpha(0.9f);
-                _tensionFish.rectTransform.anchorMin = _tensionFish.rectTransform.anchorMax = new Vector2(0.5f, fishing.FishPos);
-                _tensionFish.rectTransform.localRotation = Quaternion.Euler(0, 0, fishing.FishInBar ? 0f : Mathf.Sin(Time.time * 30f) * 14f);
+                // The fish vibrates in the meter, more for lively fish (and wriggles hard when it's outside the bar).
+                float v = fishing.Vibration;
+                _tensionFish.rectTransform.anchorMin = _tensionFish.rectTransform.anchorMax =
+                    new Vector2(0.5f + Random.Range(-v, v) * 4f, Mathf.Clamp01(fishing.FishPos + Random.Range(-v, v)));
+                float wiggle = (fishing.FishInBar ? 6f : 16f) * Mathf.Min(1.6f, fishing.MoveRate);
+                _tensionFish.rectTransform.localRotation = Quaternion.Euler(0, 0, Mathf.Sin(Time.time * (24f + 12f * fishing.MoveRate)) * wiggle);
                 _reelMeter.rectTransform.anchorMax = new Vector2(1, Mathf.Max(0.02f, fishing.Progress));
                 _reelMeter.color = Color.Lerp(UITheme.Red, UITheme.Green, fishing.Progress);
                 _tensionLabel.text = fishing.FishInBar ? "Reel!" : "<color=#E0604E>Catch it!</color>";

@@ -742,12 +742,12 @@ namespace UntitledGame.EditorTools
 
         // ------------------------------------------------------------------ market
 
-        private static readonly string[] StallModels = { "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green" };
+        private static readonly string[] StallModels = { "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red", "FantasyTown/stall-green", "FantasyTown/stall-red" };
         private static readonly string[] KeeperModels =
         {
             "MiniCharacters/character-male-d", "MiniCharacters/character-female-a", "MiniCharacters/character-male-e", "MiniCharacters/character-female-c",
             "MiniCharacters/character-female-d", "MiniCharacters/character-male-c", "MiniCharacters/character-male-b", "MiniCharacters/character-female-e",
-            "MiniCharacters/character-female-b",
+            "MiniCharacters/character-female-b", "MiniCharacters/character-male-f",
         };
 
         private static Bounds ModelBounds(GameObject go)
@@ -770,9 +770,8 @@ namespace UntitledGame.EditorTools
                 var shop = Catalog.Shops[i];
                 Vector2 s2 = WorldShape.StallPosition(i);
                 Vector3 pos = Ground(s2.x, s2.y, 0.02f);
-                Vector3 front = center - pos;
-                front.y = 0f;
-                front.Normalize();
+                Vector2 f2 = WorldShape.StallFront(i);
+                Vector3 front = new Vector3(f2.x, 0f, f2.y);
                 float yaw = Quaternion.LookRotation(front).eulerAngles.y;
 
                 var stallRoot = new GameObject("Stall_" + shop.id).transform;
@@ -823,6 +822,150 @@ namespace UntitledGame.EditorTools
             Place("PirateKit/barrel", market, Ground(c2.x - 10.6f, c2.y + 8.2f), 0f, 0.55f);
             Place("PirateKit/crate", market, Ground(c2.x - 11.4f, c2.y + 7.4f), 20f, 0.55f);
             Place("FantasyTown/stall-bench", market, Ground(c2.x + 1.5f, c2.y - 0.5f), 0f, 1.6f);
+
+            BuildCrabPots(market);
+            BuildGameStalls(market);
+        }
+
+        /// <summary>A plain coloured material saved as an asset (primitives in the scene need real materials).</summary>
+        private static Material SolidMat(string name, string hex)
+        {
+            string path = $"{ComfyAssets.MatFolder}/{name}.mat";
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (existing != null) return existing;
+            var m = new Material(ComfyAssets.PlainLitMat) { name = name };
+            m.SetColor("_BaseColor", C(hex));
+            m.SetFloat("_VertexColorWeight", 0f);
+            AssetDatabase.CreateAsset(m, path);
+            return m;
+        }
+
+        private static GameObject Prim(PrimitiveType type, Transform parent, Vector3 pos, Vector3 scale, Quaternion rot, Material m, string name = null)
+        {
+            var p = GameObject.CreatePrimitive(type);
+            Object.DestroyImmediate(p.GetComponent<Collider>());
+            if (name != null) p.name = name;
+            p.transform.SetParent(parent, false);
+            p.transform.position = pos;
+            p.transform.localScale = scale;
+            p.transform.rotation = rot;
+            p.GetComponent<Renderer>().sharedMaterial = m;
+            return p;
+        }
+
+        /// <summary>海叔's pots out at sea: a line of orange buoys off his stretch of beach, and his little boat pulled up.</summary>
+        private static void BuildCrabPots(Transform market)
+        {
+            var root = new GameObject("CrabPots").transform;
+            root.SetParent(market, false);
+            Vector2 c = WorldShape.CrabberPosition;
+            var orange = SolidMat("Buoy_Orange", "#F08A3C");
+            var white = SolidMat("Buoy_White", "#F2EFE8");
+            for (int k = 0; k < 6; k++)
+            {
+                float x = c.x - 7f + k * 2.8f + (k % 2) * 0.6f;
+                float z = WorldShape.ShoreZ(x) + 5f + (k % 3) * 2.2f;
+                var buoy = new GameObject("Buoy");
+                buoy.transform.SetParent(root, false);
+                buoy.transform.position = new Vector3(x, WorldShape.WaterLevel, z);
+                Prim(PrimitiveType.Sphere, buoy.transform, buoy.transform.position + Vector3.up * 0.05f, new Vector3(0.42f, 0.36f, 0.42f), Quaternion.identity, orange);
+                Prim(PrimitiveType.Cylinder, buoy.transform, buoy.transform.position + Vector3.up * 0.35f, new Vector3(0.05f, 0.22f, 0.05f), Quaternion.identity, white);
+            }
+            Place("PirateKit/boat-row-small", root, Ground(c.x + 4.2f, c.y + 1.2f), 70f, 0.9f);
+            // Spare pots stacked by the stall.
+            Place("PirateKit/crate", root, Ground(c.x - 2.7f, c.y - 0.6f), 10f, 0.55f);
+            Place("PirateKit/crate", root, Ground(c.x - 2.9f, c.y + 0.4f), -15f, 0.55f);
+            Place("PirateKit/barrel", root, Ground(c.x + 2.6f, c.y - 0.9f), 0f, 0.5f);
+        }
+
+        /// <summary>
+        /// The three games stalls on the seafront. Each has its finished stall ("Built") and a fenced building site
+        /// ("Construction"); MinigameStall shows one or the other by the player's HSK level.
+        /// </summary>
+        private static void BuildGameStalls(Transform market)
+        {
+            (string id, string hanzi, string english, int hsk, string blurb, string model)[] games =
+            {
+                ("pitchpot", "投壶", "Pitch-pot", 1, "throw arrows into a tall pot, an ancient party game.", "FantasyTown/stall-green"),
+                ("jianzi", "毽子", "Jianzi", 2, "keep the feathered shuttlecock in the air with your feet.", "FantasyTown/stall-red"),
+                ("mahjong", "麻将", "Mahjong", 3, "four players, 144 tiles, and a lot of talking.", "FantasyTown/stall-green"),
+            };
+            var red = SolidMat("Site_Red", "#D9534A");
+            var cream = SolidMat("Mahjong_Tile", "#F4EEDC");
+            var green = SolidMat("Mahjong_Back", "#3F8F5A");
+            var bronze = SolidMat("Pot_Bronze", "#9A6B3A");
+            var feather = SolidMat("Jianzi_Feather", "#E05A8C");
+            for (int k = 0; k < games.Length; k++)
+            {
+                var g = games[k];
+                Vector2 p2 = WorldShape.GameStallPosition(k);
+                Vector2 f2 = WorldShape.GameStallFront;
+                Vector3 front = new Vector3(f2.x, 0f, f2.y), right = Vector3.Cross(Vector3.up, front);
+                Vector3 pos = Ground(p2.x, p2.y, 0.02f);
+                float yaw = Quaternion.LookRotation(front).eulerAngles.y;
+
+                var root = new GameObject("Game_" + g.id);
+                root.transform.SetParent(market, false);
+                root.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
+                var stall = root.AddComponent<MinigameStall>();
+                stall.gameId = g.id; stall.hanzi = g.hanzi; stall.english = g.english; stall.hsk = g.hsk; stall.blurb = g.blurb;
+
+                // Finished: a stall with the game on its counter.
+                var built = new GameObject("Built").transform;
+                built.SetParent(root.transform, false);
+                var model = Place(g.model, built, pos, yaw + StallYawOffset, StallScale);
+                float counterY = model != null ? ModelBounds(model).min.y + ModelBounds(model).size.y * CounterHeightFraction : pos.y + 0.9f;
+                Vector3 counter = new Vector3(pos.x, counterY, pos.z) + front * CounterForward;
+                switch (g.id)
+                {
+                    case "mahjong":
+                        for (int t = 0; t < 7; t++)
+                        {
+                            Vector3 tp = counter + right * (-0.55f + t * 0.17f) + Vector3.up * 0.06f;
+                            Prim(PrimitiveType.Cube, built, tp, new Vector3(0.12f, 0.15f, 0.09f), Quaternion.Euler(0f, yaw, 0f), cream);
+                            Prim(PrimitiveType.Cube, built, tp - front * 0.05f, new Vector3(0.12f, 0.15f, 0.02f), Quaternion.Euler(0f, yaw, 0f), green);
+                        }
+                        break;
+                    case "jianzi":
+                        for (int t = 0; t < 2; t++)
+                        {
+                            Vector3 jp = counter + right * (-0.3f + t * 0.6f);
+                            Prim(PrimitiveType.Cylinder, built, jp + Vector3.up * 0.03f, new Vector3(0.12f, 0.02f, 0.12f), Quaternion.identity, bronze);
+                            Prim(PrimitiveType.Sphere, built, jp + Vector3.up * 0.16f, new Vector3(0.14f, 0.22f, 0.14f), Quaternion.identity, feather);
+                        }
+                        break;
+                    case "pitchpot":
+                    {
+                        // The pot stands in front of the stall; you throw from 3.4 m further out (PitchPotGame).
+                        // Body 0.4 wide and 0.6 tall, neck 0.26 wide up to 0.86 m: the mouth is 13 cm across the radius.
+                        Vector3 pp = Ground(pos.x + front.x * 2.4f, pos.z + front.z * 2.4f, 0f);
+                        var pot = new GameObject("Pot").transform;
+                        pot.SetParent(built, false);
+                        pot.position = pp;
+                        Prim(PrimitiveType.Cylinder, pot, pp + Vector3.up * 0.3f, new Vector3(0.4f, 0.3f, 0.4f), Quaternion.identity, bronze);
+                        Prim(PrimitiveType.Cylinder, pot, pp + Vector3.up * 0.72f, new Vector3(0.26f, 0.14f, 0.26f), Quaternion.identity, bronze);
+                        Prim(PrimitiveType.Cylinder, pot, pp + Vector3.up * 0.861f, new Vector3(0.2f, 0.002f, 0.2f), Quaternion.identity, SolidMat("Pot_Inside", "#2A1E14"));
+                        // A quiver of arrows on the counter.
+                        for (int t = 0; t < 3; t++)
+                            Prim(PrimitiveType.Cylinder, built, counter + right * (0.4f + t * 0.06f) + Vector3.up * 0.2f, new Vector3(0.025f, 0.22f, 0.025f), Quaternion.Euler(8f * (t - 1), 0f, 6f), cream);
+                        // The throwing line.
+                        Vector3 line = Ground(pos.x + front.x * 5.8f, pos.z + front.z * 5.8f, -0.02f);
+                        Prim(PrimitiveType.Cube, built, line, new Vector3(1.4f, 0.02f, 0.06f), Quaternion.Euler(0f, yaw, 0f), cream);
+                        break;
+                    }
+                }
+
+                // Not yet: a fenced building site with timber and a red 施工中 sign.
+                var site = new GameObject("Construction").transform;
+                site.SetParent(root.transform, false);
+                Place("SurvivalKit/structure", site, pos, yaw, 2.4f);
+                Place("SurvivalKit/resource-wood", site, Ground(pos.x + right.x * 1.2f + front.x * 0.6f, pos.z + right.z * 1.2f + front.z * 0.6f), yaw + 20f, 0.8f);
+                Place("PirateKit/barrel", site, Ground(pos.x - right.x * 1.5f + front.x * 0.4f, pos.z - right.z * 1.5f + front.z * 0.4f), 0f, 0.5f);
+                for (int s = -1; s <= 1; s++)
+                    Place("FantasyTown/fence", site, Ground(pos.x + front.x * 2.1f + right.x * s * 1.25f, pos.z + front.z * 2.1f + right.z * s * 1.25f), yaw, 1.3f);
+                site.gameObject.SetActive(true);
+                built.gameObject.SetActive(false);
+            }
         }
 
         // Tuned from preview captures of Kenney's stall models.
@@ -890,9 +1033,46 @@ namespace UntitledGame.EditorTools
                     break;
                 }
                 case "fish":
-                    for (int k = 0; k < 3; k++) Place("FoodKit/fish", parent, At(-0.62f + k * 0.36f) + front * 0.12f, yaw + 90f + k * 7f, 0.55f);
-                    Place("SurvivalKit/bucket", parent, At(0.7f), yaw, 1.4f);
+                {
+                    // 陈阿姨's sushi bar: a fish waiting on the board, a plate of sushi, and her scale.
+                    Place("FoodKit/fish", parent, At(-0.62f) + front * 0.12f, yaw + 90f, 0.55f);
+                    Material Mat(string name, string hex)
+                    {
+                        var m = new Material(ComfyAssets.PlainLitMat) { name = name };
+                        m.SetColor("_BaseColor", C(hex));
+                        m.SetFloat("_VertexColorWeight", 0f);
+                        string path = $"{ComfyAssets.MatFolder}/{name}.mat";
+                        AssetDatabase.DeleteAsset(path);
+                        AssetDatabase.CreateAsset(m, path);
+                        return m;
+                    }
+                    var rice = Mat("SushiRice", "#F4F1E8");
+                    var plate = Mat("SushiPlate", "#3B4A5C");
+                    var metal = Mat("ScaleMetal", "#B9C3C9");
+                    Material[] tops = { Mat("SushiSalmon", "#F08A5D"), Mat("SushiTuna", "#C8424A"), Mat("SushiEgg", "#F2C94C") };
+                    void Prim(PrimitiveType type, Vector3 pos, Vector3 scale, Material m, float turn = 0f)
+                    {
+                        var p = GameObject.CreatePrimitive(type);
+                        Object.DestroyImmediate(p.GetComponent<Collider>());
+                        p.transform.SetParent(parent, true);
+                        p.transform.position = pos;
+                        p.transform.rotation = Quaternion.Euler(0f, yaw + turn, 0f);
+                        p.transform.localScale = scale;
+                        p.GetComponent<Renderer>().sharedMaterial = m;
+                    }
+                    Vector3 platePos = At(-0.05f) + Vector3.up * 0.01f;
+                    Prim(PrimitiveType.Cylinder, platePos, new Vector3(0.42f, 0.012f, 0.42f), plate);
+                    for (int k = 0; k < 3; k++)
+                    {
+                        Vector3 piece = platePos + right * (-0.12f + k * 0.12f) + Vector3.up * 0.035f;
+                        Prim(PrimitiveType.Cube, piece, new Vector3(0.07f, 0.045f, 0.11f), rice, 90f);
+                        Prim(PrimitiveType.Cube, piece + Vector3.up * 0.03f, new Vector3(0.08f, 0.015f, 0.13f), tops[k], 90f);
+                    }
+                    Vector3 scalePos = At(0.6f);
+                    Prim(PrimitiveType.Cube, scalePos + Vector3.up * 0.04f, new Vector3(0.22f, 0.08f, 0.18f), metal);
+                    Prim(PrimitiveType.Cylinder, scalePos + Vector3.up * 0.1f, new Vector3(0.3f, 0.01f, 0.3f), metal);
                     break;
+                }
                 case "furniture":
                 {
                     PlaceItem("chair", parent, g(-1.7f, 1.9f), yaw + 200f);
@@ -937,6 +1117,12 @@ namespace UntitledGame.EditorTools
                     Place("PirateKit/barrel", parent, g(1.8f, 1.4f), yaw, 0.55f);
                     break;
                 }
+                case "crabber":
+                    // 海叔's catch on the counter, and a pot waiting to be mended.
+                    Place("CubePets/animal-crab", parent, At(-0.45f) + Vector3.up * 0.02f, yaw + 160f, 0.17f);
+                    Place("CubePets/animal-crab", parent, At(0.5f) + Vector3.up * 0.02f, yaw - 140f, 0.14f);
+                    Place("SurvivalKit/box-open", parent, g(1.8f, 1.2f), yaw + 15f, 0.8f);
+                    break;
                 case "school":
                 {
                     // A blackboard on two legs beside the counter, and a pile of books on it.
@@ -1041,6 +1227,7 @@ namespace UntitledGame.EditorTools
             if (WorldShape.DistanceToPath(x, z) < pathPad) return true;
             if (WorldShape.IsOnDock(x, z, 3f)) return true;
             if (WorldShape.InMarket(x, z, campPad + 1f)) return true;
+            if (WorldShape.InSeafront(x, z, campPad + 1f)) return true;
             if (Vector2.Distance(new Vector2(x, z), new Vector2(fire.x, fire.z)) < 3f) return true;
             return false;
         }

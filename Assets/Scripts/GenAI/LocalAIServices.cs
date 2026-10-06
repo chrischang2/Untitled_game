@@ -112,6 +112,9 @@ namespace UntitledGame.GenAI
             var args = new StringBuilder();
             args.Append($"-m \"{model}\" --host 127.0.0.1 --port {Config.llmPort} -c {Config.contextSize * slots} -np {slots} ");
             args.Append("--reasoning off --no-webui --jinja ");
+            if (!string.IsNullOrWhiteSpace(Config.flashAttention)) args.Append($"-fa {Config.flashAttention} ");
+            if (!string.IsNullOrWhiteSpace(Config.kvCacheType) && Config.kvCacheType != "f16")
+                args.Append($"-ctk {Config.kvCacheType} -ctv {Config.kvCacheType} ");
             if (Config.gpuLayers >= 0) args.Append($"-ngl {Config.gpuLayers} ");
             if (Config.llmThreads > 0) args.Append($"-t {Config.llmThreads} -tb {Config.llmThreads} ");
             if (!string.IsNullOrWhiteSpace(Config.extraLlmArgs)) args.Append(Config.extraLlmArgs).Append(' ');

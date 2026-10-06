@@ -100,22 +100,29 @@ namespace UntitledGame.Companion
         private static readonly string[] Goodbyes = { "再见", "拜拜", "走了", "下次见", "明天见" };
 
         /// <summary>
-        /// Is the customer asking about the shopkeeper themself? Returns "hobby", "like", "dislike", "hometown",
-        /// "family" or null. (你喜欢做什么 is a hobby question, 你喜欢什么 a "likes" one.)
+        /// Is the customer asking about the shopkeeper themself? Returns "hometown", "siblings", "hobby", "food", "family",
+        /// "birthday", "dream", "like", "dislike" or null. (你喜欢做什么 is a hobby question, 你喜欢吃什么 a food one,
+        /// 你喜欢什么 a "likes" one.)
         /// </summary>
         public static string FactQuestion(string text)
         {
             string s = Clean(text);
             if (s.Length < 3) return null;
-            bool asking = s.Contains("什么") || s.Contains("吗") || s.Contains("哪") || s.Contains("几") || s.Contains("谁") || s.Contains("怎么");
+            bool asking = s.Contains("什么") || s.Contains("吗") || s.Contains("哪") || s.Contains("几") || s.Contains("谁") || s.Contains("怎么") || s.Contains("有没有");
+            if (s.Contains("生日")) return "birthday";
+            if (s.Contains("喜欢吃") || s.Contains("爱吃") || s.Contains("最好吃") || (s.Contains("吃") && s.Contains("什么"))) return "food";
+            if (s.Contains("兄弟") || s.Contains("姐妹") ||
+                ((s.Contains("哥哥") || s.Contains("姐姐") || s.Contains("弟弟") || s.Contains("妹妹")) && asking)) return "siblings";
+            if (s.Contains("梦想") || (s.Contains("以后") && (s.Contains("做") || s.Contains("想") || s.Contains("希望"))) || s.Contains("希望什么")) return "dream";
             if (s.Contains("爱好") || (s.Contains("喜欢做") && s.Contains("什么")) || (s.Contains("周末") && s.Contains("做")) || s.Contains("有空")) return "hobby";
             if (s.Contains("不喜欢") && asking) return "dislike";
             if (s.Contains("讨厌")) return "dislike";
             if (s.Contains("喜欢") && s.Contains("什么")) return "like";
             if (s.Contains("哪里人") || s.Contains("哪儿人") || s.Contains("哪国人") || s.Contains("老家") ||
                 ((s.Contains("哪里") || s.Contains("哪儿")) && (s.Contains("来") || s.Contains("长大")))) return "hometown";
-            if ((s.Contains("家") && (s.Contains("几个人") || s.Contains("几口人") || s.Contains("家人") || s.Contains("家里"))) ||
-                s.Contains("孩子") && asking || s.Contains("结婚")) return "family";
+            if (s.Contains("结婚") || s.Contains("丈夫") || s.Contains("妻子") || s.Contains("家人") ||
+                (s.Contains("家") && (s.Contains("几个人") || s.Contains("几口人") || s.Contains("家里"))) ||
+                (s.Contains("孩子") && asking)) return "family";
             return null;
         }
 
@@ -128,6 +135,11 @@ namespace UntitledGame.Companion
             bool mentionsFish = s.Any(c => c == '鱼' || Syllable(c) == "yu");
             // "What do you sell?" / "What else is there?" / "Just looking" (unless an item is named).
             if (ContainsAny(s, BrowseWords) && FindItem(shop, s) == null) return new Result { intent = "browse" };
+
+            // At 海叔's, giving (or "selling") fish means putting them in the crab pots as bait.
+            if (shop.crabber && mentionsFish && !ContainsAny(s, Decline) && FindItem(shop, s) == null &&
+                (s.Contains("给") || s.Contains("放") || s.Contains("卖") || s.Contains("用") || s.Contains("饵") || s.Any(c => Syllable(c) == "mai")))
+                return new Result { intent = "sell_fish", fish = FindFish(s) };
 
             bool saysSell = s.Contains("卖") || (shop.buysFish && s.Any(c => Syllable(c) == "mai"));
             // At the fish market selling can only mean fish, even when the fish's name was misheard (蓝鳃鱼 -> 蓝晒油).
@@ -188,6 +200,45 @@ namespace UntitledGame.Companion
                         bestLen = n.Length;
                     }
                 }
+            }
+            if (best != null) return best;
+
+            // Nothing heard cleanly: allow one misheard syllable in a long name (力尿训练 -> 力量训练), if exactly one
+            // item fits best.
+            int bestScore = 0;
+            bool tie = false;
+            foreach (var id in shop.items)
+            {
+                var def = Catalog.Get(id);
+                if (def == null) continue;
+                var names = new List<string> { def.hanzi };
+                if (Aliases.TryGetValue(id, out var extra)) names.AddRange(extra);
+                int score = names.Max(n => FuzzyScore(s, n));
+                if (score > bestScore) { bestScore = score; best = def; tie = false; }
+                else if (score == bestScore && score > 0 && best != def) tie = true;
+            }
+            return tie ? null : best;
+        }
+
+        /// <summary>
+        /// For names of 4+ characters: the most characters matching (exactly or by sound) in any window with at most one
+        /// mismatch and at least half matching exactly; 0 if none.
+        /// </summary>
+        public static int FuzzyScore(string s, string name)
+        {
+            if (name.Length < 4) return 0;
+            int best = 0;
+            for (int i = 0; i + name.Length <= s.Length; i++)
+            {
+                int exact = 0, sound = 0, miss = 0;
+                for (int k = 0; k < name.Length && miss <= 1; k++)
+                {
+                    char a = s[i + k], b = name[k];
+                    if (a == b) exact++;
+                    else if (Syllable(a).Length > 0 && Syllable(a) == Syllable(b)) sound++;
+                    else miss++;
+                }
+                if (miss <= 1 && exact * 2 >= name.Length) best = System.Math.Max(best, exact * 2 + sound);
             }
             return best;
         }

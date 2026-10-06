@@ -46,7 +46,7 @@ namespace UntitledGame.UI
             _chinese = UIFactory.Text(panel.transform, "Chinese", "", 28, UITheme.TealDark, TextAlignmentOptions.TopLeft);
             _chinese.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(238, -76), new Vector2(390, 38));
             _details = UIFactory.Text(panel.transform, "Details", "", 25, UITheme.InkSoft, TextAlignmentOptions.TopLeft);
-            _details.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(238, -116), new Vector2(390, 36));
+            _details.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(238, -112), new Vector2(400, 44));
             _blurb = UIFactory.Text(panel.transform, "Blurb", "", 22, UITheme.Ink, TextAlignmentOptions.TopLeft);
             _blurb.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(238, -156), new Vector2(380, 80));
             _blurb.fontStyle = FontStyles.Italic;
@@ -62,25 +62,37 @@ namespace UntitledGame.UI
         {
             var s = r.species;
             _name.text = s.name;
+            int worth = Catalog.FishPrice(s, r.length) * (r.golden ? CatchJournal.GoldenValue : 1);
             _chinese.text = r.inBucket
-                ? $"Worth about ¥{Catalog.FishPrice(s, r.length)}  <size=22><color=#8A7563>· bucket {Inventory.BucketCount}/{Inventory.BucketCapacity}</color></size>"
+                ? $"Worth about ¥{worth}  <size=22><color=#8A7563>· bag {Inventory.SlotsUsed}/{Inventory.SlotCapacity} slots</color></size>"
                 : "<color=#E0604E>Bucket full: released</color>";
-            string size = s.IsFish ? $"{FishDatabase.WeightText(r.length)}{(r.perfect ? " · perfect" : "")} · " : "";
             var rc = FishDatabase.RarityColor(s.rarity);
-            _details.text = $"{size}<color=#{ColorUtility.ToHtmlStringRGB(rc)}>{FishDatabase.RarityLabel(s.rarity)}</color>";
+            string hex = ColorUtility.ToHtmlStringRGB(r.golden ? UITheme.Hex("#C9951E") : rc);
+            _name.text = $"<color=#{hex}>{(r.golden ? "Golden " : "")}{s.name}</color>";
+            string size = s.IsFish ? $"<size=34><b>{FishDatabase.WeightText(r.length)}</b></size>{(r.perfect ? "  perfect!" : "")}  " : "";
+            _details.text = $"{size}<color=#{ColorUtility.ToHtmlStringRGB(rc)}><b>{FishDatabase.RarityLabel(s.rarity)}</b></color>  <size=20>{s.hanzi} {s.pinyin}</size>";
             _blurb.text = s.blurb;
             _rarityStrip.color = rc;
-            _icon.color = s.IsFish ? s.body : UITheme.InkSoft;
-            bool badge = r.isNewSpecies || r.isRecord;
+            _icon.color = r.golden ? UITheme.Hex("#E8B83A") : s.IsFish ? s.body : UITheme.InkSoft;
+            bool badge = r.isNewSpecies || r.isRecord || r.golden || r.newMedal >= 2;
             _badgeRt.gameObject.SetActive(badge);
-            _badge.text = r.isNewSpecies ? "NEW!" : "RECORD!";
+            _badge.text = r.golden ? "GOLDEN!" : r.newMedal == 3 ? "GOLD!" : r.newMedal == 2 ? "SILVER!" : r.isNewSpecies ? "NEW!" : "RECORD!";
             _shownAt = Time.time;
             _visible = true;
         }
 
+        /// <summary>Gone at once (a new cast is starting and the card would cover the power bar).</summary>
+        public void HideNow()
+        {
+            _visible = false;
+            _group.alpha = 0f;
+        }
+
+        public bool Visible => _visible || _group.alpha > 0.01f;
+
         public void Update(bool landing)
         {
-            if (_visible && !landing && Time.time - _shownAt > 1.5f) _visible = false;
+            if (_visible && !landing && Time.time - _shownAt > 4f) _visible = false;
             if (_visible && Time.time - _shownAt > 8f) _visible = false;
             float target = _visible ? 1f : 0f;
             _group.alpha = Mathf.MoveTowards(_group.alpha, target, Time.deltaTime * 4f);
@@ -245,13 +257,10 @@ namespace UntitledGame.UI
         // Phrases for getting to know the shopkeepers (hanzi, English). Pinyin is added by the game.
         private static readonly (string section, (string zh, string en)[] phrases)[] Phrasebook =
         {
-            ("Ask about them (what they tell you goes on the People page)", new[]
+            ("Finding a good gift", new[]
             {
                 ("你喜欢什么？", "What do you like?"),
                 ("你不喜欢什么？", "What don't you like?"),
-                ("你是哪里人？", "Where are you from?"),
-                ("你的爱好是什么？", "What are your hobbies?"),
-                ("你家有几个人？", "How many people are in your family?"),
                 ("刘奶奶，老王喜欢什么？", "Granny Liu, what does Old Wang like? (she knows what everyone likes)"),
             }),
             ("Give a gift (one a day for each shopkeeper)", new[]
@@ -283,13 +292,21 @@ namespace UntitledGame.UI
             foreach (Transform c in _transcript) Object.Destroy(c.gameObject);
             _progress.text = "Phrasebook: making friends at the market";
             PhraseLine("<b>How friendship works</b>", 26);
-            PhraseLine("- Every sentence you say to a shopkeeper in Chinese earns friendship. Harder words (HSK 2-3) and longer sentences earn more " +
-                       $"(up to {Affinity.TalkCapPerDay} points a day for each shopkeeper; saying the same thing again earns nothing).\n" +
-                       "- When you arrive they ask you a question: answering it in Chinese earns extra.\n" +
-                       "- Talking about the things they love earns a bonus (see below).\n" +
-                       $"- Gifts: one they love <b>+{Affinity.GiftLiked}</b>, an ordinary one +{Affinity.GiftNeutral}, one they don't like {Affinity.GiftDisliked}. " +
-                       "Buy gifts at Granny Liu's 礼品店. To find out what someone likes, ask them, ask Granny Liu, or ask Mei.\n" +
-                       $"- Levels: {string.Join(" > ", Affinity.LevelHanzi.Select((h, i) => $"{h} ({Affinity.Thresholds[i]})"))}. Closer friends sell you better things and tell you more about themselves.");
+            PhraseLine("Every shopkeeper works the same way. To reach each friendship level you need three things:\n" +
+                       "- <b>Learn about them</b> by asking the questions below (one or two for each level). What they tell you goes on the People page.\n" +
+                       "- <b>Give them a gift</b> (one for each level; a gift they don't like doesn't count). Buy gifts at Granny Liu's 礼品店.\n" +
+                       "- <b>Pass the HSK test</b>: 朋友 needs HSK 1, 好朋友 HSK 2, 老朋友 HSK 3 (Teacher Gao's test centre).\n" +
+                       "Closer friends sell you better things. Each shop window shows what's left for the next level.");
+            PhraseLine("\n<b>The questions, level by level</b>  <size=18><color=#8A7563>(the same for everyone)</color></size>", 26);
+            for (int l = 1; l <= Affinity.MaxLevel; l++)
+            {
+                foreach (var f in Affinity.FactsFor[l])
+                {
+                    var (q, en) = Affinity.FactQuestions[f];
+                    string hsk = Affinity.HskNeeded(l) > 0 ? $", HSK {Affinity.HskNeeded(l)}" : "";
+                    PhraseLine($"<b>{q}</b>  <color=#2C7F79><i>{Pinyin.Of(q)}</i></color>\n<size=18><color=#8A7563>Ask about {en}  (for {Affinity.LevelHanzi[l]} {Affinity.LevelEnglish[l]}{hsk})</color></size>");
+                }
+            }
             foreach (var (section, phrases) in Phrasebook)
             {
                 PhraseLine($"\n<b>{section}</b>", 26);
@@ -311,9 +328,10 @@ namespace UntitledGame.UI
         {
             foreach (Transform c in _transcript) Object.Destroy(c.gameObject);
             var entries = ConversationLog.Entries;
-            _progress.text = entries.Count == 0 ? "Nothing said yet this session." : $"This session's conversations ({entries.Count} lines)";
-            foreach (var e in entries)
+            _progress.text = entries.Count == 0 ? "Nothing said yet this session." : $"This session's conversations ({entries.Count} lines, newest first)";
+            for (int i = entries.Count - 1; i >= 0; i--)
             {
+                var e = entries[i];
                 string who = e.fromPlayer ? "<color=#2C7F79><b>You</b></color>" : $"<color=#C9504A><b>{e.speaker}</b></color>";
                 string py = Pinyin.ContainsHanzi(e.text) && !e.fromPlayer ? $"\n<size=17><color=#2C7F79><i>{Pinyin.Annotate(e.text)}</i></color></size>" : "";
                 string line = $"{who}  {e.text}{py}";
@@ -348,12 +366,19 @@ namespace UntitledGame.UI
                 }
                 var sb = new System.Text.StringBuilder();
                 sb.Append($"<size=28><b>{shop.keeperName}</b></size> <color=#2C7F79><i>{Pinyin.Of(shop.keeperName)}</i></color>  ·  {shop.keeperEnglish}, {shop.english}\n");
-                sb.Append($"<color=#8A7563>Friendship:</color> {Affinity.LevelHanzi[level]} <color=#2C7F79><i>{Pinyin.Of(Affinity.LevelHanzi[level])}</i></color> ({level}/{Affinity.Thresholds.Length - 1})\n");
+                sb.Append($"<color=#8A7563>Friendship:</color> {Affinity.LevelHanzi[level]} <color=#2C7F79><i>{Pinyin.Of(Affinity.LevelHanzi[level])}</i></color> ({level}/{Affinity.MaxLevel})");
+                if (level < Affinity.MaxLevel)
+                {
+                    var left = Affinity.Requirements(shop.id, level + 1).Where(r => !r.done)
+                        .Select(r => r.kind == "fact" ? Affinity.FactQuestions[r.factId].question : r.text).ToList();
+                    sb.Append($"   <color=#8A7563>for {Affinity.LevelHanzi[level + 1]}: {(left.Count == 0 ? "all done" : string.Join(", ", left))}</color>");
+                }
+                sb.Append('\n');
                 sb.Append($"喜欢 <color=#2C7F79><i>xǐhuan</i></color>: {Words("like")}     不喜欢 <color=#2C7F79><i>bù xǐhuan</i></color>: {Words("dislike")}\n");
                 var facts = learned.Where(f => !f.id.StartsWith("like:") && !f.id.StartsWith("dislike:")).Select(f => "- " + f.english).ToList();
                 int unknown = all.Count - learned.Count;
                 if (facts.Count > 0) sb.Append(string.Join("\n", facts)).Append('\n');
-                if (unknown > 0) sb.Append($"<color=#8A7563><i>{unknown} more thing{(unknown == 1 ? "" : "s")} to find out. Ask them about themselves, or ask Mei.</i></color>");
+                if (unknown > 0) sb.Append($"<color=#8A7563><i>{unknown} more thing{(unknown == 1 ? "" : "s")} to find out: ask them (see the Phrasebook).</i></color>");
 
                 var card = UIFactory.Panel(_people, "Person_" + shop.id, UITheme.CreamDark.WithAlpha(0.6f), shadow: false, small: true);
                 var t = UIFactory.Text(card.transform, "Text", sb.ToString(), 21, UITheme.Ink, TextAlignmentOptions.TopLeft);
@@ -387,7 +412,7 @@ namespace UntitledGame.UI
                 RefreshPeople();
                 return;
             }
-            _progress.text = $"{CatchJournal.SpeciesDiscovered} / {FishDatabase.All.Count} discovered   ·   {CatchJournal.TotalCatches} total catches";
+            _progress.text = $"{CatchJournal.SpeciesDiscovered} / {FishDatabase.All.Count} discovered   ·   {CatchJournal.TotalCatches} catches   ·   medals: {CatchJournal.MedalCount(3)} gold, {CatchJournal.MedalCount(2)} silver+";
             foreach (var (s, icon, name, info, strip) in _cards)
             {
                 var rec = CatchJournal.Get(s.id);
@@ -407,9 +432,11 @@ namespace UntitledGame.UI
                     info.text = known ? $"Found {rec.count}x\n{s.blurb}" : "Washes about anywhere.";
                     continue;
                 }
-                string caught = known ? $"Caught {rec.count}x, heaviest {FishDatabase.WeightText(rec.bestLength)}" : $"<color=#{ColorUtility.ToHtmlStringRGB(FishDatabase.RarityColor(s.rarity))}>{FishDatabase.RarityLabel(s.rarity)}</color>, not caught yet";
+                string medal = known && rec.medal > 0 ? $" <color={(rec.medal == 3 ? "#C9951E" : rec.medal == 2 ? "#8C96A0" : "#A0673A")}><b>{CatchJournal.MedalNames[rec.medal]}</b></color>" : "";
+                string golden = known && rec.goldenCount > 0 ? $" <color=#C9951E>({rec.goldenCount} golden)</color>" : "";
+                string caught = known ? $"Caught {rec.count}x, heaviest {FishDatabase.WeightText(rec.bestLength)}{medal}{golden}" : $"<color=#{ColorUtility.ToHtmlStringRGB(FishDatabase.RarityColor(s.rarity))}>{FishDatabase.RarityLabel(s.rarity)}</color>, not caught yet";
                 info.text = $"{caught}\n{FishDatabase.WeightText(s.minWeight)}-{FishDatabase.WeightText(s.maxWeight)} · {FishDatabase.WhereText(s)} · {FishDatabase.WhenText(s)}\n" +
-                            $"Bait: {FishDatabase.BaitText(s)}\nLine: {FishDatabase.LineText(s)}";
+                            $"Likes: {FishDatabase.BaitText(s)}\nLine: {FishDatabase.LineText(s)}";
             }
         }
     }
@@ -552,7 +579,7 @@ namespace UntitledGame.UI
         }
     }
 
-    /// <summary>Scrollable transcript of every conversation (study material), with pinyin.</summary>
+    /// <summary>Scrollable transcript of every conversation (study material), with pinyin. Newest at the top.</summary>
     public class ChatPanel
     {
         private readonly RectTransform _root;
@@ -627,12 +654,13 @@ namespace UntitledGame.UI
                 string body = $"<b><color=#{color}>{e.speaker}</color></b>  {e.text}" + (py.Length > 0 ? $"\n<size=18><i><color=#6E8C88>{py}</color></i></size>" : "");
                 var line = UIFactory.Text(_content, "Line", body, 23, UITheme.Ink, TextAlignmentOptions.TopLeft);
                 line.textWrappingMode = TextWrappingModes.Normal;
+                line.transform.SetAsFirstSibling(); // newest first
                 added = true;
             }
             if (added)
             {
                 Canvas.ForceUpdateCanvases();
-                _scroll.verticalNormalizedPosition = 0f;
+                _scroll.verticalNormalizedPosition = 1f;
             }
         }
     }

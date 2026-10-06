@@ -6,7 +6,7 @@ namespace UntitledGame.Companion
     /// <summary>Something the player can learn about a shopkeeper (shown in the journal's People page).</summary>
     public class KeeperFact
     {
-        public string id;          // "hometown", "family", "hobby", "secret", "like:茶", "dislike:咖啡"
+        public string id;          // "hometown", "siblings", "hobby", "food", "family", "birthday", "dream", "like:茶", "dislike:咖啡"
         public string chinese;     // how the keeper says it (HSK 1-3 where possible)
         public string english;     // journal text (likes/dislikes are shown in Chinese + pinyin only)
         public int minLevel;       // friendship level needed before they'll share it
@@ -35,8 +35,8 @@ namespace UntitledGame.Companion
         public IEnumerable<KeeperFact> AllFacts()
         {
             foreach (var f in facts) yield return f;
-            foreach (var l in likes) yield return new KeeperFact { id = "like:" + l, chinese = $"我很喜欢{l}。", minLevel = 1 };
-            foreach (var d in dislikes) yield return new KeeperFact { id = "dislike:" + d, chinese = $"我不喜欢{d}。", minLevel = 1 };
+            foreach (var l in likes) yield return new KeeperFact { id = "like:" + l, chinese = $"我很喜欢{l}。", minLevel = 0 };
+            foreach (var d in dislikes) yield return new KeeperFact { id = "dislike:" + d, chinese = $"我不喜欢{d}。", minLevel = 0 };
         }
 
         public KeeperFact Fact(string id) => AllFacts().FirstOrDefault(f => f.id == id);
@@ -57,9 +57,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我老家在北方的一个小城市。", english = "Comes from a small city in the north.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢看比赛，也喜欢爬山。", english = "Loves watching sports matches and climbing hills.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我儿子在北京当医生。", english = "His son is a doctor in Beijing.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我一直想钓到一条很大的金枪鱼。", english = "His dream: to catch a giant bluefin tuna.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个弟弟，他也很喜欢钓鱼。", english = "Has a younger brother who also loves fishing.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢看比赛，也喜欢爬山。", english = "Loves watching sports matches and climbing hills.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我最喜欢吃鱼，当然！", english = "His favourite food is fish, of course.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我结婚了，我儿子在北京当医生。", english = "Married; his son is a doctor in Beijing.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是十月一号。", english = "Birthday: 1 October.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我一直想钓到一条非常大的鱼。", english = "His dream: to catch a really enormous fish.", minLevel = 3 },
                 },
                 topics = new[] { "天气", "船", "鱼", "钓鱼", "比赛", "爬山", "儿子", "北京", "下雨" },
                 questions = new[]
@@ -72,19 +75,22 @@ namespace UntitledGame.Companion
             new KeeperProfile
             {
                 shopId = "fish",
-                personality = "a warm, chatty auntie, about fifty-five, who loves cooking, fusses over everyone like family, " +
-                              "gives advice about food and health, and dances in the park every evening",
-                speakingStyle = "lots of 哎呀 and 啊; calls the customer 孩子 (child); asks if they have eaten",
+                personality = "a warm, chatty sushi chef, about fifty-five, who runs a little sushi bar, judges every fish by eye before it goes on her scale, " +
+                              "fusses over everyone like family, gives advice about food and health, and dances in the park every evening",
+                speakingStyle = "lots of 哎呀 and 啊; calls the customer 孩子 (child); asks if they have eaten; says which fish would make good sushi",
                 likes = new[] { "花", "葡萄" }, dislikes = new[] { "糖" },
                 likeReason = "花真漂亮，我要放在桌子上！", dislikeReason = "糖对身体不好，我不吃。",
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我一直住在柳湾。", english = "Has lived in Willow Bay all her life.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我每天晚上在公园跳舞。", english = "Dances in the park every evening.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我有一个女儿，她是小学老师。", english = "Has a daughter who teaches primary school.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我年轻的时候唱歌非常好听。", english = "She was a wonderful singer when she was young.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有两个姐姐，她们都住在城市里。", english = "Has two older sisters who live in the city.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我每天晚上在公园跳舞。", english = "Dances in the park every evening.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我最喜欢吃面条。", english = "Her favourite food is noodles.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我结婚了，有一个女儿，她是小学老师。", english = "Married, with a daughter who teaches primary school.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是五月八号。", english = "Birthday: 8 May.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我以后想开一个很大的饭馆，大家都来吃我做的鱼。", english = "Dreams of opening a big restaurant where everyone eats her fish.", minLevel = 3 },
                 },
-                topics = new[] { "做饭", "菜", "吃饭", "好吃", "女儿", "跳舞", "公园", "身体" },
+                topics = new[] { "做饭", "菜", "吃饭", "好吃", "女儿", "跳舞", "公园", "身体", "米饭", "鱼" },
                 questions = new[]
                 {
                     new[] { "你吃饭了吗？", "你喜欢吃鱼吗？" },
@@ -103,9 +109,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我从南方来，十年前搬到了柳湾。", english = "Came from the south and moved to Willow Bay ten years ago.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢一边听音乐一边画画。", english = "Likes painting while listening to music.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我和妻子住在海边，我们有一只猫。", english = "Lives by the sea with his wife and their cat.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我在给妻子做一把特别的椅子，别告诉她！", english = "He is secretly making a special chair for his wife.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我没有哥哥姐姐，也没有弟弟妹妹。", english = "An only child.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢一边听音乐一边画画。", english = "Likes painting while listening to music.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我喜欢吃米饭和鸡蛋，很简单。", english = "Likes simple food: rice and eggs.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我和妻子住在海边，我们有一只猫。", english = "Married; lives by the sea with his wife and their cat.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是三月十二号。", english = "Birthday: 12 March.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我在给妻子做一把特别的椅子，别告诉她！", english = "He is secretly making a special chair for his wife.", minLevel = 3 },
                 },
                 topics = new[] { "音乐", "画", "椅子", "桌子", "颜色", "妻子", "房间", "咖啡" },
                 questions = new[]
@@ -126,9 +135,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我是上海人，上大学的时候来到了柳湾。", english = "From Shanghai; came to Willow Bay for university.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢看电影和照相。", english = "Loves films and taking photos.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我有一个妹妹，她很喜欢狗。", english = "Has a little sister who loves dogs.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我以后想开一个很大的动物医院。", english = "Dreams of opening a big animal hospital one day.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个妹妹，她很喜欢狗。", english = "Has a little sister who loves dogs.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢看电影和照相。", english = "Loves films and taking photos.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我最喜欢吃蛋糕和西瓜！", english = "Loves cake and watermelon.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我还没结婚，现在我和我的猫住在一起。", english = "Not married; lives with her cats.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是七月七号。", english = "Birthday: 7 July.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我以后想开一个很大的动物医院。", english = "Dreams of opening a big animal hospital one day.", minLevel = 3 },
                 },
                 topics = new[] { "猫", "狗", "动物", "电影", "照片", "照相", "汤圆", "妹妹", "可爱" },
                 questions = new[]
@@ -149,9 +161,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我是北京人，在北京教了四十年书。", english = "From Beijing; taught there for forty years.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢看书，也喜欢下雨天在公园里走走。", english = "Loves reading and walking in the park on rainy days.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我丈夫也是老师，我们常常一起去旅游。", english = "Her husband is also a teacher; they often travel together.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我年轻的时候自己写过一本书。", english = "She once wrote a book herself when she was young.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个哥哥，他也是老师。", english = "Has an older brother who is also a teacher.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢看书，也喜欢下雨天在公园里走走。", english = "Loves reading and walking in the park on rainy days.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我喜欢喝茶，吃一点水果。", english = "Likes tea and a little fruit.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我丈夫也是老师，我们常常一起去旅游。", english = "Married; her husband is also a teacher and they often travel together.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是九月十号，那天是老师的节日。", english = "Birthday: 10 September, Teachers' Day.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我想再写一本书。", english = "Wants to write another book.", minLevel = 3 },
                 },
                 topics = new[] { "书", "看书", "历史", "故事", "旅游", "学习", "汉语", "北京", "老师" },
                 questions = new[]
@@ -172,9 +187,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我在山里长大，小时候每天跑步去上学。", english = "Grew up in the hills and ran to school every day as a child.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢跑步、游泳和踢足球。", english = "Loves running, swimming and football.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我有一个哥哥，他是游泳运动员。", english = "His older brother is a competitive swimmer.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "其实……我很害怕狗。", english = "He is actually scared of dogs.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个哥哥，他是游泳运动员。", english = "His older brother is a competitive swimmer.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢跑步、游泳和踢足球。", english = "Loves running, swimming and football.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我喜欢吃鸡蛋和香蕉，喝牛奶。", english = "Likes eggs, bananas and milk.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我还没结婚，我的女朋友也很喜欢运动。", english = "Not married; his girlfriend loves sport too.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是一月一号，新年！", english = "Birthday: 1 January, New Year's Day!", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我以后想去参加一个很大的比赛。", english = "Dreams of competing in a big competition.", minLevel = 3 },
                 },
                 topics = new[] { "跑步", "游泳", "运动", "身体", "健康", "足球", "锻炼", "睡觉", "哥哥" },
                 questions = new[]
@@ -195,9 +213,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我是南方人，我家在一个很大的城市。", english = "From a big city in the south.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢画画，也喜欢买新衣服。", english = "Loves painting and buying new clothes.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我爸爸妈妈都是老师，可是我想当画家。", english = "Both his parents are teachers, but he wants to be a painter.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "汤圆的小帽子是我自己做的！", english = "He made Tangyuan's little hats himself.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个姐姐，她也喜欢画画。", english = "Has an older sister who also loves painting.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢画画，也喜欢买新衣服。", english = "Loves painting and buying new clothes.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我喜欢吃甜的东西，比如蛋糕。", english = "Loves sweet things, like cake.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我还没结婚。我爸爸妈妈都是老师，可是我想画画。", english = "Not married; both his parents are teachers, but he wants to paint.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是四月二十号。", english = "Birthday: 20 April.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我以后想在北京开一个画画的店。", english = "Dreams of opening an art shop in Beijing.", minLevel = 3 },
                 },
                 topics = new[] { "颜色", "红色", "蓝色", "黄色", "白色", "衣服", "画画", "漂亮" },
                 questions = new[]
@@ -218,9 +239,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我一直住在柳湾，这里的人我都认识。", english = "Has lived in Willow Bay all her life and knows everybody.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢唱歌，常常唱老歌。", english = "Loves singing old songs.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我有三个孩子，还有很多孩子的孩子！", english = "Has three children and lots of grandchildren.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我和老王是小学同学。", english = "She and Old Wang went to primary school together.", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有很多弟弟妹妹，我是家里最大的。", english = "The eldest of many brothers and sisters.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢唱歌，常常唱老歌。", english = "Loves singing old songs.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我早上最喜欢吃面包。", english = "Loves bread for breakfast.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我有三个孩子，还有很多孩子的孩子！", english = "Has three children and lots of grandchildren.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是十二月二十五号。", english = "Birthday: 25 December.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我希望我的孩子们身体都很健康。", english = "Hopes all her children stay healthy.", minLevel = 3 },
                 },
                 topics = new[] { "唱歌", "孩子", "朋友", "礼物", "天气", "老王", "以前" },
                 questions = new[]
@@ -241,9 +265,12 @@ namespace UntitledGame.Companion
                 facts = new[]
                 {
                     new KeeperFact { id = "hometown", chinese = "我是北京人，说的是普通话。", english = "From Beijing; speaks standard Mandarin.", minLevel = 0 },
-                    new KeeperFact { id = "hobby", chinese = "我喜欢写字，也喜欢听音乐。", english = "Loves calligraphy and listening to music.", minLevel = 0 },
-                    new KeeperFact { id = "family", chinese = "我有一个儿子，他在国外学习。", english = "Has a son who studies abroad.", minLevel = 1 },
-                    new KeeperFact { id = "secret", chinese = "我年轻的时候，考试也常常考得不好！", english = "When she was young, she often failed her own exams!", minLevel = 3 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个妹妹，她是医生。", english = "Has a younger sister who is a doctor.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢写字，也喜欢听音乐。", english = "Loves calligraphy and listening to music.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我喜欢喝咖啡，吃面条。", english = "Likes coffee and noodles.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我结婚了，我有一个儿子，他在国外学习。", english = "Married; her son studies abroad.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是六月一号。", english = "Birthday: 1 June.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我希望我的学生都能通过考试！", english = "Hopes all her students pass their exams!", minLevel = 3 },
                 },
                 topics = new[] { "汉语", "学习", "考试", "老师", "学生", "写字", "作业", "普通话", "音乐" },
                 questions = new[]
@@ -251,6 +278,32 @@ namespace UntitledGame.Companion
                     new[] { "你会说汉语吗？", "你今天学习了吗？" },
                     new[] { "你每天学习几个小时？", "你觉得汉语难吗？" },
                     new[] { "你为什么想学汉语？", "你觉得学汉语最难的是什么？" },
+                },
+            },
+            new KeeperProfile
+            {
+                shopId = "crabber",
+                personality = "a sunburnt, easy-going crab fisherman, about sixty, who has lived on the beach all his life, gets up before the sun " +
+                              "to check his pots, loves the sea and simple food, tells terrible jokes, and is never in a hurry",
+                speakingStyle = "slow and relaxed; says 慢慢来 (take it easy) and 没事 a lot; laughs 嘿嘿; talks about the sea, the tide and crabs",
+                likes = new[] { "西瓜", "面包" }, dislikes = new[] { "伞" },
+                likeReason = "在海边吃西瓜，最舒服了！", dislikeReason = "我每天在海里，伞有什么用？嘿嘿。",
+                facts = new[]
+                {
+                    new KeeperFact { id = "hometown", chinese = "我在这个海边出生，一直住在这里。", english = "Born on this beach, and has lived here ever since.", minLevel = 0 },
+                    new KeeperFact { id = "siblings", chinese = "我有三个哥哥，他们都是渔民。", english = "Has three older brothers, all fishermen.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢早上看日出，晚上唱歌。", english = "Loves watching the sunrise and singing in the evening.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我最喜欢吃螃蟹，也喜欢米饭。", english = "His favourite food is crab (and rice).", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我没有结婚，我的狗就是我的家人。", english = "Not married; his dog is his family.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是七月七号。", english = "Birthday: 7 July.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我想有一条自己的大船，去很远的海。", english = "Dreams of his own big boat, to sail far out to sea.", minLevel = 3 },
+                },
+                topics = new[] { "螃蟹", "海", "大海", "船", "日出", "唱歌", "狗", "米饭", "早上" },
+                questions = new[]
+                {
+                    new[] { "你喜欢吃螃蟹吗？", "你今天早上几点起床？" },
+                    new[] { "你喜欢大海吗？", "你有没有狗？" },
+                    new[] { "你觉得住在海边好不好？为什么？", "如果你有一条船，你想去哪儿？" },
                 },
             },
         };

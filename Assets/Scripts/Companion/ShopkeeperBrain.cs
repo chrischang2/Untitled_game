@@ -27,6 +27,7 @@ namespace UntitledGame.Companion
             public int quantity = 1;
             public int price;
             public string fishId = "all";
+            public bool crabBait;      // 海叔: the fish go in the crab pots as bait (no money now, a bigger haul tomorrow)
             public string english;     // "Bamboo Rod - 120 yuan" for the UI card
         }
 
@@ -85,6 +86,21 @@ namespace UntitledGame.Companion
                 : "[Game: A customer walks up to your stall and wants to talk to you. Greet them with one short, simple sentence (e.g. 欢迎光临！).";
             if (Shop != null && Shop.school && !again)
                 greet = "[Game: A student walks up to your test centre. Greet them in one short sentence and tell them simply that here they can 上课, 练习 or 考试.";
+            if (Shop != null && Shop.buysFish && !again && DailyRequest.Active)
+                greet += $" Also tell them what fish you'd like today, saying exactly: {DailyRequest.Chinese}。";
+            if (Shop != null && Shop.crabber)
+            {
+                // Coming down to the beach is how you collect the crab money.
+                int paid = CrabPots.Claim();
+                if (paid > 0)
+                {
+                    AudioManager.Instance?.PlaySfx("SFX/rpg_handleCoins", 0.7f);
+                    GameEvents.Banner($"Crab pots: +¥{paid}", $"海叔 sold the crabs from your pots and hands you ¥{paid}.\n{CrabPots.Describe()}", true);
+                    TransactionDone?.Invoke(this, $"Crab pots: +¥{paid}", $"螃蟹卖了{Catalog.ChineseNumber(paid)}块");
+                    greet += $" You've sold the crabs from the customer's pots: hand them {Catalog.ChineseNumber(paid)}块 and say so simply (你的螃蟹卖了…块).";
+                }
+                else greet += " Their pots have nothing new yet (crabs come in every morning); say so simply.";
+            }
             if (!again || _pendingQuestion == null)
             {
                 // Each visit the keeper asks the player one question; harder ones as they become friends.
@@ -146,6 +162,8 @@ namespace UntitledGame.Companion
             base.OnEnable();
             All.Add(this);
         }
+
+        private void Start() => Environment.ShopSign.Create(this);
 
         protected override void OnDisable()
         {
@@ -209,7 +227,6 @@ namespace UntitledGame.Companion
                 return;
             }
             string question = _pendingQuestion;
-            int questionLevel = _pendingQuestionLevel;
             _pendingQuestion = null;
             _pendingQuestionLevel = 0;
             int levelBefore = Affinity.Level(shopId);
@@ -250,9 +267,9 @@ namespace UntitledGame.Companion
                 chat = true;
             }
 
-            // Friendship: every Chinese line counts; answering their question counts extra.
-            bool answered = question != null && (parsed == null || chat);
-            note = (note ?? "") + FriendshipFor(text, answered ? questionLevel : 0, levelBefore);
+            // Friendship goes up when the facts, the gift and the HSK test for the next level are all done.
+            int levelNow = Affinity.Level(shopId);
+            note = (note ?? "") + (levelNow > levelBefore ? LevelUpNote(levelNow) : "") + NewWordSurprise(text);
 
             if (note.Trim().Length == 0 || note.StartsWith("\n"))
             {
@@ -267,33 +284,45 @@ namespace UntitledGame.Companion
             "[Game: The customer is chatting with you, not buying. Reply naturally and in character in one or two short sentences " +
             "with simple HSK 1-3 words. You may ask a simple question back. Don't offer goods or name prices.]";
 
-        /// <summary>Scores the line for friendship; returns an extra note when the friendship level went up.</summary>
-        private string FriendshipFor(string text, int questionLevel, int levelBefore)
+        /// <summary>Chance that using a new word with a keeper earns a little unexpected present (at most once a day each).</summary>
+        public const float NewWordSurpriseChance = 0.15f;
+        public static bool ForceSurprise;
+
+        /// <summary>
+        /// Every HSK word the player uses with this keeper for the first time is noted; now and then they're so pleased
+        /// they hand over a small present. Never promised, so it stays a nice surprise.
+        /// </summary>
+        private string NewWordSurprise(string text)
         {
-            var score = Affinity.ScoreLine(shopId, text, questionLevel);
-            ChatAudit.Write(MemoryKey, $"friendship: +{score.points} ({score.why})");
-            if (score.points > 0)
-            {
-                Affinity.Add(shopId, score.points, "talk: " + score.why);
-                GameEvents.Toast($"{DisplayName} friendship +{score.points}  <size=18>({score.why})</size>", 2.2f);
-            }
-            int now = Affinity.Level(shopId);
-            return now > levelBefore ? LevelUpNote(now) : "";
+            var s = Affinity.State(shopId);
+            s.wordsHeard ??= new List<string>();
+            var fresh = HskVocab.Segment(Pinyin.ToSimplified(text)).Select(w => w.word).Where(w => w.Length > 1 || HskVocab.LevelOf(w) > 1)
+                .Distinct().Where(w => !s.wordsHeard.Contains(w)).ToList();
+            if (fresh.Count == 0) return "";
+            s.wordsHeard.AddRange(fresh);
+            if (s.surpriseDay == SaveSystem.Data.day || !(ForceSurprise || UnityEngine.Random.value < NewWordSurpriseChance)) return "";
+            s.surpriseDay = SaveSystem.Data.day;
+            string word = fresh.OrderByDescending(HskVocab.LevelOf).First();
+            string present = Surprise.Give(DisplayNameEnglish, 1);
+            GameEvents.Toast($"{DisplayName} liked hearing you say 「{word}」 {Pinyin.Of(word)} and gives you a little something: {present}.", 4.5f);
+            ChatAudit.Write(MemoryKey, $"surprise for using the new word {word}: {present}");
+            return $"\n[Game: You're pleased the customer used the word 「{word}」 so well. Hand them a small present as a surprise (这个送给你！).]";
         }
 
+        /// <summary>The keeper's line when the friendship goes up (the banner is shown by the UI).</summary>
         private string LevelUpNote(int level)
         {
             string unlock = Shop.items.Select(Catalog.Get).Any(i => i != null && i.minAffinity == level) ? " Now there are new things you'll sell them." : "";
-            GameEvents.Toast($"You and {DisplayName} ({DisplayNameEnglish}) are now {Affinity.LevelLabel(level)}!{unlock}", 5f);
-            var p = Profile;
-            var fact = p?.AllFacts().FirstOrDefault(f => f.minLevel <= level && !Affinity.Knows(shopId, f.id) && !f.id.StartsWith("dislike:"));
-            string share = "";
-            if (fact != null)
-            {
-                Affinity.Learn(shopId, fact.id, "friendship level " + level);
-                share = $" Also share something personal, keeping it this simple: {fact.chinese}";
-            }
-            return $"\n[Game: You feel closer to this customer now ({Affinity.LevelHanzi[level]}). Say warmly that you're happy to be friends.{unlock}{share}]";
+            return $"\n[Game: You feel closer to this customer now ({Affinity.LevelHanzi[level]}). Say warmly that you're happy to be friends.{unlock}]";
+        }
+
+        /// <summary>A short note of what's left for the next friendship level (toasts after learning something or a gift).</summary>
+        private string NextStepText()
+        {
+            int next = Affinity.Level(shopId) + 1;
+            if (next > Affinity.MaxLevel) return "";
+            var left = Affinity.Requirements(shopId, next).Where(r => !r.done).Select(r => r.kind == "fact" ? Affinity.FactQuestions[r.factId].question : r.text).ToList();
+            return left.Count == 0 ? "" : $"  <size=18>(for {Affinity.LevelHanzi[next]}: {string.Join(", ", left)})</size>";
         }
 
         /// <summary>"送你…" / "这是给你的礼物": takes the gift from the bag and reacts. Null when it isn't about a gift.</summary>
@@ -319,18 +348,17 @@ namespace UntitledGame.Companion
                 return $"[Game: The customer wants to give you {gift.hanzi}, but they already gave you a gift today. Thank them and kindly say one gift a day is more than enough.]";
             }
             Inventory.Remove(gift.id, 1);
-            Affinity.MarkGift(shopId);
             var p = Profile;
             bool liked = p != null && p.likes.Contains(gift.hanzi);
             bool disliked = p != null && p.dislikes.Contains(gift.hanzi);
-            int pts = liked ? Affinity.GiftLiked : disliked ? Affinity.GiftDisliked : Affinity.GiftNeutral;
-            Affinity.Add(shopId, pts, $"gift {gift.english} ({(liked ? "liked" : disliked ? "disliked" : "neutral")})");
+            bool counted = Affinity.RecordGift(shopId, disliked);
             if (liked) Affinity.Learn(shopId, "like:" + gift.hanzi, "gift reaction");
             if (disliked) Affinity.Learn(shopId, "dislike:" + gift.hanzi, "gift reaction");
             ConversationLog.Add("You", $"(gives {DisplayName} {gift.hanzi})", true);
             // Likes and dislikes stay in Chinese (the journal shows 喜欢 / 不喜欢 with pinyin; ask Mei what they mean).
             string named = $"{gift.hanzi} {Pinyin.Of(gift.hanzi)}";
-            GameEvents.Toast(liked ? $"{DisplayName} 喜欢 {named}! Friendship +{pts}" : disliked ? $"{DisplayName} 不喜欢 {named}... Friendship {pts}" : $"{DisplayName} thanks you for the gift. Friendship +{pts}", 4f);
+            string counts = counted ? " The gift counts toward your friendship." : disliked ? " A gift they don't like doesn't count." : " (You've already given a gift for this level.)";
+            GameEvents.Toast((liked ? $"{DisplayName} 喜欢 {named}!" : disliked ? $"{DisplayName} 不喜欢 {named}..." : $"{DisplayName} thanks you for the gift.") + counts + NextStepText(), 5f);
             if (liked) return $"[Game: The customer gives you {gift.hanzi} as a gift. You LOVE it! Thank them happily and say why: {p.likeReason}]";
             if (disliked) return $"[Game: The customer gives you {gift.hanzi} as a gift, but you really don't like it. Thank them politely but honestly say you don't like it: {p.dislikeReason}]";
             return $"[Game: The customer gives you {gift.hanzi} as a gift. Thank them politely; it's nice, though not your favourite.]";
@@ -367,7 +395,17 @@ namespace UntitledGame.Companion
                     fact = p.dislikes.Select(d => p.Fact("dislike:" + d)).FirstOrDefault(f => !Affinity.Knows(shopId, f.id)) ?? p.Fact("dislike:" + p.dislikes[0]);
                     break;
                 default:
-                    topic = kind == "hometown" ? "where you are from" : kind == "family" ? "your family" : "your hobbies";
+                    topic = kind switch
+                    {
+                        "hometown" => "where you are from",
+                        "siblings" => "whether you have brothers and sisters",
+                        "hobby" => "your hobbies",
+                        "food" => "what food you like",
+                        "family" => "whether you're married and have children",
+                        "birthday" => "your birthday",
+                        "dream" => "what you hope to do in the future",
+                        _ => "yourself",
+                    };
                     fact = p.Fact(kind);
                     break;
             }
@@ -375,10 +413,11 @@ namespace UntitledGame.Companion
             if (fact.minLevel > lvl)
             {
                 ChatAudit.Write(MemoryKey, $"won't share {fact.id} yet (needs friendship {fact.minLevel})");
+                GameEvents.Toast($"{DisplayName} will tell you that once you're {Affinity.LevelHanzi[fact.minLevel]} ({Affinity.LevelEnglish[fact.minLevel]}).{NextStepText()}", 4.5f);
                 return $"[Game: The customer asks about {topic}. You have only just met, so smile and say you'll tell them when you know each other a little better.]";
             }
             if (Affinity.Learn(shopId, fact.id, "asked"))
-                GameEvents.Toast($"Journal: you learned something about {DisplayName} (J, People page).", 3f);
+                GameEvents.Toast($"Journal: you learned something about {DisplayName} (J, People page).{NextStepText()}", 4.5f);
             return $"[Game: The customer asks about {topic}. Tell them in one or two short sentences, keeping it this simple: {fact.chinese}]";
         }
 
@@ -438,9 +477,12 @@ namespace UntitledGame.Companion
             var shop = Shop;
             if (shop.school)
                 return "[Game: The student asks what you do here. Tell them simply: they can say 我想上课 for a lesson, 我想练习 to practise, or 我想考试 to take the HSK test.]";
+            if (shop.crabber)
+                return "[Game: The customer asks what you do. Say simply: you look after their crab pots (螃蟹笼) in the sea; every morning the crabs come in and " +
+                       "you sell them, and they come here to get the money. You also sell pot upgrades, and if they give you fish (给你鱼), you put them in the pots and there are more crabs tomorrow.]";
             if (shop.buysFish)
             {
-                string cards = Hsk.FishBonus > 0 ? $" Also say that because they passed 汉语水平考试{Catalog.ChineseNumber(Hsk.Level)}级 you pay them more for every fish." : "";
+                string cards = " Also say that everything goes on your scale, and the more they bring at once, the more you pay for each fish.";
                 return Inventory.BucketCount > 0
                     ? $"[Game: The customer asks what you buy. Say you buy all kinds of fish from the sea, and bigger (heavier) or rarer fish pay more. They have {Inventory.DescribeBucketChinese()} in their bucket.{cards}]"
                     : $"[Game: The customer asks what you buy. Say you buy all kinds of fish from the sea, and bigger (heavier) or rarer fish pay more. Their bucket is empty.{cards}]";
@@ -505,14 +547,16 @@ namespace UntitledGame.Companion
                     }
                     if (item.category == ItemCategory.Upgrade)
                     {
-                        // One level at a time; friends are trained to higher levels.
+                        // One level at a time; each tier of five levels needs its HSK test.
                         qty = 1;
-                        int lvl = PlayerStats.Level(item.stat);
-                        if (lvl >= PlayerStats.TrainingCap(friendship) && lvl < PlayerStats.MaxLevel)
+                        if (PlayerStats.Level(item.stat) < PlayerStats.MaxLevel && !PlayerStats.CanTrainNext(item.stat))
                         {
                             SetOffer(null);
-                            return $"[Game: The customer wants more {item.hanzi}, but you only train people harder once you know them better. " +
-                                   "Say so in an encouraging way: come and chat more first!]";
+                            int need = PlayerStats.HskNeededForNext(item.stat);
+                            ChatAudit.Write(MemoryKey, $"won't train {item.stat} past {PlayerStats.Level(item.stat)}: needs HSK {need}");
+                            GameEvents.Toast($"The next {PlayerStats.StatName(item.stat).ToLower()} training needs the HSK {need} test (Teacher Gao at the test centre).", 4.5f);
+                            return $"[Game: The customer wants more {item.hanzi}, but they've done every level you teach at their stage. The next stage is for people who have passed " +
+                                   $"汉语水平考试{Catalog.ChineseNumber(need)}级 (HSK {need}). Say so in an encouraging way (加油！).]";
                         }
                     }
                     Inventory.CanBuy(item.id, qty, out var reason, out int cost);
@@ -541,10 +585,30 @@ namespace UntitledGame.Companion
                     }
                     return "";
                 }
+                case "sell_fish" when shop.crabber:
+                {
+                    if (Inventory.BucketCount == 0)
+                    {
+                        SetOffer(null);
+                        return "[Game: The customer wants to give you fish for the crab pots, but their bucket is empty. Tell them kindly to come back after fishing.]";
+                    }
+                    var species = FishDatabase.Get(r.fish);
+                    var fish = FishSale.Selection(species != null && Inventory.Bucket.Any(b => b.species.id == species.id) ? species.id : "all");
+                    int extra = Mathf.FloorToInt(CrabPots.BaitValue(fish));
+                    if (extra <= 0)
+                    {
+                        SetOffer(null);
+                        return "[Game: The customer wants to give you fish for the crab pots, but the pots already have all the bait they can use today. Thank them and say: tomorrow.]";
+                    }
+                    SetOffer(new Offer { selling = true, crabBait = true, fishId = fish.Count == Inventory.BucketCount ? "all" : fish[0].speciesId, price = extra,
+                        english = $"Put {fish.Count} fish in the crab pots — +¥{extra} tomorrow" });
+                    return $"[Game: The customer offers you {fish.Count}条鱼 as bait for their crab pots. With them, tomorrow's crabs will be worth about {Catalog.ChineseNumber(extra)}块 more. " +
+                           "Say that simply and ask if they want to put them in (要放吗？).]";
+                }
                 case "sell_fish":
                 {
                     if (!shop.buysFish)
-                        return "[Game: The customer wants to sell fish. You don't buy fish here; tell them to go to 陈阿姨's 鱼店 nearby.]";
+                        return "[Game: The customer wants to sell fish. You don't buy fish here; tell them to go to 陈阿姨's 寿司店 (sushi bar) nearby.]";
                     if (Inventory.BucketCount == 0)
                     {
                         SetOffer(null);
@@ -552,16 +616,18 @@ namespace UntitledGame.Companion
                     }
                     var species = FishDatabase.Get(r.fish);
                     bool some = species != null && Inventory.Bucket.Any(b => b.species.id == species.id);
-                    int value = some
-                        ? Inventory.Bucket.Where(b => b.species.id == species.id).Sum(b => Catalog.FishPrice(b.species, b.length))
-                        : Inventory.BucketValue;
                     string desc = some
                         ? $"{Inventory.Bucket.Count(b => b.species.id == species.id)}条{species.hanzi}"
                         : Inventory.DescribeBucketChinese();
                     int count = some ? Inventory.Bucket.Count(b => b.species.id == species.id) : Inventory.BucketCount;
-                    value = Mathf.RoundToInt(value * (1f + 0.05f * Affinity.Level(shopId))); // friends get a better price
-                    SetOffer(new Offer { selling = true, fishId = some ? species.id : "all", price = value, english = $"Sell {count} catch{(count == 1 ? "" : "es")} — +¥{value}" });
-                    return $"[Game: The customer wants to sell {desc}. You offer {Catalog.ChineseNumber(value)}块 in total. Say what you see, the total, and ask if that's OK (可以吗？).]";
+                    // Everything goes on her scale: the more weight, the bigger the multiplier (and friends get 5% a level).
+                    var quote = FishSale.For(FishSale.Selection(some ? species.id : "all"), Affinity.Level(shopId));
+                    int value = quote.total;
+                    SetOffer(new Offer { selling = true, fishId = some ? species.id : "all", price = value,
+                        english = $"Sell {count} catch{(count == 1 ? "" : "es")} ({quote.fills} bar{(quote.fills == 1 ? "" : "s")}, x{quote.multiplier:0.00}) — +¥{value}" });
+                    string scale = quote.fills > 0 ? $" Together they fill your scale's bar {quote.fills} time{(quote.fills == 1 ? "" : "s")}, so you add a bonus (x{quote.multiplier:0.00})." : "";
+                    return $"[Game: The customer wants to sell {desc}. You put them on your scale.{scale} You offer {Catalog.ChineseNumber(value)}块 in total. " +
+                           "Say what you see (you're a sushi chef: say what you'd make with them), the total, and ask if that's OK (可以吗？).]";
                 }
                 case "confirm":
                     return PendingOffer != null ? Execute() : "";
@@ -590,20 +656,42 @@ namespace UntitledGame.Companion
             var o = PendingOffer;
             SetOffer(null, "accepted");
             if (o == null) return "";
+            if (o.selling && o.crabBait)
+            {
+                var fish = FishSale.Selection(o.fishId);
+                float extra = CrabPots.AddBait(fish);
+                string en = $"Put {fish.Count} fish in the crab pots (+¥{extra:0} tomorrow)";
+                ChatAudit.Write(MemoryKey, en);
+                AudioManager.Instance?.PlaySfx("SFX/water_small", 0.6f);
+                GameEvents.Toast($"{en}. Collect it from 海叔 tomorrow.", 4f);
+                TransactionDone?.Invoke(this, en, $"把{Catalog.ChineseNumber(fish.Count)}条鱼放进了螃蟹笼");
+                return $"[Game: Done: you put the customer's {fish.Count}条鱼 in their crab pots. Tell them there will be more crabs tomorrow (明天螃蟹更多！).]";
+            }
             if (o.selling)
             {
+                bool fulfils = DailyRequest.CanFulfil && (o.fishId == "all" || o.fishId == DailyRequest.Fish.id);
+                var quote = FishSale.For(FishSale.Selection(o.fishId), Affinity.Level(shopId));
+                o.price = Mathf.Max(o.price, quote.total);
                 var (count, money) = o.fishId == "all"
                     ? (Inventory.BucketCount, Inventory.SellAllFish())
                     : Inventory.SellSpecies(o.fishId);
                 if (o.price > money)
                 {
-                    Inventory.Earn(o.price - money); // the friendship bonus on the offer
+                    Inventory.Earn(o.price - money); // the scale's multiplier and the friendship bonus
                     money = o.price;
                 }
+                FishSale.Announce(quote);
                 string en = $"Sold {count} catch{(count == 1 ? "" : "es")} (+¥{money})";
                 AudioManager.Instance?.PlaySfx("SFX/rpg_handleCoins", 0.7f);
                 ChatAudit.Write(MemoryKey, $"SALE {en}; player now has ¥{Inventory.Money}");
                 TransactionDone?.Invoke(this, en, $"卖了{Catalog.ChineseNumber(count)}条鱼，得到{Catalog.ChineseNumber(money)}块");
+                if (fulfils)
+                {
+                    string surprise = DailyRequest.Fulfil();
+                    GameEvents.Banner("Just what Auntie Chen wanted!", $"She was hoping for {DailyRequest.Count} {DailyRequest.Fish.name.ToLower()} today, and gives you a little surprise: {surprise}.", true);
+                    return $"[Game: Deal done! You paid the customer {Catalog.ChineseNumber(money)}块 for their fish, and it included the {DailyRequest.Fish.hanzi} you wanted today! " +
+                           "You're delighted: thank them warmly and give them a little present to say thanks (这是给你的小礼物！).]";
+                }
                 return $"[Game: Deal done! You paid the customer {Catalog.ChineseNumber(money)}块 for their fish. Hand over the money and thank them.]";
             }
             var item = Catalog.Get(o.itemId);

@@ -19,17 +19,28 @@ Everything runs locally on your PC:
 ## The market (southeast of the cabin)
 | Stall | Keeper | Sells / buys |
 |---|---|---|
-| 渔具店 Tackle shop | 老王 Old Wang | **baits** (worms, dough, shrimp, squid, crabs, live baitfish, glow lure: each fish only bites on certain ones), **lines** (红/蓝/黑/金线: 6/15/40/80 kg, for heavier fish), his rowboat, a big bucket, a fancy float |
-| 鱼店 Fish market | 陈阿姨 Auntie Chen | **buys your fish**. Rarer and bigger fish pay more, and passing HSK tests adds +10% / +20% / +35% automatically |
+| 渔具店 Tackle shop | 老王 Old Wang | **baits** (worms, dough, shrimp, squid, crabs, live baitfish, glow lure: any bait works, but each fish bites far more often on the ones it likes), **lines** (红/蓝/黑/金线: 6/15/40/80 kg, for heavier fish), his rowboat, a big bucket, a fancy float |
+| 寿司店 Sushi bar | 陈阿姨 Auntie Chen | a sushi chef who **buys your fish** and weighs every sale on her scale (see below) |
 | 家具店 Furniture shop | 李师傅 Master Li | chairs, tables, a sofa, lamps, plants, a rug, a bookcase, a radio, a teddy bear… for your camp |
 | 宠物店 Pet shop | 小林 Xiao Lin | cat food, dried-fish treats, a bowl, a bed, a box, yarn, a scratching post, a bell collar for Tangyuan |
 | 书店 Bookshop | 周老师 Teacher Zhou | fishing books. **Reading one (bag → Read) teaches you new fish**: how far out they swim, what bait they like, what line they need. A new game only knows the sardine |
 | 颜色店 Colour shop | 小方 Xiao Fang | cosmetics: boat paint, hats for Tangyuan, sun hats for Mei, roof colours for the house |
 | 礼品店 Gift shop | 刘奶奶 Granny Liu | gifts for the shopkeepers (flowers, tea, coffee, cake, fruit, sweets, a hat, an umbrella, a watch...). She knows what everyone likes, if you ask her |
-| 健身房 Fitness trainer | 武教练 Coach Wu | six trainings, five levels each: 力量 (cast further), 眼睛 (wider green bar), 跑步 (fish escape slower), 运气 (bonus fish), 技术 (heavier fish), 安静 (faster bites). Friends can train higher |
+| 健身房 Fitness trainer | 武教练 Coach Wu | six trainings, 20 levels each in four tiers of five: 力量 (calmer fish), 眼睛 (wider green bar: each tier's five levels double it for that tier's fish), 跑步 (faster catch, slower escapes), 运气 (bonus and golden fish), 技术 (heavier fish), 安静 (faster bites). Levels cost ¥10, 20, 40, 70, 100 in the first tier and ten times as much each tier after; tier 2, 3 and 4 open with the HSK 1, 2 and 3 tests |
 | 考试中心 Test centre | 高老师 Teacher Gao | **lessons, free practice and HSK 1–3 tests** (see below). Nothing for sale |
 
 **Unlocking goods takes two things:** enough friendship with the seller, and (for the better goods) a passed HSK test. The shop window shows what each locked item needs.
+
+**Friendship works the same way with every shopkeeper**, so you practise the same questions with each of them. Each level needs you to learn something about them (by asking), give them one gift (not one they dislike), and pass an HSK test:
+
+| Level | Ask | Gift | HSK |
+|---|---|---|---|
+| 认识 acquaintance | 你是哪里人？ (where they're from) | 1 | - |
+| 朋友 friend | 你有哥哥姐姐吗？ (brothers and sisters), 你的爱好是什么？ (hobby) | 1 | HSK 1 |
+| 好朋友 good friend | 你喜欢吃什么？ (favourite food), 你结婚了吗？ (married? children?) | 1 | HSK 2 |
+| 老朋友 old friend | 你的生日是几月几号？ (birthday), 你以后想做什么？ (dream) | 1 | HSK 3 |
+
+A shopkeeper only answers a level's questions once you've reached the level before it. The shop window shows a checklist for the next level, with each question in Chinese and pinyin. Mei won't tell you the answers: she'll help you ask.
 
 How shopping works:
 1. Walk up to a stall, face the keeper and press **E**. They greet you and the **shop window** opens on the right with everything they sell (or, at the fish market, your catch). Hold **V** and say something like 老板，我想买竹鱼竿 or 阿姨，我想卖鱼, **Everything with shopkeepers is spoken**: the shop window only lists the wares (and your friendship); there are no buy buttons, and typing (T) only goes to Mei.
@@ -45,13 +56,13 @@ The keepers can't invent prices or give things away: the game decides, and they 
 
 ## Lessons and HSK tests (高老师's test centre)
 Everything is spoken. Press **E** at the test centre and say:
-- **我想上课**: the next lesson. You repeat each of its words after her (the window shows the characters, pinyin and English), then she quizzes you on 8 of them from English. Get 6 right to pass. **Passing a lesson the first time pays** ¥40 (HSK 1), ¥60 (HSK 2) or ¥70 (HSK 3). Say 第三课 to pick a lesson.
-- **我想练习**: free practice with 10 random words, including ones you got wrong before. It never pays.
+- **我想上课**: the next lesson. You repeat each of its words after her (the window shows the characters, pinyin and English), then she quizzes you on 8 of them from English. **She doesn't move on until you get each word right**; say 跳过 or "skip" if you just can't. In the quiz, confirm what was heard with **Y** (or **N** to say it again). Get 6 quiz words right without skipping to pass. There's no fixed pay: Teacher Gao praises the words you got right first time, and sometimes has a little present for you. Say 第三课 to pick a lesson.
+- **我想练习**: practice that picks the words you need most. Every HSK word has a mastery level (0-5, spaced repetition). Practice brings back words that are due or weak, plus a few easy wins. A word counts as *known* at level 3. Using words in conversation, with Mei or the shopkeepers, also counts. The test centre window shows how many words you know at each level and in each lesson.
 - **我想考试**: the next HSK test. She asks 20 words from English, and you need 15. Take it as often as you like. After each answer the window shows what it heard (with pinyin): press **Y** if that's what you said, or **N** (or just say it again) to retry.
 
 When a lesson or test ends, a big banner says whether you passed, and Teacher Gao's window keeps the result with the words you missed.
 
-In a lesson, 不知道 skips a word, 不学了 stops, and walking away ends it.
+In a lesson, 跳过 / 不知道 / "skip" skips a word, 不学了 stops, and walking away ends it.
 
 | Level | Lessons | Words | Passing the test unlocks |
 |---|---|---|---|
@@ -100,11 +111,44 @@ The lessons of each level cover every word of it once. HSK 1's are grouped by th
 | **Esc** | menu: volumes, voices, **what Mei sounds like**, talking speed, **Mei's English**, **pinyin**, hands-free talking, day length, **Saves & logs** |
 | **F5** | quick save |
 
-**Energy and days.** Fishing uses energy: 10 per cast, and reeling drains more (heavy fish drain it fast). Sleep in your bed at any time to wake at 6am refreshed. At 2am or at zero energy you pass out: you keep only your 3 most valuable bag slots and wake at 10am at home. Better beds (Master Li) and furniture (comfort) give more energy. The waking day lasts 40 real minutes by default (Esc → Day length).
+**Energy and days.** Fishing uses energy: 10 per cast that lands in the water, and reeling drains more (heavy fish drain it fast). Sleep in your bed at any time to wake at 6am refreshed. At 2am or at zero energy you pass out: you keep only your 3 most valuable bag slots and wake at 10am at home. Better beds (Master Li) and furniture (comfort) give more energy; each kind of furniture counts once. The waking day lasts 40 real minutes by default (Esc → Day length).
 
 **The bag holds only fish** (each kind stacks in one slot). Everything else (bait, gifts, books, furniture, cards) is a key item and never takes space. You start with 4 slots; Old Wang's buckets give 8, 12 and 16. Only fish bite: there's no junk to fish up.
 
-**The journal (J)** has four tabs: the fish you've caught, the people you've met (喜欢 / 不喜欢 in Chinese with pinyin only: ask Mei what they mean), a **phrasebook** (how friendship works, phrases for asking about people and giving gifts, and each shopkeeper's favourite topics), and a **transcript** of everything said with Mei and the shopkeepers. The transcript starts fresh each time you open the game.
+**Selling fish: Auntie Chen's scale.** Everything you sell at once goes on her scale, and each fish fills its bar by rarity and size, not weight. The biggest common fish counts about the same as an average fish one rarity up. The first bar takes 4 common fish at 80% size, the second 8 uncommon ones, then 16 rare, 32 legendary, and so on. Every bar filled raises the price multiplier by 10%, plus 2% for every lesson you've passed and 15% for every HSK test. So 12 good sea bass with 3 lessons and HSK 1 fill 2 bars at +31% each, ×1.62. The bar fills gradually with a tone that rises in pitch, and chimes at each fill. Friendship still adds 5% per level.
+
+**Fish tiers and prices.** Each fish has a tier: the HSK level of the book that teaches it (the starter fish and the first two books are tier 0). A tier's commonest fish sells for about ¥10 and its rarest for about ¥40, times 10 for each tier, more for bigger ones.
+
+**Reeling.** Every fish has a power: its tier, plus up to 1 for the rarest of its tier. Your eye (眼睛), stamina (跑步) and strength (力量) training each give power. The gap between them sets the green bar's size, how fast the meter fills and drains, and how wildly the fish moves. With every training level of your tier, its common fish are trivial and its rarest are a fair fight (about 75% caught). The next tier's fish nearly always get away until you pass the HSK test and train further. Each way of swimming (darting, sinking, smooth...) is calibrated to feel equally hard at the same gap. Every fight is logged in chat.log (FISHING lines) for tuning. You start knowing four fish: sardine, goby, horse mackerel and mullet. All can be caught from the dock with the starter line. The catch card shows the weight in large type and the name in its rarity colour.
+
+**Crab pots (海叔, Uncle Hai).** Down the beach past the market, 海叔 keeps your crab pots: passive income.
+- **Collecting:** every morning the pots bring in crabs. Go down and talk to him to collect the money. Uncollected crabs only keep for 1 day, or longer with the cooler.
+- **Fish as bait:** say 给你鱼 to give him fish. They go in the pots, and the next day's haul grows by about 1.2-2× what Auntie Chen would pay for them, up to a daily cap.
+- **Seven upgrades:** more pots, bigger pots, lures (how full they get), deep-water ropes (what a crab is worth), fish-bait know-how, cooler, market helper.
+  - 20 levels each, five per HSK tier, priced like Coach Wu's training.
+  - With every upgrade of a tier, a day's crabs are worth about one biggest-size rarest fish of that tier: ¥72, ¥720, ¥7,200, ¥72,000. A new game earns about ¥1.5 a day.
+
+**Games stalls.** Along the beach path, three stalls are building sites (施工中) until their HSK test: 投壶 pitch-pot (HSK 1), 毽子 jianzi (HSK 2) and 麻将 mahjong (HSK 3).
+
+**投壶 Pitch-pot** (playable once HSK 1 is passed). Press F at the stall to step up to the line, 3.4 m from a bronze pot. You get eight arrows.
+- **Aim:** each arrow starts a little off line (a breeze), so aim with A/D.
+- **Power:** hold the mouse to swing the power up and down, then let go to throw.
+- **Calls in Chinese:** in the mouth is 中了 (a hit), clipping the rim is 差一点 (so close), and a miss is 没中, with pinyin.
+- **Prize:** 4+ hits wins a small prize once a day; your best round is saved. E stops.
+
+Jianzi and mahjong are coming soon.
+
+**Fish frenzies and streaks.** A patch of bubbling water off the beach is a feeding shoal: cast into it and fish bite twice as fast and come up bigger (+20% on the weight window). It moves every two minutes. Landing fish in a row builds a streak; 5 or more makes golden fish more likely (+2%). Losing one ends it.
+
+**Casting.** While charging a cast, A/D (or the arrow keys) swing it left and right, and a ring on the water shows exactly where it will land. The ring is white on water, gold in a frenzy and red over land, and a label says how far out that is. Everyone casts up to 10 m. Release at 97% power or more for a perfect cast: the fight starts with the catch meter 15% fuller. Casting further out catches bigger fish. Each fish's weight comes from a window half its range wide: the bottom half within 2 m of the shore, the top half for a 95% cast from the end of the dock (16.7 m out) or further, sliding evenly in between. Quality training still favours the top of the window.
+
+**HUD.** The bag is shown as a grid of slots under the energy bar (each fish with its count, and "used/total" slots). The cast power bar shows how far the cast will go, and the bobber shows its distance and how far it is from shore. The journal's transcript and the Conversations panel (C) put the newest lines first.
+
+**Medals, golden fish and the trophy wall.** Every species earns a medal by weight: bronze for any catch, silver from 60% of its weight range, gold from 90%. Each catch has a small chance (3%, more with luck training) of being **golden**, worth 5× as much. Gold medals and golden fish hang on the **trophy wall** in your house. Bait is a bonus now: any bait works, but a fish bites about 4× as often on the bait it likes (only the oarfish insists on its glow lure).
+
+**Auntie Chen's fish of the day.** Every morning she wants a few of one kind of fish (sometimes big ones). She tells you in Chinese, and the shop window shows it with pinyin. Sell her the fish and she gives you a surprise present. Shopkeepers also sometimes hand you a little something the first time you use a new word with them.
+
+**The journal (J)** has four tabs: the fish you've caught, the people you've met (喜欢 / 不喜欢 in Chinese with pinyin only: ask Mei what they mean), a **phrasebook** (how friendship works, the questions for each level, phrases for gifts and chatting, and each shopkeeper's favourite topics), and a **transcript** of everything said with Mei and the shopkeepers. The transcript starts fresh each time you open the game.
 
 **The boat and the island.** Past your boat's range the currents push you back; Old Wang sells upgrades. The best boat reaches an island far out where you can camp for several days.
 
