@@ -7,20 +7,37 @@ using UntitledGame.Environment;
 
 namespace UntitledGame.Home
 {
-    /// <summary>Spawns and tracks furniture / pet items the player has placed around their camp.</summary>
+    /// <summary>
+    /// Spawns and tracks furniture / pet items the player has placed around their camp. Each region has its own house:
+    /// only what was placed in the current region is shown, and arriving somewhere new shows that house's things.
+    /// </summary>
     public class HomeItems : MonoBehaviour
     {
         public static HomeItems Instance { get; private set; }
 
         private readonly Dictionary<PlacedItem, GameObject> _spawned = new Dictionary<PlacedItem, GameObject>();
 
-        public IEnumerable<PlacedItem> Placed => SaveSystem.Data.placed;
+        public IEnumerable<PlacedItem> Placed => SaveSystem.Data.placed.Where(Here);
+
+        private static bool Here(PlacedItem p) => p.region == Regions.Current;
 
         private void Awake() => Instance = this;
 
+        private void OnEnable() => Regions.Changed += Respawn;
+        private void OnDisable() => Regions.Changed -= Respawn;
+
+        /// <summary>Shows the current region's house: everything placed here, nothing from the other houses.</summary>
+        public void Respawn()
+        {
+            foreach (var go in _spawned.Values) if (go != null) Destroy(go);
+            _spawned.Clear();
+            foreach (var p in SaveSystem.Data.placed.Where(Here).Where(p => !Stranded(p)).ToList()) Spawn(p);
+            RefreshBowl();
+        }
+
         private void Start()
         {
-            var placed = SaveSystem.Data.placed.ToList();
+            var placed = SaveSystem.Data.placed.Where(Here).ToList();
             foreach (var p in placed.Where(p => !Stranded(p))) Spawn(p);
             RescueStranded();
             RefreshBowl();
@@ -30,7 +47,7 @@ namespace UntitledGame.Home
         /// <summary>Moves every stranded placed item into the house (and respawns it there). Returns how many moved.</summary>
         public int RescueStranded()
         {
-            var stranded = SaveSystem.Data.placed.Where(Stranded).ToList();
+            var stranded = SaveSystem.Data.placed.Where(Here).Where(Stranded).ToList();
             Physics.SyncTransforms();
             foreach (var p in stranded)
             {
@@ -107,7 +124,7 @@ namespace UntitledGame.Home
         public void Place(string id, Vector3 position, float yaw)
         {
             if (!Inventory.Remove(id, 1)) return;
-            var p = new PlacedItem { id = id, x = position.x, y = position.y, z = position.z, yaw = yaw };
+            var p = new PlacedItem { id = id, x = position.x, y = position.y, z = position.z, yaw = yaw, region = Regions.Current };
             SaveSystem.Data.placed.Add(p);
             SaveSystem.Save();
             Spawn(p);

@@ -294,16 +294,17 @@ namespace UntitledGame.UI
             PhraseLine("<b>How friendship works</b>", 26);
             PhraseLine("Every shopkeeper works the same way. To reach each friendship level you need three things:\n" +
                        "- <b>Learn about them</b> by asking the questions below (one or two for each level). What they tell you goes on the People page.\n" +
-                       "- <b>Give them a gift</b> (one for each level; a gift they don't like doesn't count). Buy gifts at Granny Liu's 礼品店.\n" +
-                       "- <b>Pass the HSK test</b>: 朋友 needs HSK 1, 好朋友 HSK 2, 老朋友 HSK 3 (Teacher Gao's test centre).\n" +
-                       "Closer friends sell you better things. Each shop window shows what's left for the next level.");
+                       "- <b>Give them a gift</b> (one for each level; a gift they don't like doesn't count). Buy gifts at the 礼品店.\n" +
+                       "- <b>Pass the HSK test</b> for the closer levels, up to the test you study for in their region (Willow Bay: HSK 1, the desert: HSK 2, Snow Bay and Mars: HSK 3).\n" +
+                       "Every stop on the bus route has new people to befriend. Closer friends sell you better things, and old friends (老朋友) give you a special perk.");
             PhraseLine("\n<b>The questions, level by level</b>  <size=18><color=#8A7563>(the same for everyone)</color></size>", 26);
             for (int l = 1; l <= Affinity.MaxLevel; l++)
             {
                 foreach (var f in Affinity.FactsFor[l])
                 {
                     var (q, en) = Affinity.FactQuestions[f];
-                    string hsk = Affinity.HskNeeded(l) > 0 ? $", HSK {Affinity.HskNeeded(l)}" : "";
+                    string here = Catalog.ShopFor("tackle", UntitledGame.Environment.Regions.Current).id;
+                    string hsk = Affinity.HskNeeded(here, l) > 0 ? $", HSK {Affinity.HskNeeded(here, l)} here" : "";
                     PhraseLine($"<b>{q}</b>  <color=#2C7F79><i>{Pinyin.Of(q)}</i></color>\n<size=18><color=#8A7563>Ask about {en}  (for {Affinity.LevelHanzi[l]} {Affinity.LevelEnglish[l]}{hsk})</color></size>");
                 }
             }
@@ -314,7 +315,7 @@ namespace UntitledGame.UI
                     PhraseLine($"<b>{zh}</b>  <color=#2C7F79><i>{Pinyin.Of(zh)}</i></color>\n<size=18><color=#8A7563>{en}</color></size>");
             }
             PhraseLine("\n<b>What they love talking about</b>  <size=18><color=#8A7563>(don't know a word? Ask Mei)</color></size>", 26);
-            foreach (var shop in Catalog.Shops)
+            foreach (var shop in Catalog.PeopleIn(UntitledGame.Environment.Regions.Current))
             {
                 var p = KeeperProfiles.For(shop.id);
                 if (p == null) continue;
@@ -348,7 +349,7 @@ namespace UntitledGame.UI
         {
             foreach (Transform c in _people) Object.Destroy(c.gameObject);
             int known = 0, total = 0;
-            foreach (var shop in Catalog.Shops)
+            foreach (var shop in Catalog.PeopleIn(UntitledGame.Environment.Regions.Current))
             {
                 var p = KeeperProfiles.For(shop.id);
                 if (p == null) continue;
@@ -412,9 +413,17 @@ namespace UntitledGame.UI
                 RefreshPeople();
                 return;
             }
-            _progress.text = $"{CatchJournal.SpeciesDiscovered} / {FishDatabase.All.Count} discovered   ·   {CatchJournal.TotalCatches} catches   ·   medals: {CatchJournal.MedalCount(3)} gold, {CatchJournal.MedalCount(2)} silver+";
+            // Only this region's sea (twenty fish): the others are a surprise, and they wouldn't fit.
+            int tier = Environment.Regions.FishTier();
+            var here = FishDatabase.All.Where(f => !f.IsFish || FishPower.TierOf(f) == tier).ToList();
+            int caughtHere = here.Count(f => f.IsFish && (CatchJournal.Get(f.id)?.count > 0));
+            _progress.text = $"{Environment.Regions.Here.english} {Environment.Regions.Here.hanzi}: {caughtHere} / {here.Count(f => f.IsFish)} caught   ·   {CatchJournal.TotalCatches} catches in all   ·   " +
+                             $"medals: {CatchJournal.MedalCount(3)} gold, {CatchJournal.MedalCount(2)} silver+";
             foreach (var (s, icon, name, info, strip) in _cards)
             {
+                bool local = !s.IsFish || FishPower.TierOf(s) == tier;
+                if (icon.transform.parent.gameObject.activeSelf != local) icon.transform.parent.gameObject.SetActive(local);
+                if (!local) continue;
                 var rec = CatchJournal.Get(s.id);
                 bool known = rec != null && rec.count > 0;
                 if (!known && !Progression.PlayerStats.IsDiscovered(s))

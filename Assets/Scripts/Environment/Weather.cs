@@ -12,6 +12,7 @@ namespace UntitledGame.Environment
         public static Weather Instance { get; private set; }
 
         [SerializeField] private ParticleSystem rain;
+        [SerializeField] private ParticleSystem snow;
         [SerializeField] private float checkEveryGameHours = 2f;
         [SerializeField, Range(0, 1)] private float rainChance = 0.22f;
 
@@ -22,9 +23,15 @@ namespace UntitledGame.Environment
 
         public float RainAmount { get; private set; }
         public bool IsRaining => RainAmount > 0.4f;
-        public string Description => IsRaining ? "a gentle rain" : (RainAmount > 0.05f ? "clouding over" : "clear skies");
+        public string Description => Snowy
+            ? (IsRaining ? "heavy snow" : "light snow")
+            : IsRaining ? "a gentle rain" : (RainAmount > 0.05f ? "clouding over" : "clear skies");
+
+        /// <summary>In a snowy region showers fall as snow, and a few flakes are always drifting down.</summary>
+        public static bool Snowy => Regions.Here.snow;
 
         public void SetRain(ParticleSystem ps) => rain = ps;
+        public void SetSnow(ParticleSystem ps) => snow = ps;
 
         private void Awake() => Instance = this;
 
@@ -53,7 +60,9 @@ namespace UntitledGame.Environment
                 if (elapsed >= checkEveryGameHours)
                 {
                     _lastCheckHour = hour;
-                    if (_rainTarget < 0.5f && Random.value < rainChance) ForceRain(true, Random.Range(1f, 3f));
+                    // Each region has its own weather (it hardly ever rains in the desert).
+                    float chance = rainChance * Regions.Here.rainChance / 0.22f;
+                    if (_rainTarget < 0.5f && Random.value < chance) ForceRain(true, Random.Range(1f, 3f));
                 }
                 if (_rainTarget > 0.5f && _rainUntilHour >= 0f && Mathf.Abs(Mathf.DeltaAngle(hour * 15f, _rainUntilHour * 15f)) < 3f)
                 {
@@ -63,16 +72,23 @@ namespace UntitledGame.Environment
             }
 
             RainAmount = Mathf.MoveTowards(RainAmount, _rainTarget, Time.deltaTime / 20f);
-            if (AudioManager.Instance != null) AudioManager.Instance.RainAmount = RainAmount;
+            bool snowy = Snowy;
+            if (AudioManager.Instance != null) AudioManager.Instance.RainAmount = snowy ? 0f : RainAmount;
 
             if (rain != null)
             {
                 var em = rain.emission;
-                em.rateOverTime = 900f * RainAmount;
+                em.rateOverTime = snowy ? 0f : 900f * RainAmount;
                 if (Camera.main != null) rain.transform.position = Camera.main.transform.position + Vector3.up * 8f;
             }
+            if (snow != null)
+            {
+                var em = snow.emission;
+                em.rateOverTime = snowy ? 45f + 420f * RainAmount : 0f;
+                if (Camera.main != null) snow.transform.position = Camera.main.transform.position + Vector3.up * 7f;
+            }
 
-            if (RainAmount > 0.3f && Camera.main != null)
+            if (!snowy && RainAmount > 0.3f && Camera.main != null)
             {
                 _dropTimer -= Time.deltaTime;
                 if (_dropTimer <= 0f)

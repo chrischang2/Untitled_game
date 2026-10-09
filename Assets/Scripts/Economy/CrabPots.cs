@@ -69,7 +69,8 @@ namespace UntitledGame.Economy
             Pots(pots) * PotSize(size) * Fill(lure) * CrabValue(deep) * PriceBonus(helper);
 
         /// <summary>A normal day's haul right now (before fish bait), in yuan.</summary>
-        public static float Daily => DailyAt(L("crab_pots"), L("crab_size"), L("crab_lure"), L("crab_deep"), L("crab_helper"));
+        public static float Daily => DailyAt(L("crab_pots"), L("crab_size"), L("crab_lure"), L("crab_deep"), L("crab_helper")) *
+                                     (Progression.Perks.Has("crabber") ? Progression.Perks.CrabBonus : 1f);
         public static int Crabs => Mathf.RoundToInt(Pots(L("crab_pots")) * PotSize(L("crab_size")) * Fill(L("crab_lure")));
         public static int KeepDaysNow => KeepDays(L("crab_cooler"));
 

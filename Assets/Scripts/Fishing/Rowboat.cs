@@ -187,7 +187,7 @@ namespace UntitledGame.Fishing
 
             // Currents: past the boat's range the sea pushes you back towards the shore.
             float out_ = -WorldShape.ShoreDistance(transform.position.x, transform.position.z);
-            InCurrent = out_ > Range && !WorldShape.OnIsland(transform.position.x, transform.position.z, 10f);
+            InCurrent = out_ > Range;
             if (InCurrent)
             {
                 float push = Mathf.Clamp(out_ - Range, 0f, 6f) * 1.2f + 1.2f;
@@ -201,7 +201,7 @@ namespace UntitledGame.Fishing
             }
 
             Vector3 next = transform.position + _velocity * Time.deltaTime;
-            if (-WorldShape.ShoreDistance(next.x, next.z) > Range + 4f && !WorldShape.OnIsland(next.x, next.z, 10f) && next.z > transform.position.z)
+            if (-WorldShape.ShoreDistance(next.x, next.z) > Range + 4f && next.z > transform.position.z)
                 next = new Vector3(next.x, next.y, transform.position.z); // can't get any further out
             if (!Rowable(next))
             {

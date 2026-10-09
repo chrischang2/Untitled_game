@@ -11,8 +11,9 @@ namespace UntitledGame.Progression
     /// <summary>
     /// The player's fishing progression.
     /// - Stats (trained with 武教练): cast distance and calmer fish (strength), green-bar width, escape allowance,
-    ///   bonus-fish chance, fish size (quality) and bite speed. 20 levels each in four tiers of five; tier t needs
-    ///   the HSK t test. Training costs 10, 20, 40, 70, 100 in the first tier, ten times that in each tier after.
+    ///   bonus-fish chance, fish size (quality) and bite speed. 20 levels each in four tiers of five; tier t opens
+    ///   level by level with the lessons of HSK level t+1 (Hsk.UpgradeLevelOpen). Training costs 10, 20, 40, 70, 100
+    ///   in the first tier, ten times that in each tier after.
     ///   The three reeling stats are matched against each fish's power (FishPower).
     /// - Knowledge: books from 周老师. You can only catch fish you've read about; a new game knows just the sardine.
     /// (Equipment - baits and lines - lives in the Inventory.)
@@ -89,15 +90,21 @@ namespace UntitledGame.Progression
 
         /// <summary>The training tier a level belongs to (levels 1-5 are tier 0, 6-10 tier 1...).</summary>
         public static int TierOfLevel(int level) => Mathf.Max(0, (level - 1) / LevelsPerTier);
-        /// <summary>The HSK test needed before 武教练 trains this stat to its next level.</summary>
-        public static int HskNeededForNext(string stat) => TierOfLevel(Level(stat) + 1);
-        public static bool CanTrainNext(string stat) => Level(stat) < MaxLevel && Hsk.Level >= HskNeededForNext(stat);
+        /// <summary>The upgrade tier this stat's next level belongs to.</summary>
+        public static int TierOfNext(string stat) => TierOfLevel(Level(stat) + 1);
+        public static bool CanTrainNext(string stat) => Level(stat) < MaxLevel && Hsk.UpgradeLevelOpen(Level(stat) + 1);
+        /// <summary>What the next level still needs ("2 more HSK 1 lessons"), or null if it's open (or there is none).</summary>
+        public static string NextNeeds(string stat) => Level(stat) >= MaxLevel ? null : Hsk.UpgradeNeeds(Level(stat) + 1);
+        /// <summary>The next level belongs to a tier that's still a surprise (its region hasn't been reached).</summary>
+        public static bool NextHidden(string stat) => Level(stat) < MaxLevel && !Hsk.UpgradeTierRevealed(TierOfNext(stat));
         /// <summary>The next level's price: 10, 20, 40, 70, 100 in tier 0, ten times as much each tier after.</summary>
         public static int NextPrice(string stat)
         {
             int next = Mathf.Min(Level(stat) + 1, MaxLevel);
             int tier = TierOfLevel(next);
-            return TierPrices[(next - 1) % LevelsPerTier] * (int)Mathf.Pow(10, tier);
+            int price = TierPrices[(next - 1) % LevelsPerTier] * (int)Mathf.Pow(10, tier);
+            // An old friend of the coach here trains you for less (Perks); crab upgrades come from the crabber.
+            return !CrabPots.IsCrabStat(stat) && Perks.Has("gym") ? Mathf.RoundToInt(price * Perks.TrainingDiscount) : price;
         }
 
         /// <summary>Everyone casts up to 10 m (strength training calms hooked fish instead, see FishPower).</summary>

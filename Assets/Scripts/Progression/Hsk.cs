@@ -10,7 +10,9 @@ namespace UntitledGame.Progression
     /// <summary>
     /// The player's HSK progress at 高老师's test centre (考试中心): which lessons they've passed and which HSK test
     /// (1-3) they've passed. Passing a test unlocks goods in every shop (ItemDef.minHsk, alongside friendship), better
-    /// fish prices (Auntie Chen's membership cards), new cosmetics, and switches more of the interface to Chinese.
+    /// fish prices, new cosmetics, the bus on to the next region (BusTrip), and switches more of the interface to
+    /// Chinese. Each HSK level's lessons open one tier of upgrades (training and crab pots) level by level
+    /// (UpgradeLevelOpen).
     /// </summary>
     public static class Hsk
     {
@@ -23,13 +25,16 @@ namespace UntitledGame.Progression
         public const int TestQuestions = 20, TestPassMark = 15;
         public const int PracticeQuestions = 10;
 
-        /// <summary>What each HSK level unlocks (for the test centre's window and toasts). Friendship still applies too.</summary>
+        /// <summary>
+        /// What each HSK level unlocks (for the test centre's window and toasts). The goods themselves stay a surprise
+        /// until you reach the next stop (Economy.ShopStock).
+        /// </summary>
         public static readonly string[] Unlocks =
         {
             "",
-            "+15% per bar on 陈阿姨's scale, blue line, squid & crab bait, good oars, huge bucket, Fish under the Rocks, double bed, sofa, radio, new cosmetics",
-            "+15% per bar on 陈阿姨's scale, black line, live baitfish, sail, giant bucket, Fish of the Open Sea, big bed, new cosmetics",
-            "+15% per bar on 陈阿姨's scale, gold line, glow lure, new boat (the island), Legends of the Sea, golden cosmetics",
+            "the bus to the next stop (a new region with new fish, and new goods in every shop), +15% per bar on 陈阿姨's scale, more friendship levels",
+            "the bus to the next stop (a new region with new fish, and new goods in every shop), +15% per bar on 陈阿姨's scale, more friendship levels",
+            "+15% per bar on 陈阿姨's scale, the last tier of training, and a surprise in every shop",
         };
 
         /// <summary>How much more Auntie Chen pays for fish at each HSK level (automatic: no card to buy).</summary>
@@ -74,6 +79,50 @@ namespace UntitledGame.Progression
         public static bool LessonDone(int level, int lesson) => Done.Contains($"{level}-{lesson}");
         public static int LessonsDone(int level) => Enumerable.Range(1, LessonCounts[level]).Count(n => LessonDone(level, n));
 
+        /// <summary>
+        /// Upgrades (training and crab pots) come in four tiers of five levels. Tier t opens with the lessons of HSK
+        /// level t+1, level by level: the first after one lesson, then evenly so the fifth needs all of that level's
+        /// lessons (HSK 1's 11 lessons: 1, 4, 6, 9, 11). There's no HSK 4, so the last tier opens with the HSK 3 test.
+        /// A tier also waits for the region that goes with it (tier t from region t on), so it stays a surprise.
+        /// </summary>
+        public const int UpgradeTiers = 4, LevelsPerUpgradeTier = 5;
+
+        public static int UpgradeTier(int level) => Mathf.Clamp((level - 1) / LevelsPerUpgradeTier, 0, UpgradeTiers - 1);
+
+        /// <summary>The HSK level whose lessons open this upgrade level (0 for the last tier, which needs the HSK 3 test).</summary>
+        public static int LessonLevelForUpgrade(int level) => UpgradeTier(level) + 1 <= MaxLevel ? UpgradeTier(level) + 1 : 0;
+
+        /// <summary>Lessons of LessonLevelForUpgrade needed for this upgrade level (0 for the last tier).</summary>
+        public static int LessonsForUpgrade(int level)
+        {
+            int hsk = LessonLevelForUpgrade(level);
+            if (hsk == 0) return 0;
+            int n = LessonCounts[hsk], k = (level - 1) % LevelsPerUpgradeTier;
+            return 1 + Mathf.CeilToInt((n - 1) * k / (float)(LevelsPerUpgradeTier - 1));
+        }
+
+        /// <summary>The tier's region has been reached (before that its levels aren't even shown).</summary>
+        public static bool UpgradeTierRevealed(int tier) => Data.regionReached >= Mathf.Min(tier, Environment.Regions.Last);
+
+        public static bool UpgradeLevelOpen(int level)
+        {
+            if (level < 1) return true;
+            if (!UpgradeTierRevealed(UpgradeTier(level))) return false;
+            int hsk = LessonLevelForUpgrade(level);
+            return hsk == 0 ? Level >= MaxLevel : LessonsDone(hsk) >= LessonsForUpgrade(level);
+        }
+
+        /// <summary>What's still needed for an upgrade level ("3 more HSK 2 lessons", "the HSK 3 test"); null if open.</summary>
+        public static string UpgradeNeeds(int level)
+        {
+            if (UpgradeLevelOpen(level)) return null;
+            if (!UpgradeTierRevealed(UpgradeTier(level))) return "the next stop on the bus";
+            int hsk = LessonLevelForUpgrade(level);
+            if (hsk == 0) return $"the HSK {MaxLevel} test";
+            int left = LessonsForUpgrade(level) - LessonsDone(hsk);
+            return $"{left} more HSK {hsk} lesson{(left == 1 ? "" : "s")}";
+        }
+
         /// <summary>Marks a lesson passed; true the first time (when it pays).</summary>
         public static bool MarkLessonDone(int level, int lesson)
         {
@@ -105,6 +154,7 @@ namespace UntitledGame.Progression
             ChatAudit.Write("HSK", $"passed the HSK {level} test");
             Changed?.Invoke();
             Affinity.EvaluateAll(); // friendships waiting for this test move up now
+            Economy.ShopStock.ApplyDisplays(); // the last stop brings out goods for tests beyond it
         }
 
         /// <summary>Words the player got wrong come back more often in free practice.</summary>

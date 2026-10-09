@@ -44,14 +44,29 @@ namespace UntitledGame.EditorTools
                 KeeperView(1),
                 new View { name = "plaza", pos = MarketPoint(13f, 11f, 0f), lookAt = MarketPoint(-3f, 0f, 0f), fov = 60 },
                 KeeperView(4, "bookshop"),
-                new View { name = "island", pos = new Vector3(WorldShape.IslandCenter.x - 22f, 9f, WorldShape.IslandCenter.y - 26f), lookAt = new Vector3(WorldShape.IslandCenter.x, 1f, WorldShape.IslandCenter.y), fov = 55 },
+                new View { name = "busstop", pos = new Vector3(WorldShape.BusStopCenter.x - 3f, WorldShape.BusStopHeight + 3.2f, WorldShape.BusStopCenter.y + 9f),
+                    lookAt = new Vector3(WorldShape.BusStopCenter.x, WorldShape.BusStopHeight + 1f, WorldShape.BusStopCenter.y - 1.5f), fov = 55 },
+                new View { name = "driver", pos = new Vector3(WorldShape.BusDriverPosition.x + 0.4f, WorldShape.BusStopHeight + 1.7f, WorldShape.BusDriverPosition.y + 3.2f),
+                    lookAt = new Vector3(WorldShape.BusDriverPosition.x, WorldShape.BusStopHeight + 0.9f, WorldShape.BusDriverPosition.y), fov = 50 },
                 new View { name = "camp", pos = pp - fwd * 4f + Vector3.up * 3f + Vector3.right * 6f, lookAt = pp - fwd * 12f, fov = 55 },
             };
 
             string[] args = System.Environment.GetCommandLineArgs();
             float[] times = { 7.5f, 13f, 19.2f, 23f };
             string only = null;
-            for (int i = 0; i < args.Length - 1; i++) if (args[i] == "-captureView") only = args[i + 1];
+            int region = 0;
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "-captureView") only = args[i + 1];
+                if (args[i] == "-captureRegion") int.TryParse(args[i + 1], out region);
+            }
+            // -captureRegion 1 shows the desert, 2 the snow (each region's RegionStyle objects), files prefixed with its id.
+            region = Mathf.Clamp(region, 0, Regions.Last);
+            Regions.Show(region); // the region's look, everyone's clothes and the sea's colour
+            var driver = GameObject.Find("Driver Zhang") ?? FindInactive("Driver Zhang");
+            if (driver != null) driver.SetActive(true);
+            Regions.PreviewRegion = region;
+            string prefix = region == 0 ? "" : Regions.All[region].id + "_";
 
             Directory.CreateDirectory("Captures");
             // The very first render after loading comes out with stale material data; render once and discard.
@@ -64,10 +79,18 @@ namespace UntitledGame.EditorTools
                     if (v.name != "gameplay" && v.name != "overview" && t != 13f && t != 19.2f) continue;
                     dn.TimeOfDay = t;
                     dn.Apply();
-                    Render(cam, v, $"Captures/{v.name}_{t:00.0}.png");
+                    Render(cam, v, $"Captures/{prefix}{v.name}_{t:00.0}.png");
                 }
             }
+            Regions.PreviewRegion = -1;
             Debug.Log("[Capture] Done.");
+        }
+
+        private static GameObject FindInactive(string name)
+        {
+            foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (t.name == name) return t.gameObject;
+            return null;
         }
 
         /// <summary>What a customer standing at stall i sees.</summary>

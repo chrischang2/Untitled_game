@@ -71,7 +71,7 @@ namespace UntitledGame.Companion
             sb.AppendLine("The market (a short walk southeast of the cabin); when the player mentions a shopkeeper you're told their goods and prices:");
             sb.AppendLine(Encyclopedia.MarketSummary());
             sb.AppendLine("Fish the player knows about (the only ones they can catch): " +
-                string.Join("、", Progression.PlayerStats.Discovered.Select(f => $"{f.hanzi} [{f.name.ToLower()}]")) + ".");
+                string.Join("、", Progression.PlayerStats.Discovered.Where(f => Fishing.FishPower.TierOf(f) == Environment.Regions.FishTier()).Select(f => $"{f.hanzi} [{f.name.ToLower()}]")) + ".");
             sb.AppendLine("There are more kinds of fish in the sea, but the player only learns about them by reading fishing books from 周老师's 书店 [bookshop]. " +
                 "Big fish are heavy: the player trains strength with 武教练 at the 健身房 [gym] so they can reel them in. Don't name undiscovered fish.");
             sb.AppendLine(Encyclopedia.GameGuide());
@@ -95,7 +95,9 @@ namespace UntitledGame.Companion
             var pet = SaveSystem.Data.pet;
             string cat = pet.hunger > 0.7f ? "汤圆 is hungry" : pet.happiness > 0.7f ? "汤圆 is very happy" : "汤圆 is fine";
             string words = VocabNotebook.Entries.Count > 0 ? $" Words the player has learned: {VocabNotebook.RecentForPrompt(8)}." : "";
-            return $"[Game: {time}, {weather}. Location: {location}.{activity} Player has {Inventory.Money}块, {bucket}, line: {Inventory.LineHanzi} ({Inventory.LineKg:0} kg), " +
+            var region = Environment.Regions.Here;
+            string where = Environment.Regions.Current == 0 ? location : $"{location}, in {region.english} ({region.hanzi}), {region.blurb} (you all came by bus from 柳湾)";
+            return $"[Game: {time}, {weather}. Location: {where}.{activity} Player has {Inventory.Money}块, {bucket}, line: {Inventory.LineHanzi} ({Inventory.LineKg:0} kg), " +
                    $"bait: {(Inventory.Bait != null ? Inventory.Bait.hanzi : "none")}, casts {Progression.PlayerStats.CastDistance:0} m, {Progression.PlayerStats.Knowledge} fishing books read, " +
                    $"energy {Progression.Energy.Current:0}/{Progression.Energy.Max:0}, bag {Inventory.SlotsUsed}/{Inventory.SlotCapacity} slots. {cat}.{words}]";
         }

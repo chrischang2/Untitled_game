@@ -43,6 +43,15 @@ namespace UntitledGame.Economy
             Notify();
         }
 
+        /// <summary>Pays money out (false, and nothing taken, if there isn't enough).</summary>
+        public static bool Spend(int amount)
+        {
+            if (amount < 0 || D.money < amount) return false;
+            D.money -= amount;
+            Notify();
+            return true;
+        }
+
         // ------------------------------------------------------------------ items
 
         public static int Count(string id) => D.items.FirstOrDefault(i => i.id == id)?.count ?? 0;
@@ -83,7 +92,7 @@ namespace UntitledGame.Economy
             if (def.unique && Owns(itemId)) { reason = BuyResult.AlreadyOwned; return false; }
             if (def.category == ItemCategory.Upgrade)
             {
-                // One level at a time, at the next level's price; each tier of five needs its HSK test.
+                // One level at a time, at the next level's price; each tier of five opens after enough lessons (Hsk.LessonsForTier).
                 if (UntitledGame.Progression.PlayerStats.Level(def.stat) >= UntitledGame.Progression.PlayerStats.MaxLevel) { reason = BuyResult.AlreadyOwned; return false; }
                 if (!UntitledGame.Progression.PlayerStats.CanTrainNext(def.stat)) { reason = BuyResult.Locked; return false; }
                 cost = Catalog.PriceOf(def);

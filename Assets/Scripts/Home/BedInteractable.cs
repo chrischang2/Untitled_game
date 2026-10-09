@@ -1,5 +1,6 @@
 using UnityEngine;
 using UntitledGame.Economy;
+using UntitledGame.Environment;
 using UntitledGame.Progression;
 
 namespace UntitledGame.Home
@@ -45,6 +46,7 @@ namespace UntitledGame.Home
         {
             base.OnEnable();
             Inventory.Changed += RefreshModel;
+            Regions.Changed += RefreshModel;
             RefreshModel();
         }
 
@@ -52,6 +54,7 @@ namespace UntitledGame.Home
         {
             base.OnDisable();
             Inventory.Changed -= RefreshModel;
+            Regions.Changed -= RefreshModel;
         }
 
         public void RefreshModel()

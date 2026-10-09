@@ -112,7 +112,7 @@ namespace UntitledGame.Home
             if (!Busy) StartCoroutine(PassOut("You're completely exhausted... everything goes dark."));
         }
 
-        /// <summary>Sleep in a bed (or the island tent): wake at 6am with full energy. False if it's too early.</summary>
+        /// <summary>Sleep in a bed: wake at 6am with full energy. False if it's too early.</summary>
         public bool TrySleep(Vector3 wakeSpot, float wakeYaw, string where)
         {
             if (Busy) return false;
@@ -170,6 +170,26 @@ namespace UntitledGame.Home
                 "The player passed out last night from exhaustion and woke up at home late in the morning, having lost most of what they were carrying.",
                 "Show you were worried, and gently remind them to sleep before 2am and watch their energy. One or two short sentences. No lesson.");
         }
+
+        /// <summary>
+        /// Fades to black with a caption, runs <paramref name="whileDark"/>, holds, then fades back (the bus ride uses it).
+        /// Gameplay is blocked throughout.
+        /// </summary>
+        public IEnumerator Blackout(string text, System.Action whileDark, string darkText = null, float hold = 1.5f)
+        {
+            Busy = true;
+            InputGate.BlockGameplay(this);
+            yield return FadeTo(1f, text);
+            whileDark?.Invoke();
+            if (darkText != null) _fadeText.text = darkText;
+            yield return new WaitForSecondsRealtime(hold);
+            yield return FadeTo(0f, null);
+            InputGate.UnblockGameplay(this);
+            Busy = false;
+        }
+
+        /// <summary>Moves the player (out of any seat) and brings Mei along.</summary>
+        public static void MovePlayer(Vector3 spot, float yaw) => PutPlayer(spot, yaw);
 
         private static Vector3 FallbackSpot()
         {

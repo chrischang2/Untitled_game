@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using UntitledGame.Economy;
+using UntitledGame.Environment;
 using UntitledGame.Fishing;
 using UntitledGame.Language;
 
@@ -51,7 +52,14 @@ namespace UntitledGame.Companion
             { "book_shore", new[] { "海边", "海边的书" } },
             { "book_rocks", new[] { "石头", "石头下" } },
             { "book_open", new[] { "远海" } },
-            { "book_legends", new[] { "传说", "海的传说" } },
+            { "book_bay", new[] { "柳湾", "秘密" } },
+            { "book_reef", new[] { "珊瑚" } },
+            { "book_warm", new[] { "热海" } },
+            { "book_ice", new[] { "冰海", "冰下" } },
+            { "book_north", new[] { "北方" } },
+            { "book_legends", new[] { "火星", "火星的书" } },
+            { "book_space", new[] { "太空" } },
+            { "book_stars", new[] { "传说", "星星" } },
             { "bait_squid", new[] { "鱿鱼条" } },
             { "bait_crab", new[] { "螃蟹", "蟹" } },
             { "bait_fish", new[] { "活鱼", "小鱼" } },
@@ -98,6 +106,25 @@ namespace UntitledGame.Companion
         private static readonly string[] BrowseWords = { "卖什么", "买什么", "有什么", "卖啥", "有啥", "看看", "看一看", "看一下", "都有" };
         private static readonly string[] Thanks = { "谢谢", "多谢", "谢了" };
         private static readonly string[] Goodbyes = { "再见", "拜拜", "走了", "下次见", "明天见" };
+        private static readonly string[] TravelWords = { "坐车", "上车", "去", "走吧", "出发", "开车", "我们走", "带我", "回", "车票", "买票", "票" };
+
+        /// <summary>
+        /// At the bus stop: asking the price is ask_price; talk of going somewhere (or buying a ticket) is "travel", with
+        /// item "back" (回…, or naming an earlier stop) or "next". Null if it's neither.
+        /// </summary>
+        private static Result ParseBus(string s, bool mentionsFish)
+        {
+            if (ContainsAny(s, PriceWords) || s.Contains("车费")) return new Result { intent = "ask_price" };
+            int named = -1;
+            for (int r = 0; r < Regions.All.Length; r++)
+                if (Mentions(s, Regions.All[r].hanzi) || (Regions.All[r].id == "desert" && s.Contains("沙漠")) ||
+                    (Regions.All[r].id == "snow" && (s.Contains("雪") || s.Contains("冰"))) ||
+                    (Regions.All[r].id == "mars" && s.Contains("太空"))) named = r;
+            if (named < 0 && !ContainsAny(s, TravelWords)) return null;
+            if (ContainsAny(s, Decline) && named < 0) return null;
+            bool back = named >= 0 ? named < Regions.Current : s.Contains("回");
+            return new Result { intent = "travel", item = back ? "back" : "next" };
+        }
 
         /// <summary>
         /// Is the customer asking about the shopkeeper themself? Returns "hometown", "siblings", "hobby", "food", "family",
@@ -135,6 +162,15 @@ namespace UntitledGame.Companion
             bool mentionsFish = s.Any(c => c == '鱼' || Syllable(c) == "yu");
             // "What do you sell?" / "What else is there?" / "Just looking" (unless an item is named).
             if (ContainsAny(s, BrowseWords) && FindItem(shop, s) == null) return new Result { intent = "browse" };
+
+            // At the bus stop: paying the fare in fish, or asking to ride.
+            if (shop.busDriver)
+            {
+                var bus = ParseBus(s, mentionsFish);
+                if (bus != null && !(offerPending && bus.intent == "travel" && ContainsAny(s, Confirm) && !s.Contains("回")))
+                    return bus;
+                if (bus != null) return new Result { intent = "confirm" }; // 好，走吧 with a ride on offer
+            }
 
             // At 海叔's, giving (or "selling") fish means putting them in the crab pots as bait.
             if (shop.crabber && mentionsFish && !ContainsAny(s, Decline) && FindItem(shop, s) == null &&

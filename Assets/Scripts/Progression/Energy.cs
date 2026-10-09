@@ -8,8 +8,9 @@ namespace UntitledGame.Progression
 {
     /// <summary>
     /// Energy for the day. Fishing uses it (a cast, and continuously while reeling: heavier fish drain it faster).
-    /// Each morning it refills to the maximum, which comes from your bed (Master Li sells better ones) plus the
-    /// home's comfort level (every piece of furniture you place adds comfort). At zero you pass out.
+    /// Each morning it refills to the maximum, which comes from your bed plus the home's comfort level (every kind of
+    /// furniture you place adds comfort). Every region has its own house, so its own bed and furniture: the furniture
+    /// shop there sells beds for that house. At zero you pass out.
     /// </summary>
     public static class Energy
     {
@@ -24,14 +25,17 @@ namespace UntitledGame.Progression
 
         private static SaveData D => SaveSystem.Data;
 
-        /// <summary>The best bed you own (the house comes with a sleeping mat).</summary>
-        public static ItemDef Bed => Catalog.Items.Where(i => i.category == ItemCategory.Bed && (i.id == StarterBed || Inventory.Owns(i.id)))
+        /// <summary>The best bed you own for this region's house (every house comes with a sleeping mat).</summary>
+        public static ItemDef Bed => BedIn(Environment.Regions.Current);
+
+        public static ItemDef BedIn(int region) => Catalog.Items.Where(i => i.category == ItemCategory.Bed && (i.id == StarterBed || Inventory.Owns(i.id)) &&
+                                                                         (i.region < 0 || i.region == region))
             .OrderByDescending(i => i.bedLevel).FirstOrDefault();
 
         public static int BedLevel => Bed?.bedLevel ?? 0;
 
         /// <summary>Comfort from placed furniture: each kind counts once (a second identical chair adds nothing).</summary>
-        public static int ComfortPoints => D.placed.Select(p => p.id).Distinct().Sum(id => Catalog.Get(id)?.comfort ?? 0);
+        public static int ComfortPoints => D.placed.Where(p => p.region == Environment.Regions.Current).Select(p => p.id).Distinct().Sum(id => Catalog.Get(id)?.comfort ?? 0);
 
         public static int ComfortLevel
         {

@@ -56,8 +56,15 @@ namespace UntitledGame.Progression
             return 0; // likes and dislikes: any time
         }
 
-        /// <summary>The HSK test needed for a friendship level (level 1: none).</summary>
-        public static int HskNeeded(int level) => Mathf.Max(0, level - 1);
+        /// <summary>
+        /// The HSK test needed for a friendship level with a keeper (level 1: none). It never goes beyond the test you
+        /// study for in their region (HSK region+1), so the closest friendship in each region needs that region's test.
+        /// </summary>
+        public static int HskNeeded(string shopId, int level)
+        {
+            int region = Economy.Catalog.Shop(shopId)?.region ?? 0;
+            return Mathf.Clamp(Mathf.Min(level - 1, (region < 0 ? Hsk.MaxLevel : region + 1)), 0, Hsk.MaxLevel);
+        }
 
         /// <summary>(shop id, old level, new level)</summary>
         public static event Action<string, int, int> LevelChanged;
@@ -113,7 +120,7 @@ namespace UntitledGame.Progression
                 list.Add(new Requirement { kind = "fact", factId = f, text = $"learn {en}: {q}", done = s.facts.Contains(f) });
             }
             list.Add(new Requirement { kind = "gift", text = "give a gift", done = s.giftLevels.Contains(level) });
-            int hsk = HskNeeded(level);
+            int hsk = HskNeeded(shopId, level);
             if (hsk > 0) list.Add(new Requirement { kind = "hsk", text = $"pass HSK {hsk}", done = Hsk.Level >= hsk });
             return list;
         }

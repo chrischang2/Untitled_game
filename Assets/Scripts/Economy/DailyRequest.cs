@@ -35,7 +35,8 @@ namespace UntitledGame.Economy
         public static void Ensure()
         {
             if (D.requestDay == Today) return;
-            var known = Progression.PlayerStats.Discovered.ToList();
+            // Only fish from this region's sea (the bus route: Environment.Regions).
+            var known = Progression.PlayerStats.Discovered.Where(f => FishPower.TierOf(f) == Environment.Regions.FishTier()).ToList();
             D.requestDay = Today;
             D.requestDone = false;
             if (known.Count == 0)

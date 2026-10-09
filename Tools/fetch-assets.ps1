@@ -64,17 +64,22 @@ function Copy-Kit([string]$slug, [string]$kitName, [string[]]$patterns, [string[
 
 # ---------------------------------------------------------------- Kenney models
 Copy-Kit "nature-kit" "NatureKit" @("tree_*", "rock_*", "stone_*", "lily_*", "plant_*", "flower_*", "grass*", "mushroom_*", "log*", "stump_*",
-    "campfire_*", "canoe*", "tent_*", "fence_simple*", "fence_planks*", "path_stone*", "path_wood*", "hanging_moss", "sign", "bridge_wood*", "pot_*", "crop_pumpkin") @("tree_palm*")
+    "campfire_*", "canoe*", "tent_*", "fence_simple*", "fence_planks*", "path_stone*", "path_wood*", "hanging_moss", "sign", "bridge_wood*", "pot_*", "crop_pumpkin",
+    "cactus_*", "tree_palm*", "statue_obelisk", "statue_column*", "statue_block")
 Copy-Kit "survival-kit" "SurvivalKit" @("fish*", "bucket", "campfire-*", "barrel*", "box*", "bedroll*", "signpost*", "chest", "tent*", "workbench",
     "resource-wood", "tree-log*", "rock-*", "patch-grass*", "grass*", "floor-old", "fence", "structure-roof", "structure", "structure-floor")
 Copy-Kit "pirate-kit" "PirateKit" @("boat-row-*", "structure-platform-dock*", "structure-fence*", "platform-planks", "barrel", "crate", "crate-bottles",
-    "tool-paddle", "bottle*", "flag", "flag-pennant", "grass-plant", "patch-grass*", "rocks-a", "rocks-b", "rocks-c")
-Copy-Kit "holiday-kit" "HolidayKit" @("cabin-*", "lantern*", "bench*", "floor-wood", "rocks-*")
+    "tool-paddle", "bottle*", "flag", "flag-pennant", "grass-plant", "patch-grass*", "rocks-a", "rocks-b", "rocks-c",
+    "patch-sand*", "rocks-sand-*")
+Copy-Kit "holiday-kit" "HolidayKit" @("cabin-*", "lantern*", "bench*", "floor-wood", "rocks-*", "tree-snow-*", "snow-*", "snowman*", "sled")
 Copy-Kit "mini-characters" "MiniCharacters" @("character-*")
-Copy-Kit "cube-pets" "CubePets" @("animal-cat", "animal-dog", "animal-fish", "animal-chick", "animal-bunny", "animal-crab", "animal-fox", "animal-deer", "animal-parrot", "animal-beaver")
+Copy-Kit "cube-pets" "CubePets" @("animal-cat", "animal-dog", "animal-fish", "animal-chick", "animal-bunny", "animal-crab", "animal-fox", "animal-deer", "animal-parrot", "animal-beaver", "animal-penguin", "animal-polar")
 Copy-Kit "fantasy-town-kit" "FantasyTown" @("lantern", "stall", "stall-green", "stall-red", "stall-bench", "stall-stool", "cart", "fence*", "hedge", "hedge-curved", "rock-*", "tree*", "poles*", "banner-*", "watermill*", "wheel")
 Copy-Kit "furniture-kit" "FurnitureKit" @("chairCushion", "tableRound", "loungeSofa", "lampRoundFloor", "pottedPlant", "rugRound", "bookcaseOpen",
-    "radio", "bear", "cardboardBoxOpen", "cardboardBoxClosed", "books", "plantSmall1", "bedSingle", "bedDouble")
+    "radio", "bear", "cardboardBoxOpen", "cardboardBoxClosed", "books", "plantSmall1", "bedSingle", "bedDouble",
+    "rugRectangle", "pillowLong", "tableCoffee", "cabinetBed", "kitchenStove", "televisionVintage", "loungeChair", "rugRounded", "bookcaseClosed",
+    "bedBunk", "plantSmall2", "loungeDesignSofa", "loungeChairRelax", "rugSquare", "loungeSofaLong")
+Copy-Kit "space-kit" "SpaceKit" @("desk_computer", "desk_chair", "machine_generator", "machine_wireless", "rock_crystals", "barrel")
 Copy-Kit "food-kit" "FoodKit" @("fish", "fish-bones", "cup-tea", "mug", "pot-stew", "pot-stew-lid", "bowl-soup", "loaf", "apple", "skewer", "mussel*")
 
 # ---------------------------------------------------------------- Audio

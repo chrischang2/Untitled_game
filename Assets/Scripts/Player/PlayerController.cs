@@ -111,7 +111,6 @@ namespace UntitledGame.Player
 
         public static bool IsWalkable(Vector3 p)
         {
-            if (WorldShape.OnIsland(p.x, p.z)) return WorldShape.TerrainHeight(p.x, p.z) > WorldShape.WaterLevel - 0.3f;
             if (new Vector2(p.x, p.z).magnitude > WorldShape.PlayableRadius) return false;
             if (WorldShape.IsOnDock(p.x, p.z, -0.25f)) return true;
             return WorldShape.TerrainHeight(p.x, p.z) > WorldShape.WaterLevel - 0.3f;

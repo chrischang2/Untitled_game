@@ -9,6 +9,33 @@ namespace UntitledGame.EditorTools
     /// <summary>Diagnostics used while building the project (material dumps etc.).</summary>
     public static class DebugTools
     {
+        /// <summary>Bones, and per bone the atlas colours its vertices use, for every mini character (Captures/characters.txt).</summary>
+        public static void DumpCharacters()
+        {
+            var sb = new StringBuilder();
+            var atlas = new Texture2D(2, 2);
+            atlas.LoadImage(File.ReadAllBytes("Assets/ThirdParty/Kenney/MiniCharacters/Textures/colormap.png"));
+            foreach (var name in new[] { "male-a", "male-b", "male-c", "male-d", "male-e", "male-f", "female-a", "female-b", "female-c", "female-d", "female-e", "female-f" })
+            {
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>($"Assets/ThirdParty/Kenney/MiniCharacters/character-{name}.fbx");
+                var smr = prefab.GetComponentInChildren<SkinnedMeshRenderer>();
+                var mf = prefab.GetComponentInChildren<MeshFilter>();
+                var mesh = smr != null ? smr.sharedMesh : mf?.sharedMesh;
+                sb.AppendLine($"== {name}: smr={smr != null} verts={mesh?.vertexCount} bones=[{(smr != null ? string.Join(",", smr.bones.Select(b => b.name)) : "")}]");
+                if (mesh == null || smr == null) continue;
+                var uv = mesh.uv;
+                var bw = mesh.boneWeights;
+                foreach (var g in Enumerable.Range(0, mesh.vertexCount).GroupBy(i => smr.bones[bw[i].boneIndex0].name))
+                {
+                    var cols = g.GroupBy(i => ColorUtility.ToHtmlStringRGB(atlas.GetPixelBilinear(uv[i].x, uv[i].y)))
+                        .OrderByDescending(c => c.Count()).Select(c => $"#{c.Key}x{c.Count()}");
+                    sb.AppendLine($"   {g.Key}: {g.Count()} verts  {string.Join(" ", cols)}");
+                }
+            }
+            File.WriteAllText("Captures/characters.txt", sb.ToString());
+            Debug.Log("[Automation] wrote Captures/characters.txt");
+        }
+
         [MenuItem("Untitled Game/Debug/Dump Kenney Materials")]
         public static void DumpMaterials()
         {

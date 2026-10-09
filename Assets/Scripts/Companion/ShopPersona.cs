@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text;
 using UntitledGame.Economy;
+using UntitledGame.Environment;
 using UntitledGame.Fishing;
 using UntitledGame.Progression;
 
@@ -14,7 +15,10 @@ namespace UntitledGame.Companion
             var sb = new StringBuilder();
             var profile = KeeperProfiles.For(shop.id);
             string personality = profile != null ? profile.personality : shop.personality;
-            sb.AppendLine($"You are {shop.keeperName}, {personality}. You run the {shop.hanzi} at the little market in the seaside village of Willow Bay (柳湾).");
+            var here = Regions.Here;
+            sb.AppendLine(shop.busDriver
+                ? $"You are {shop.keeperName}, {personality}. You drive the little bus (公共汽车) along the coast; it stops at the 汽车站 near the market in {here.english} ({here.hanzi}), {here.blurb}."
+                : $"You are {shop.keeperName}, {personality}. You run the {shop.hanzi} at the little market in the seaside village of {here.english} ({here.hanzi}), {here.blurb}.");
             if (profile != null) sb.AppendLine($"How you talk: {profile.speakingStyle}.");
             sb.AppendLine("You ONLY speak Mandarin Chinese in Simplified characters. You do not understand English at all.");
             sb.AppendLine("Your customer is a foreigner learning Mandarin, so speak slowly and simply: one or two very short sentences. " +
@@ -30,10 +34,10 @@ namespace UntitledGame.Companion
                 sb.AppendLine($"How well you know this customer: {Affinity.LevelHanzi[level]} ({Affinity.LevelEnglish[level]}). " +
                               (level == 0 ? "You have only just met: be polite and friendly." : level >= 3 ? "You are close friends: be warm and cheerful with them." : "You know them a bit: be warm."));
             }
-            if (shop.id == "gifts")
+            if (shop.role == "gifts")
             {
                 sb.AppendLine("You know what everyone at the market likes, and you love telling customers so they can pick good gifts: " +
-                    string.Join("；", KeeperProfiles.All.Where(p => p.shopId != "gifts").Select(p =>
+                    string.Join("；", KeeperProfiles.All.Where(p => p.shopId != shop.id && Catalog.Shop(p.shopId)?.region == shop.region).Select(p =>
                         $"{Catalog.Shop(p.shopId)?.keeperName}喜欢{string.Join("和", p.likes)}，不喜欢{string.Join("和", p.dislikes)}")) + "。");
             }
             sb.AppendLine("Write numbers and prices in Chinese characters (一百二十块). Never use English, pinyin, lists, markdown or emoji. Stay in character.");
@@ -42,9 +46,9 @@ namespace UntitledGame.Companion
                           "and never invent prices.");
             sb.AppendLine("The customer's words (顾客说：「…」) come through speech recognition and are often slightly wrong because of their accent. " +
                           "Never repeat their words back, never comment on strange words and never pretend they said something else: the [Game] note tells you what they meant.");
-            if (shop.items.Length > 0)
+            if (ShopStock.Goods(shop).Any())
             {
-                sb.AppendLine("What you sell: " + string.Join("；", shop.items.Select(Catalog.Get).Where(i => i != null)
+                sb.AppendLine("What you sell: " + string.Join("；", ShopStock.Goods(shop)
                     .Select(i => $"{i.hanzi} {Catalog.ChineseNumber(Catalog.PriceOf(i))}块" + (i.packSize > 1 ? $"（一包{Catalog.ChineseNumber(i.packSize)}个）" : ""))) + "。");
             }
             if (shop.school)
@@ -63,6 +67,11 @@ namespace UntitledGame.Companion
                               "the customer comes down to collect the money (the game tells you how much). Fish they give you go in the pots as bait, so there are more crabs the next day. " +
                               "You also sell upgrades for their pots.");
             }
+            if (shop.busDriver)
+            {
+                sb.AppendLine("A ticket to the next stop costs money (the game tells you how much; never invent a price), and the passenger only pays once for each stop. " +
+                              "Going back is free. When they're ready, they get on and you drive.");
+            }
             sb.AppendLine("Regulars: Mei (美) often comes by with the customer. The customer's cat is called 汤圆.");
             return sb.ToString().Trim();
         }
@@ -73,21 +82,26 @@ namespace UntitledGame.Companion
             sb.AppendLine($"You interpret what a customer said to {shop.keeperName} at the {shop.english} ({shop.hanzi}).");
             sb.AppendLine("The customer is a Mandarin learner and the text comes from speech recognition, so it may contain homophone mistakes " +
                           "(for example 雨干 instead of 鱼竿). Match items by sound and meaning.");
-            if (shop.items.Length > 0)
+            if (ShopStock.Goods(shop).Any())
             {
                 sb.AppendLine("Items for sale (id: Chinese = English, price):");
-                foreach (var i in shop.items.Select(Catalog.Get).Where(i => i != null))
+                foreach (var i in ShopStock.Goods(shop))
                     sb.AppendLine($"- {i.id}: {i.hanzi} = {i.english}, {Catalog.PriceOf(i)} yuan");
             }
             if (shop.crabber)
             {
                 sb.AppendLine("Here, giving or selling fish (给你鱼 / 放鱼 / 卖鱼) means putting them in the crab pots as bait: intent sell_fish. Use fish \"all\" unless they name one kind.");
-                sb.AppendLine("Fish: " + string.Join(", ", FishDatabase.All.Select(f => $"{f.id} = {f.hanzi} ({f.name})")));
+                sb.AppendLine("Fish: " + string.Join(", ", FishDatabase.LocalAndCarried().Select(f => $"{f.id} = {f.hanzi} ({f.name})")));
+            }
+            if (shop.busDriver)
+            {
+                sb.AppendLine("This is the bus driver. Wanting to ride, go somewhere or buy a ticket (我想去… / 坐车 / 走吧 / 上车 / 买票) is intent travel, " +
+                              "with item \"back\" for going back (回…) and \"next\" otherwise. Asking the price is ask_price.");
             }
             if (shop.buysFish)
             {
                 sb.AppendLine("This shop BUYS fish from the customer (intent sell_fish). Use fish \"all\" unless they name one kind.");
-                sb.AppendLine("Fish: " + string.Join(", ", FishDatabase.All.Select(f => $"{f.id} = {f.hanzi} ({f.name})")));
+                sb.AppendLine("Fish: " + string.Join(", ", FishDatabase.LocalAndCarried().Select(f => $"{f.id} = {f.hanzi} ({f.name})")));
             }
             sb.AppendLine($"Pending offer waiting for the customer's answer: {pendingOffer}.");
             sb.AppendLine("Intents: buy (wants to purchase an item), ask_price (asks how much something costs), sell_fish (wants to sell fish), " +
@@ -99,11 +113,13 @@ namespace UntitledGame.Companion
 
         public static string ClassifierSchema(ShopDef shop)
         {
-            var intents = shop.buysFish || shop.crabber
+            var intents = shop.busDriver
+                ? new[] { "travel", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" }
+                : shop.buysFish || shop.crabber
                 ? new[] { "sell_fish", "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" }
                 : new[] { "buy", "ask_price", "browse", "confirm", "decline", "greeting", "thanks", "goodbye", "other" };
-            var items = shop.items.Concat(new[] { "unclear", "none" });
-            var fish = FishDatabase.All.Select(f => f.id).Concat(new[] { "all", "none" });
+            var items = (shop.busDriver ? new[] { "next", "back" } : ShopStock.Goods(shop).Select(i => i.id)).Concat(new[] { "unclear", "none" });
+            var fish = FishDatabase.LocalAndCarried().Select(f => f.id).Concat(new[] { "all", "none" });
             string Enum(System.Collections.Generic.IEnumerable<string> v) => "[" + string.Join(",", v.Select(x => "\"" + x + "\"")) + "]";
             return "{\"type\":\"object\",\"properties\":{" +
                    "\"intent\":{\"type\":\"string\",\"enum\":" + Enum(intents) + "}," +

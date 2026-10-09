@@ -156,6 +156,16 @@ namespace UntitledGame.Environment
             horizon = Color.Lerp(horizon, grey, rain * 0.6f);
             zenith = Color.Lerp(zenith, grey * 0.85f, rain * 0.6f);
             Color cloud = cloudColor.Evaluate(t01);
+            // The region's haze (the desert's warm, dusty light) by day.
+            var region = Regions.PreviewRegion >= 0 ? Regions.Get(Regions.PreviewRegion) : Application.isPlaying ? Regions.Here : null;
+            if (region != null && region.hazeAmount > 0f)
+            {
+                float day = (1f - Darkness) * (1f - rain) * region.hazeAmount;
+                fog = Color.Lerp(fog, region.haze, day);
+                horizon = Color.Lerp(horizon, region.haze, day * 0.8f);
+                amb = Color.Lerp(amb, region.haze, day * 0.35f);
+                sunCol = Color.Lerp(sunCol, new Color(1f, 0.9f, 0.72f), day * 0.6f);
+            }
 
             if (sun != null)
             {

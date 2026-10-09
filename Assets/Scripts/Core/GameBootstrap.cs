@@ -59,6 +59,8 @@ namespace UntitledGame.Core
                 _lastDay = dayNight.Day;
             }
 
+            // Dress the scene for the region the player is in (the bus route: Environment.Regions).
+            Regions.Apply();
             _player = FindFirstObjectByType<PlayerController>();
             _cam = FindFirstObjectByType<CameraRig>();
             _meiBody = FindFirstObjectByType<CompanionController>();
@@ -208,6 +210,7 @@ namespace UntitledGame.Core
 
         private void Update()
         {
+            Progression.Perks.Tick();
             _unsavedPlaySeconds += Time.unscaledDeltaTime;
 
             // A restore point at the start of each new in-game day.

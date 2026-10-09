@@ -71,7 +71,7 @@ namespace UntitledGame.Core
         }
 
         /// <summary>The newer sections that aren't part of the original run (the full suite runs them at the end).</summary>
-        public static readonly string[] ExtraSections = { "mastery", "requests", "market", "sale", "fish", "balance", "hud", "crabs", "pitchpot", "home" };
+        public static readonly string[] ExtraSections = { "mastery", "requests", "market", "sale", "fish", "balance", "hud", "crabs", "pitchpot", "bus", "home" };
 
         private IEnumerator RunSections(string[] sections)
         {
@@ -123,6 +123,14 @@ namespace UntitledGame.Core
                     case "hud":
                         yield return HudChecks(ui);
                         break;
+                    case "bus":
+                    {
+                        float wait = Time.realtimeSinceStartup + 240f;
+                        while (Time.realtimeSinceStartup < wait && services.LlmStatus == ServiceStatus.Starting) yield return null;
+                        Check(services.LlmStatus == ServiceStatus.Ready, "the shopkeepers' AI is ready");
+                        yield return BusChecks(player, cam);
+                        break;
+                    }
                     case "market":
                         yield return MarketChecks(player, cam);
                         break;
@@ -183,15 +191,17 @@ namespace UntitledGame.Core
         private IEnumerator MarketChecks(PlayerController player, CameraRig cam)
         {
             yield return new WaitForSeconds(0.5f);
-            int signs = ShopkeeperBrain.Keepers.Count(k => k.transform.parent != null && k.transform.parent.Find("ShopSign") != null);
-            Check(signs == ShopkeeperBrain.Keepers.Count && signs == Catalog.Shops.Count, $"every stall has a sign ({signs}/{Catalog.Shops.Count})");
+            var stallKeepers = ShopkeeperBrain.Keepers.Where(k => !k.Shop.busDriver).ToList();
+            int stalls = Catalog.StallShops(Regions.Current).Count();
+            int signs = stallKeepers.Count(k => k.transform.parent != null && k.transform.parent.Find("ShopSign") != null);
+            Check(signs == stallKeepers.Count && signs == stalls, $"every stall has a sign ({signs}/{stalls})");
             Vector2 c = WorldShape.MarketCenter;
             player.Teleport(new Vector3(c.x - 3f, WorldShape.TerrainHeight(c.x - 3f, c.y) + 0.05f, c.y), 90f);
             cam.Configure(player.transform, 90f, 14f, 6f);
             yield return new WaitForSeconds(5f);
             yield return Shot("22_market_signs");
             var fish = ShopkeeperBrain.Keepers.First(k => k.Shop.buysFish);
-            int i = Catalog.Shops.IndexOf(fish.Shop);
+            int i = fish.Shop.stall;
             Vector2 spot = WorldShape.CustomerSpot(i), stall = WorldShape.StallPosition(i);
             Vector2 dir = (stall - spot).normalized;
             float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
@@ -345,16 +355,49 @@ namespace UntitledGame.Core
             PlayerStats.SetLevel("luck", luck);
             Check(prices.Take(5).SequenceEqual(new[] { 10, 20, 40, 70, 100 }) && prices[5] == 100 && prices[9] == 1000 && prices[19] == 100000,
                 $"training costs 10, 20, 40, 70, 100, then x10 each tier ({string.Join(", ", prices)})");
-            int hsk = SaveSystem.Data.hskLevel;
-            SaveSystem.Data.hskLevel = 0;
+            var lessonsBefore = SaveSystem.Data.lessonsDone.ToList();
+            int reachedBefore = SaveSystem.Data.regionReached, hskBefore = SaveSystem.Data.hskLevel;
+            SaveSystem.Data.regionReached = 0;
+            PlayerStats.SetLevel("luck", 0);
+            SetLessons(1, 0);
+            bool noneYet = !PlayerStats.CanTrainNext("luck");
+            SetLessons(1, 1);
+            bool first = PlayerStats.CanTrainNext("luck");
+            PlayerStats.SetLevel("luck", 1);
+            SetLessons(1, 3);
+            bool secondLocked = !PlayerStats.CanTrainNext("luck") && PlayerStats.NextNeeds("luck") == "1 more HSK 1 lesson";
+            SetLessons(1, 4);
+            bool secondOpen = PlayerStats.CanTrainNext("luck");
             PlayerStats.SetLevel("luck", 4);
-            bool fifth = PlayerStats.CanTrainNext("luck");
+            SetLessons(1, 10);
+            bool fifthLocked = !PlayerStats.CanTrainNext("luck");
+            SetLessons(1, 11);
+            bool fifthOpen = PlayerStats.CanTrainNext("luck");
+            // Tier 1 stays a surprise in Willow Bay, then opens with HSK 2 lessons in the desert.
             PlayerStats.SetLevel("luck", 5);
-            bool sixthLocked = !PlayerStats.CanTrainNext("luck") && PlayerStats.HskNeededForNext("luck") == 1;
-            SaveSystem.Data.hskLevel = 1;
-            bool sixthOpen = PlayerStats.CanTrainNext("luck");
-            Check(fifth && sixthLocked && sixthOpen, "each tier of 5 training levels opens with its HSK test");
-            SaveSystem.Data.hskLevel = hsk;
+            SetLessons(1, 11, 2, 10);
+            bool hiddenHome = !PlayerStats.CanTrainNext("luck") && PlayerStats.NextHidden("luck");
+            SaveSystem.Data.regionReached = 1;
+            SetLessons(1, 11, 2, 0);
+            bool tier1Locked = !PlayerStats.CanTrainNext("luck") && !PlayerStats.NextHidden("luck");
+            SetLessons(1, 11, 2, 1);
+            bool tier1Open = PlayerStats.CanTrainNext("luck");
+            // The last tier: the HSK 3 test, in the snow.
+            PlayerStats.SetLevel("luck", 15);
+            SaveSystem.Data.regionReached = Regions.Last;
+            SetLessons(1, 11, 2, 10, 3, 20);
+            SaveSystem.Data.hskLevel = 2;
+            bool lastLocked = !PlayerStats.CanTrainNext("luck") && PlayerStats.NextNeeds("luck") == "the HSK 3 test";
+            SaveSystem.Data.hskLevel = 3;
+            bool lastOpen = PlayerStats.CanTrainNext("luck");
+            string Thresholds(int tier) => string.Join("/", Enumerable.Range(tier * 5 + 1, 5).Select(Hsk.LessonsForUpgrade));
+            Check(noneYet && first && secondLocked && secondOpen && fifthLocked && fifthOpen && hiddenHome && tier1Locked && tier1Open && lastLocked && lastOpen &&
+                  Thresholds(0) == "1/4/6/9/11" && Thresholds(1) == "1/4/6/8/10" && Thresholds(2) == "1/6/11/16/20",
+                $"training opens level by level with each HSK level's lessons (HSK 1: {Thresholds(0)}; HSK 2: {Thresholds(1)}; HSK 3: {Thresholds(2)}; last tier: the HSK 3 test), and later tiers wait for their region");
+            SaveSystem.Data.lessonsDone.Clear();
+            SaveSystem.Data.lessonsDone.AddRange(lessonsBefore);
+            SaveSystem.Data.regionReached = reachedBefore;
+            SaveSystem.Data.hskLevel = hskBefore;
             PlayerStats.SetLevel("luck", luck);
 
             // Eye training: a tier's five levels double its fish's bar, and the next tier starts where the first did.
@@ -365,11 +408,12 @@ namespace UntitledGame.Core
             float octopusAtStart = FishPower.For(octopus, 0, 0, 0).barSize;
             Check(trained / fresh > 1.85f && trained / fresh < 2.15f && nextTrained / nextFresh > 1.85f && nextTrained / nextFresh < 2.15f,
                 $"5 eye-training levels double the bar for that tier's fish (mullet {fresh * 100f:0}% -> {trained * 100f:0}%, octopus {nextFresh * 100f:0}% -> {nextTrained * 100f:0}%)");
-            // The commonest fish of tier 0 (goby) and tier 1 (octopus), compared for the same swimming style.
-            var goby = FishDatabase.Get("goby");
-            float gobyFresh = FishPower.FromGaps(FishPower.BarGap(goby, 0), 0, 0).barSize, octopusAfterTier0 = FishPower.FromGaps(FishPower.BarGap(octopus, 5), 0, 0).barSize;
+            // The commonest fish of tier 0 and tier 1, compared for the same swimming style.
+            var firstCommon = fish.Where(f => FishPower.TierOf(f) == 0).OrderBy(FishPower.RarityRank).First();
+            var nextCommon = fish.Where(f => FishPower.TierOf(f) == 1).OrderBy(FishPower.RarityRank).First();
+            float gobyFresh = FishPower.FromGaps(FishPower.BarGap(firstCommon, 0), 0, 0).barSize, octopusAfterTier0 = FishPower.FromGaps(FishPower.BarGap(nextCommon, 5), 0, 0).barSize;
             Check(Mathf.Abs(octopusAfterTier0 - gobyFresh) < 0.005f && octopusAtStart < nextFresh,
-                $"finishing tier 0's eye training gives the next tier's commonest fish the bar a beginner has on tier 0's ({octopusAfterTier0 * 100f:0}% vs {gobyFresh * 100f:0}%)");
+                $"finishing tier 0's eye training gives the next tier's commonest fish ({nextCommon.name}) the bar a beginner has on tier 0's {firstCommon.name} ({octopusAfterTier0 * 100f:0}% vs {gobyFresh * 100f:0}%)");
 
             // Casting: 10 m for everyone; a perfect cast starts the meter 15% fuller.
             Check(Mathf.Approximately(PlayerStats.CastDistance, 10f), $"everyone casts up to {PlayerStats.CastDistance:0} m (strength no longer adds distance)");
@@ -512,13 +556,19 @@ namespace UntitledGame.Core
                 return up;
             });
             Check(each, "every income upgrade raises the daily haul");
-            SaveSystem.Data.hskLevel = 0;
+            var crabLessons = SaveSystem.Data.lessonsDone.ToList();
+            int crabReached = SaveSystem.Data.regionReached;
             PlayerStats.SetLevel("crab_pots", 5);
-            bool locked = !PlayerStats.CanTrainNext("crab_pots") && PlayerStats.HskNeededForNext("crab_pots") == 1;
+            SaveSystem.Data.regionReached = 1;
+            SetLessons(1, 11, 2, 0);
+            bool locked = !PlayerStats.CanTrainNext("crab_pots") && PlayerStats.NextNeeds("crab_pots") == "1 more HSK 2 lesson";
             Inventory.CanBuy("crab_pots", 1, out var why, out _);
-            SaveSystem.Data.hskLevel = 1;
+            SetLessons(1, 11, 2, 1);
             bool opens = PlayerStats.CanTrainNext("crab_pots") && Catalog.PriceOf(Catalog.Get("crab_pots")) == 100;
-            Check(locked && why == BuyResult.Locked && opens, "crab upgrades come 5 per HSK tier (the 6th pot needs HSK 1), priced like training");
+            SaveSystem.Data.lessonsDone.Clear();
+            SaveSystem.Data.lessonsDone.AddRange(crabLessons);
+            SaveSystem.Data.regionReached = crabReached;
+            Check(locked && why == BuyResult.Locked && opens, "crab upgrades open level by level with lessons like training (the 6th pot needs an HSK 2 lesson), priced like training");
             SetAll(5);
 
             // Days: one haul each morning; uncollected crabs keep only as long as the cooler allows.
@@ -691,9 +741,10 @@ namespace UntitledGame.Core
             Check(Mathf.Abs(biggestCommon - averageUncommon) < 0.01f, $"the biggest common fish counts like an average uncommon one ({biggestCommon:0.00} vs {averageUncommon:0.00} points)");
             Check(FishSale.BarRecipe(2) == (16, Rarity.Rare) && Mathf.Abs(FishSale.BarCapacity(2) - 16f * FishSale.Points(FishDatabase.Get("conger"), Kg(FishDatabase.Get("conger"), 0.8f))) < 0.01f,
                 "the third bar takes 16 rare fish at 80%");
-            int tier0 = Catalog.FishPrice(goby, Kg(goby, 0.5f)), tier1 = Catalog.FishPrice(FishDatabase.Get("octopus"), Kg(FishDatabase.Get("octopus"), 0.5f));
-            int tier2 = Catalog.FishPrice(FishDatabase.Get("skipjack"), Kg(FishDatabase.Get("skipjack"), 0.5f));
-            Check(tier1 >= tier0 * 8 && tier2 >= tier1 * 8, $"each fish tier sells for about ten times the last (goby ¥{tier0}, octopus ¥{tier1}, skipjack ¥{tier2})");
+            FishSpecies Commonest(int t) => FishDatabase.All.Where(f => f.IsFish && FishPower.TierOf(f) == t).OrderBy(FishPower.RarityRank).First();
+            var prices = Enumerable.Range(0, 4).Select(t => (f: Commonest(t), price: Catalog.FishPrice(Commonest(t), Kg(Commonest(t), 0.5f)))).ToList();
+            Check(Enumerable.Range(1, 3).All(t => prices[t].price >= prices[t - 1].price * 8),
+                $"each fish tier sells for about ten times the last ({string.Join(", ", prices.Select(x => $"{x.f.name} ¥{x.price}"))})");
             int hsk = SaveSystem.Data.hskLevel;
             var done = SaveSystem.Data.lessonsDone.ToList();
             SaveSystem.Data.hskLevel = 0;
@@ -711,7 +762,7 @@ namespace UntitledGame.Core
                 $"12 good sea bass fill 2 bars: x{quote.multiplier:0.00}, ¥{quote.baseValue} -> ¥{quote.total}");
             var chen = ShopkeeperBrain.Keepers.First(k => k.Shop.id == "fish");
             Check(chen.Shop.hanzi == "寿司店", $"Auntie Chen runs a sushi bar ({chen.Shop.hanzi} {chen.Shop.english})");
-            int i = Catalog.Shops.IndexOf(chen.Shop);
+            int i = chen.Shop.stall;
             Vector2 spot = WorldShape.CustomerSpot(i), stall = WorldShape.StallPosition(i);
             Vector2 dir = (stall - spot).normalized;
             float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
@@ -835,7 +886,10 @@ namespace UntitledGame.Core
             var oar = FishDatabase.Get("oarfish");
             var night = new CatchContext { hour = 23f, shoreDistance = 80f, lineKg = 80f, bait = squid };
             var glow = new CatchContext { hour = 23f, shoreDistance = 80f, lineKg = 80f, bait = Catalog.Get("bait_glow") };
+            int here = SaveSystem.Data.location;
+            SaveSystem.Data.location = Regions.HomeOfTier(FishPower.TierOf(oar)); // where the oarfish lives
             Check(FishDatabase.Missing(oar, night) != null && FishDatabase.Missing(oar, glow) == null, "the oarfish still only bites on the glow lure");
+            SaveSystem.Data.location = here;
             discovered.Clear();
             discovered.AddRange(saved);
         }
@@ -1007,7 +1061,9 @@ namespace UntitledGame.Core
             Affinity.Learn("colours", "food", "self-test");
             Affinity.Learn("colours", "family", "self-test");
             Affinity.RecordGift("colours", disliked: false);
-            Check(Affinity.Level("colours") == 2, "好朋友 needs HSK 2 even with everything else done");
+            Check(Affinity.Level("colours") == 3 && Affinity.HskNeeded("colours", 4) == 1 && Affinity.HskNeeded("colours_desert", 3) == 2 &&
+                  Affinity.HskNeeded("colours_snow", 4) == 3 && Affinity.HskNeeded("colours_mars", 4) == 3,
+                "in Willow Bay the closest friendship only needs Willow Bay's test (HSK 1); the desert's needs HSK 2, Snow Bay's and Mars's HSK 3");
             s.facts.Clear();
             s.giftLevels.Clear();
             s.lastGiftDay = -1;
@@ -1071,6 +1127,280 @@ namespace UntitledGame.Core
             yield return new WaitForSeconds(0.4f);
         }
 
+        /// <summary>Marks lessons passed, as (HSK level, how many) pairs, and no others: SetLessons(1, 11, 2, 3).</summary>
+        private static void SetLessons(params int[] levelCounts)
+        {
+            var done = SaveSystem.Data.lessonsDone;
+            done.Clear();
+            for (int i = 0; i + 1 < levelCounts.Length; i += 2)
+                for (int k = 1; k <= Mathf.Min(levelCounts[i + 1], Hsk.LessonCounts[levelCounts[i]]); k++)
+                    done.Add($"{levelCounts[i]}-{k}");
+        }
+
+        /// <summary>
+        /// The bus: always there, the driver only after HSK 1; a ticket costs what ten of the region's best fish at their
+        /// biggest sell for; riding switches the region's look, fish, goods and everyone's clothes; desert to snow needs
+        /// HSK 2 and the next ticket, Snow Bay to Mars HSK 3 and the last; going back is free; paid legs stay paid.
+        /// </summary>
+        private IEnumerator BusChecks(PlayerController player, CameraRig cam)
+        {
+            var d = SaveSystem.Data;
+            int hsk = d.hskLevel, location = d.location, reached = d.regionReached, money = d.money;
+            var discovered = d.discoveredFish.ToList();
+            d.location = 0;
+            d.regionReached = 0;
+            Regions.Apply();
+
+            // Tickets and which sea each fish lives in.
+            int fare0 = BusTrip.Fare(0), fare1 = BusTrip.Fare(1), fare2 = BusTrip.Fare(2);
+            var best0 = BusTrip.FareFish(0);
+            Check(FishPower.TierOf(best0) == 0 && fare0 == 10 * Catalog.FishPrice(best0, best0.maxWeight) &&
+                  FishDatabase.All.Where(f => f.IsFish && FishPower.TierOf(f) == 0).All(f => Catalog.FishPrice(f, f.maxWeight) <= Catalog.FishPrice(best0, best0.maxWeight)) &&
+                  fare1 == fare0 * 10 && fare2 == fare1 * 10,
+                $"tickets cost ten top-size best fish: Willow Bay ¥{fare0} ({BusTrip.FareFishEnglish(0)}), the desert ¥{fare1} ({BusTrip.FareFishEnglish(1)}), Snow Bay ¥{fare2} ({BusTrip.FareFishEnglish(2)})");
+            Check(Enumerable.Range(0, 4).All(t => FishDatabase.All.Count(f => f.IsFish && FishPower.TierOf(f) == t) == 20),
+                $"every region's sea has 20 kinds of fish ({string.Join(", ", Enumerable.Range(0, 4).Select(t => FishDatabase.All.Count(f => f.IsFish && FishPower.TierOf(f) == t)))})");
+            var octopus = FishDatabase.Get("octopus");
+            var shark = FishDatabase.Get("cod");
+            var martian = FishDatabase.Get("dustminnow");
+            foreach (var f in new[] { "octopus", "cod", "dustminnow" }) if (!d.discoveredFish.Contains(f)) d.discoveredFish.Add(f);
+            var ctx = new CatchContext { hour = 20f, lineKg = 100f, shoreDistance = 100f, bait = Catalog.Get("bait_squid") };
+            string atHome = FishDatabase.Missing(octopus, ctx);
+            Check(atHome != null && atHome.StartsWith("doesn't live here") && Enumerable.Range(0, 4).All(r => Regions.FishTier(r) == r),
+                $"each region's sea has its own tier (octopus at home: {atHome})");
+
+            // Goods of later tiers are a surprise: not listed or displayed in Willow Bay.
+            var blue = Catalog.Get("line_blue");
+            var blueTag = PriceTag.Known.FirstOrDefault(t => t.itemId == "line_blue");
+            var tackleShop = Catalog.Shop("tackle");
+            Check(!ShopStock.Revealed(blue) && !ShopStock.Goods(tackleShop).Contains(blue) && (blueTag == null || !blueTag.gameObject.activeSelf) &&
+                  !Encyclopedia.NoteFor("what fishing lines are there").Contains("蓝线"),
+                $"HSK 1 goods are hidden in Willow Bay (Old Wang shows {string.Join(", ", ShopStock.Goods(tackleShop).Select(i => i.id))})");
+
+            // The bus is always there; the driver turns up with HSK 1.
+            var stop = BusStop.Instance;
+            Check(stop != null && stop.transform.Find("Bus") != null, "the bus is parked at the bus stop");
+            if (stop == null) yield break;
+            d.hskLevel = 0;
+            yield return null;
+            yield return null;
+            Check(!stop.Driver.activeSelf && !ShopkeeperBrain.Keepers.Any(k => k.Shop.busDriver), "before the HSK 1 test there's no driver");
+            Vector2 view = WorldShape.BusStopCenter + new Vector2(-2f, 8f);
+            player.Teleport(new Vector3(view.x, WorldShape.TerrainHeight(view.x, view.y) + 0.05f, view.y), 180f);
+            cam.Configure(player.transform, 180f, 16f, 8f);
+            yield return new WaitForSeconds(1f);
+            yield return Shot("29a_bus_stop_closed");
+            d.hskLevel = 1;
+            yield return null;
+            yield return null;
+            var driver = ShopkeeperBrain.Keepers.FirstOrDefault(k => k.Shop.busDriver);
+            Check(stop.Driver.activeSelf && driver != null, "after HSK 1, 张师傅 the driver is at the bus");
+            if (driver == null) yield break;
+
+            var busShop = driver.Shop;
+            var p1 = ShopIntentParser.Parse(busShop, "我想去沙漠", false);
+            var p2 = ShopIntentParser.Parse(busShop, "车票多少钱", false);
+            var p3 = ShopIntentParser.Parse(busShop, "我要回去", false);
+            var p4 = ShopIntentParser.Parse(busShop, "我想去雪湾", false);
+            Check(p1?.intent == "travel" && p1.item == "next" && p2?.intent == "ask_price" && p3?.intent == "travel" && p3.item == "back" && p4?.intent == "travel",
+                $"bus lines are understood (去沙漠 -> {p1}; 车票多少钱 -> {p2}; 回去 -> {p3}; 去雪湾 -> {p4})");
+
+            yield return GoToShop(player, cam, WorldShape.BusStall, driver);
+            yield return WaitIdle(driver, 30f);
+            yield return Shot("29b_bus_driver");
+
+            // Not enough money: he won't sell a ticket.
+            d.money = fare0 - 1;
+            driver.HandlePlayerUtterance("师傅，我想去金沙湾。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer == null && Regions.Current == 0 && BusTrip.CannotGoOn() == "money", $"with ¥{d.money} (the ticket is ¥{fare0}) he won't sell a ticket");
+
+            // Buy the ticket and ride.
+            d.money = fare0 + 100;
+            driver.HandlePlayerUtterance("我想去金沙湾。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer != null && driver.PendingOffer.busTo == 1 && driver.PendingOffer.price == fare0, $"he offers a ticket ({driver.PendingOffer?.english})");
+            int paidFrom = d.money; // (other sections may have added a little money: compare with just before)
+            // Willow Bay's house: a double bed and a chair there (they stay in that house).
+            Inventory.Add("bed_double", 1);
+            int placedBefore = d.placed.Count;
+            d.placed.Add(new PlacedItem { id = "chair", region = 0, x = 0, y = 0, z = 0 });
+            float homeEnergy = Energy.Max;
+            int dayBefore = DayNightCycle.Instance.Day;
+            Energy.Spend(30f);
+            driver.HandlePlayerUtterance("好，走吧。");
+            yield return WaitForRide(stop);
+            Check(DayNightCycle.Instance.Day == dayBefore + 1 && Mathf.Abs(DayNightCycle.Instance.TimeOfDay - 6f) < 0.3f,
+                $"the bus ride takes the night: day {dayBefore} -> {DayNightCycle.Instance.Day}, arriving at {DayNightCycle.Instance.ClockText}");
+            Check(Energy.BedLevel == 0 && Mathf.Approximately(Energy.Max, Energy.BedEnergy[0]) && Mathf.Approximately(Energy.Current, Energy.Max) && homeEnergy > Energy.Max,
+                $"...rested as if you'd slept in the desert house: {Energy.Current:0}/{Energy.Max:0} energy (Willow Bay's house, with its double bed and chair, gives {homeEnergy:0})");
+            Check(!FindObjectsByType<FurnitureInteractable>(FindObjectsSortMode.None).Any(fi => fi.name.Contains("chair")),
+                "...and Willow Bay's furniture stays in Willow Bay's house");
+            Inventory.Add("bed_desert2", 1);
+            Check(Mathf.Approximately(Energy.Max, Energy.BedEnergy[2]) && Energy.Bed.id == "bed_desert2", $"a desert bed counts in the desert house ({Energy.Bed.english}: {Energy.Max:0})");
+            Check(Regions.Current == 1 && d.regionReached == 1 && d.money == paidFrom - fare0 && RegionShown(1) && Vector3.Distance(player.transform.position, BusStop.ArrivalSpot) < 2f,
+                $"the ticket is paid (¥{paidFrom} -> ¥{d.money}) and the bus takes you to {Regions.Here.english}: the desert look is on, you get off at the stop " +
+                $"(region {Regions.Current}, reached {d.regionReached}, ¥{d.money}, look {RegionShown(1)}, {Vector3.Distance(player.transform.position, BusStop.ArrivalSpot):0.0} m from the stop)");
+            Check(FishDatabase.Missing(octopus, ctx) == null && FishDatabase.Missing(shark, ctx) != null && FishDatabase.Missing(FishDatabase.Get("goby"), ctx) != null,
+                "...the desert's sea has its own fish (the octopus; not Willow Bay's goby or Snow Bay's cod)");
+            Check(ShopStock.Revealed(blue) && (blueTag == null || blueTag.gameObject.activeSelf) && !ShopStock.Revealed("line_black"),
+                "...Old Wang now puts out the blue line (the black line is still a surprise)");
+            // Perks: the cook here as an old friend pays 20% more; the furniture maker gives his masterpiece.
+            var cook = Catalog.ShopFor("fish", 1);
+            var carpenter = Catalog.ShopFor("furniture", 1);
+            float perkBefore = FishSale.PerkMultiplier;
+            d.hskLevel = 2; // (the desert's closest friendships need its test, HSK 2)
+            MakeOldFriends(cook.id);
+            MakeOldFriends(carpenter.id);
+            Check(Mathf.Approximately(perkBefore, 1f) && Mathf.Approximately(FishSale.PerkMultiplier, 1.2f) && Inventory.Owns("sig_desert") && Perks.Has("furniture") && !Perks.Has("tackle"),
+                $"old friends here give their perks ({cook.keeperName}: x{FishSale.PerkMultiplier:0.00} for fish; {carpenter.keeperName}: {Catalog.Get("sig_desert").english})");
+            d.hskLevel = 1;
+            var outfit = player.GetComponent<RegionOutfit>();
+            var meiOutfit = FindFirstObjectByType<CompanionBrain>()?.GetComponent<RegionOutfit>();
+            int dressed = FindObjectsByType<RegionOutfit>(FindObjectsSortMode.None).Count(o => o.Shown == 1);
+            Check(outfit != null && outfit.Shown == 1 && outfit.Body.sharedMesh.name.Contains("desert") && outfit.Hat(1) != null && outfit.Hat(1).activeSelf && meiOutfit != null && dressed >= 12,
+                $"...and everyone is dressed for the desert ({dressed} characters; the player has a sun hat and {outfit?.Body.sharedMesh.name})");
+            var hereKeepers = ShopkeeperBrain.Keepers.Where(k => !k.Shop.busDriver).ToList();
+            Check(hereKeepers.Count == 10 && hereKeepers.All(k => k.Shop.region == 1) && FindObjectsByType<MinigameStall>(FindObjectsSortMode.None).Length == 3,
+                $"every stall is here too, with new people ({string.Join(", ", hereKeepers.OrderBy(k => k.Shop.stall).Select(k => k.DisplayName))})");
+            cam.Configure(player.transform, 200f, 16f, 9f);
+            yield return new WaitForSeconds(1.5f);
+            yield return Shot("30a_desert_bus_stop");
+            yield return CloseUp(player, cam, "30b_desert_outfits");
+
+            // On to the snow: HSK 2 and the next ticket.
+            yield return GoToShop(player, cam, WorldShape.BusStall, driver);
+            yield return WaitIdle(driver, 30f);
+            d.money = fare1 + 50;
+            driver.HandlePlayerUtterance("师傅，我想去雪湾。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer == null && BusTrip.CannotGoOn() == "hsk", "riding on to the snow needs the HSK 2 test");
+            d.hskLevel = 2;
+            driver.HandlePlayerUtterance("我想去雪湾。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer != null && driver.PendingOffer.busTo == 2 && driver.PendingOffer.price == fare1, $"after HSK 2 he offers the next ticket ({driver.PendingOffer?.english})");
+            int paidFrom1 = d.money; // (other sections may have added a little money: compare with just before)
+            driver.HandlePlayerUtterance("好的，走吧。");
+            yield return WaitForRide(stop);
+            Check(Regions.Current == 2 && d.regionReached == 2 && d.money == paidFrom1 - fare1 && RegionShown(2) && Weather.Snowy, $"the bus takes you to {Regions.Here.english}: snow on the ground and in the air");
+            Check(FishDatabase.Missing(shark, ctx) == null && FishDatabase.Missing(octopus, ctx) != null && ShopStock.Revealed("line_black") && !ShopStock.Revealed("line_gold"),
+                "...the snowy sea has its own fish (the cod), and HSK 2 goods are out (HSK 3 goods wait for the next stop)");
+            Check(outfit.Shown == 2 && outfit.Body.sharedMesh.name.Contains("snow") && outfit.Hat(2).activeSelf && outfit.Extra(2) != null && outfit.Extra(2).activeSelf && !outfit.Hat(1).activeSelf,
+                "...and everyone wears coats, beanies and scarves");
+            cam.Configure(player.transform, 200f, 16f, 9f);
+            yield return new WaitForSeconds(2f);
+            yield return Shot("31a_snow_bus_stop");
+            yield return CloseUp(player, cam, "31b_snow_outfits");
+            Vector2 mc = WorldShape.MarketCenter;
+            player.Teleport(new Vector3(mc.x - 13f, WorldShape.TerrainHeight(mc.x - 13f, mc.y) + 0.05f, mc.y), 90f);
+            cam.Configure(player.transform, 90f, 18f, 10f);
+            yield return new WaitForSeconds(2f);
+            yield return Shot("31c_snow_market");
+
+            // On to Mars: HSK 3 and the last ticket.
+            yield return GoToShop(player, cam, WorldShape.BusStall, driver);
+            yield return WaitIdle(driver, 30f);
+            d.money = fare2 + 10;
+            driver.HandlePlayerUtterance("师傅，我想去火星。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer == null && BusTrip.CannotGoOn() == "hsk", "riding on to Mars needs the HSK 3 test");
+            Hsk.PassTest(3);
+            Check(!ShopStock.Revealed("line_gold"), "...and passing it doesn't bring HSK 3 goods out in Snow Bay");
+            driver.HandlePlayerUtterance("我想去火星。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer != null && driver.PendingOffer.busTo == 3 && driver.PendingOffer.price == fare2, $"after HSK 3 he offers a ticket to Mars ({driver.PendingOffer?.english})");
+            int paidFrom2 = d.money; // (other sections may have added a little money: compare with just before)
+            driver.HandlePlayerUtterance("好的，走吧。");
+            yield return WaitForRide(stop);
+            Check(Regions.Current == 3 && Regions.Here.id == "mars" && d.regionReached == 3 && d.money == paidFrom2 - fare2 && RegionShown(3) && !Weather.Snowy,
+                $"the bus takes you to {Regions.Here.english}: red ground and a purple sea");
+            Check(FishDatabase.Missing(martian, ctx) == null && FishDatabase.Missing(shark, ctx) != null && ShopStock.Revealed("line_gold") && BusTrip.Next < 0 && BusTrip.CannotGoOn() == "end",
+                "...the purple sea has the Martian fish, HSK 3 goods are out, and it's the end of the line");
+            Check(outfit.Shown == 3 && outfit.Body.sharedMesh.name.Contains("mars") && outfit.Extra(3) != null && outfit.Extra(3).activeSelf && !outfit.Extra(2).activeSelf,
+                "...and everyone wears a space suit and helmet");
+            cam.Configure(player.transform, 200f, 16f, 9f);
+            yield return new WaitForSeconds(2f);
+            yield return Shot("32a_mars_bus_stop");
+            yield return CloseUp(player, cam, "32b_mars_outfits");
+            player.Teleport(new Vector3(mc.x - 13f, WorldShape.TerrainHeight(mc.x - 13f, mc.y) + 0.05f, mc.y), 90f);
+            cam.Configure(player.transform, 90f, 18f, 10f);
+            yield return new WaitForSeconds(2f);
+            yield return Shot("32c_mars_market");
+            Vector2 dock = WorldShape.DockShorePoint + WorldShape.DockDirection * 5f;
+            player.Teleport(new Vector3(dock.x, WorldShape.TerrainHeight(dock.x, dock.y) + 0.05f, dock.y), 0f);
+            cam.Configure(player.transform, 160f, 20f, 12f);
+            yield return new WaitForSeconds(2f);
+            yield return Shot("32d_mars_sea");
+            d.money = 50;
+
+            // Back for free, and the paid legs stay paid.
+            yield return GoToShop(player, cam, WorldShape.BusStall, driver);
+            yield return WaitIdle(driver, 30f);
+            driver.HandlePlayerUtterance("师傅，我想回雪湾。");
+            yield return WaitIdle(driver);
+            Check(driver.PendingOffer != null && driver.PendingOffer.busTo == 2 && driver.PendingOffer.price == 0, $"going back is free ({driver.PendingOffer?.english})");
+            driver.HandlePlayerUtterance("好的。");
+            yield return WaitForRide(stop);
+            Check(Regions.Current == 2 && RegionShown(2) && d.money == 50, "...back in Snow Bay, nothing paid");
+            d.money = 0;
+            Check(BusTrip.NextPaid && BusTrip.CannotGoOn() == null, "riding to Mars again needs no ticket, even with no money");
+
+            // Put everything back.
+            if (ShopConversation.Active != null) ShopConversation.Instance.End(sayGoodbye: false);
+            d.placed.RemoveAll(pl => pl.id == "chair" && pl.region == 0 && pl.x == 0 && pl.z == 0);
+            Inventory.Remove("bed_double", 1);
+            Inventory.Remove("bed_desert2", 1);
+            Inventory.Remove("sig_desert", 1);
+            foreach (var id in new[] { cook.id, carpenter.id }) { var ks = Affinity.State(id); ks.facts.Clear(); ks.giftLevels.Clear(); ks.level = 0; }
+            d.perksGranted.Clear();
+            d.hskLevel = hsk;
+            d.location = location;
+            d.regionReached = reached;
+            d.money = money;
+            d.discoveredFish.Clear();
+            d.discoveredFish.AddRange(discovered);
+            Regions.Apply();
+        }
+
+        /// <summary>Everything done for the highest friendship with a keeper (facts, a gift per level, tests), then evaluated.</summary>
+        private static void MakeOldFriends(string shopId)
+        {
+            var ks = Affinity.State(shopId);
+            foreach (var f in new[] { "hometown", "siblings", "hobby", "food", "family", "birthday", "dream" }) if (!ks.facts.Contains(f)) ks.facts.Add(f);
+            for (int l = 1; l <= Affinity.MaxLevel; l++) if (!ks.giftLevels.Contains(l)) ks.giftLevels.Add(l);
+            Affinity.Evaluate(shopId);
+        }
+
+        private IEnumerator WaitForRide(BusStop stop)
+        {
+            float until = Time.realtimeSinceStartup + 30f;
+            yield return new WaitForSeconds(0.5f);
+            while ((stop.Riding || SleepSystem.Instance.Busy) && Time.realtimeSinceStartup < until) yield return null;
+            yield return null;
+        }
+
+        private static bool RegionShown(int region)
+        {
+            var looks = FindObjectsByType<RegionStyle>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            return looks.Length > 0 && looks.All(l => l.gameObject.activeSelf == (l.region == region));
+        }
+
+        /// <summary>The player, Mei and a shopkeeper side by side in the plaza, to see their clothes.</summary>
+        private IEnumerator CloseUp(PlayerController player, CameraRig cam, string shot)
+        {
+            if (ShopConversation.Active != null) ShopConversation.Instance.End(sayGoodbye: false);
+            var keeper = ShopkeeperBrain.Keepers.First(k => k.Shop.role == "fish");
+            int i = keeper.Shop.stall;
+            Vector2 spot = WorldShape.CustomerSpot(i), stall = WorldShape.StallPosition(i);
+            Vector2 dir = (stall - spot).normalized;
+            float yaw = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
+            player.Teleport(new Vector3(spot.x, WorldShape.TerrainHeight(spot.x, spot.y) + 0.05f, spot.y), yaw + 180f);
+            FindFirstObjectByType<CompanionController>()?.Warp();
+            cam.Configure(player.transform, yaw, 12f, 4.5f); // from the plaza, looking at their faces
+            yield return new WaitForSeconds(1.5f);
+            yield return Shot(shot);
+        }
+
         /// <summary>Walks up to a stall and "presses E" to start talking with its keeper.</summary>
         private IEnumerator GoToShop(PlayerController player, CameraRig cam, int stall, ShopkeeperBrain keeper)
         {
@@ -1120,7 +1450,7 @@ namespace UntitledGame.Core
             yield return WaitIdle(books);
             Check(Inventory.Owns("book_basics"), "bought Fishing for Beginners by saying 要");
             var found = PlayerStats.ReadBook("book_basics");
-            Check(found.Count == 4 && PlayerStats.IsDiscovered(FishDatabase.Get("mackerel")), $"reading it discovered {found.Count} fish ({string.Join(", ", found.Select(f => f.name))})");
+            Check(found.Count == Catalog.Get("book_basics").teachesFish.Length && PlayerStats.IsDiscovered(FishDatabase.Get("mackerel")), $"reading it discovered {found.Count} fish ({string.Join(", ", found.Select(f => f.name))})");
             // Every requirement has to be met: distance, bait, line, time.
             var mackerel = FishDatabase.Get("mackerel");
             var near = new CatchContext { hour = 9f, shoreDistance = 3f, lineKg = 3f, bait = Catalog.Get("bait_worm") };
@@ -1138,6 +1468,8 @@ namespace UntitledGame.Core
             Check(ui.Shop.Keeper == gym, "walking to Coach Wu switches the shop window to the trainer");
             yield return WaitIdle(gym, 30f);
             float calmBefore = FishPower.ForPlayer(FishDatabase.Get("mackerel")).moveRate;
+            bool addedLesson = !SaveSystem.Data.lessonsDone.Contains("1-1");
+            if (addedLesson) SaveSystem.Data.lessonsDone.Add("1-1"); // the first training level needs one HSK 1 lesson
             yield return Say(vc, gym, SpeechEngine.VoiceMale, "教练，我想买力量训练。");
             yield return WaitIdle(gym);
             Check(gym.PendingOffer != null && gym.PendingOffer.itemId == "up_cast", "asking for 力量训练 gets a strength-training offer");
@@ -1146,6 +1478,7 @@ namespace UntitledGame.Core
             float calmAfter = FishPower.ForPlayer(FishDatabase.Get("mackerel")).moveRate;
             Check(PlayerStats.Level("cast") == 1 && calmAfter < calmBefore, $"strength training calms fish (mackerel x{calmBefore:0.00} -> x{calmAfter:0.00})");
             Check(Catalog.PriceOf(Catalog.Get("up_cast")) == 20, $"the next level costs more (¥{Catalog.PriceOf(Catalog.Get("up_cast"))})");
+            if (addedLesson) SaveSystem.Data.lessonsDone.Remove("1-1");
             ShopConversation.Instance.End(sayGoodbye: false);
             yield return FriendshipChecks(vc, player, cam, ui);
         }
@@ -1211,7 +1544,7 @@ namespace UntitledGame.Core
         private IEnumerator SchoolChecks(VoiceChatController vc, PlayerController player, CameraRig cam, GameUI ui)
         {
             var teacher = ShopkeeperBrain.Keepers.FirstOrDefault(k => k.Shop.school);
-            Check(teacher != null && Catalog.Shops.IndexOf(teacher.Shop) == 8 && WorldShape.StallCount == 10, "the test centre is the 9th stall, with 高老师 (海叔's crab stall is the 10th)");
+            Check(teacher != null && teacher.Shop.stall == 8 && WorldShape.StallCount == 10, "the test centre is the 9th stall, with 高老师 (海叔's crab stall is the 10th)");
             if (teacher == null) yield break;
 
             // Before any test: Old Wang won't sell the blue line even to a friend.
@@ -1327,9 +1660,14 @@ namespace UntitledGame.Core
             Check(Mathf.Abs(FishSale.PerFill - expected) < 0.001f && FishSale.PerFill >= 0.25f,
                 $"after HSK 1 (and {FishSale.LessonsPassed} lessons) each bar on Auntie Chen's scale is worth +{FishSale.PerFill * 100f:0}%");
 
-            // Unlocked: the blue line (friend + HSK 1).
+            // HSK 1 goods stay a surprise in Willow Bay; from the desert on, Old Wang sells the blue line.
             tackle.HandlePlayerUtterance("老板，我要蓝线。");
-            Check(tackle.PendingOffer != null && tackle.PendingOffer.itemId == "line_blue", "after HSK 1, Old Wang offers the blue line");
+            bool hiddenHere = tackle.PendingOffer == null;
+            int reachedNow = SaveSystem.Data.regionReached;
+            SaveSystem.Data.regionReached = 1;
+            tackle.HandlePlayerUtterance("老板，我要蓝线。");
+            Check(hiddenHere && tackle.PendingOffer != null && tackle.PendingOffer.itemId == "line_blue", "the blue line isn't sold in Willow Bay, but is once you've reached the desert");
+            SaveSystem.Data.regionReached = reachedNow;
             tackle.HandlePlayerUtterance("不要了。");
             tackle.Interrupt();
             ShopConversation.Instance.End(sayGoodbye: false);
@@ -1393,8 +1731,7 @@ namespace UntitledGame.Core
         }
 
         /// <summary>
-        /// Energy, the longer day, sleeping in bed, passing out (keeping only 3 slots), the bag limit, currents, the island
-        /// camp and cosmetics.
+        /// Energy, the longer day, sleeping in bed, passing out (keeping only 3 slots), the bag limit, currents and cosmetics.
         /// </summary>
         private IEnumerator DayChecks(PlayerController player, CameraRig cam)
         {
@@ -1461,28 +1798,9 @@ namespace UntitledGame.Core
             boat.SimulatedInput = Vector2.zero;
             boat.ReturnToDock();
 
-            // The island: with the best boat, camp and sleep there.
+            // The best boat goes past any current.
             Inventory.Add("boat_new", 1);
-            Check(Rowboat.Range >= 140f, $"the new boat can go {Rowboat.Range:0} m out (the island is at {WorldShape.IslandCenter.y - WorldShape.CoastZ:0} m)");
-            var camp = IslandCamp.Instance;
-            Check(camp != null, "the island has a camp spot");
-            if (camp != null)
-            {
-                player.Teleport(camp.transform.position + Vector3.up * 0.2f, 0f);
-                cam.Configure(player.transform, 200f, 25f, 9f);
-                yield return new WaitForSeconds(0.5f);
-                Check(PlayerController.IsWalkable(player.transform.position), "you can walk on the island");
-                camp.Interact(); // set up camp
-                Check(camp.IsSetUp, "set up camp on the island");
-                yield return new WaitForSeconds(1f);
-                yield return Shot("15_island_camp");
-                dn.TimeOfDay = 22f;
-                day = dn.Day;
-                camp.Interact(); // sleep in the tent
-                yield return new WaitForSeconds(0.5f);
-                while (SleepSystem.Instance.Busy) yield return null;
-                Check(dn.Day == day + 1 && WorldShape.OnIsland(player.transform.position.x, player.transform.position.z), $"slept in the tent and woke on the island (day {dn.Day}, {dn.ClockText})");
-            }
+            Check(Rowboat.Range >= 140f, $"the new boat can go {Rowboat.Range:0} m out");
 
             // Cosmetics: buying puts them on.
             Inventory.Add("cos_boat_red", 1);
@@ -1950,6 +2268,7 @@ namespace UntitledGame.Core
             while (f.State != FishingState.Waiting && f.State != FishingState.Idle && Time.time - t < 5f) yield return null;
             yield return new WaitForSeconds(1.5f);
             yield return Shot("10_waiting");
+            f.DebugNextSpecies = "goby"; // the easiest starter fish: the test bot is crude, and this checks the flow
             f.DebugBiteNow();
             t = Time.time;
             while (f.State != FishingState.Bite && Time.time - t < 5f) yield return null;

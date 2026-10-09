@@ -80,8 +80,8 @@ namespace UntitledGame.Companion
             toPlayer.y = 0f;
             float dist = toPlayer.magnitude;
 
-            // The player is out in the boat or on the island: wait on the mainland (no following across the water).
-            if (Fishing.Rowboat.PlayerAboard || WorldShape.OnIsland(target.position.x, target.position.z, 6f))
+            // The player is out in the boat: wait on the shore (no following across the water).
+            if (Fishing.Rowboat.PlayerAboard)
             {
                 _crumbs.Clear();
                 _lastCrumb = target.position;

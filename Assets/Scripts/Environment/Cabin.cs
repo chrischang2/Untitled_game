@@ -30,7 +30,7 @@ namespace UntitledGame.Environment
         /// <summary>The player's house (the first cabin), or null.</summary>
         public static Cabin PlayerHouse => All.Count > 0 ? All[0] : null;
 
-        private Transform _door;
+        private readonly List<Transform> _doors = new List<Transform>(); // each region's house has its own leaf
         private float _doorAngle;
         private bool _doorWasOpen;
         private readonly Dictionary<string, Renderer[]> _sides = new Dictionary<string, Renderer[]>();
@@ -57,7 +57,7 @@ namespace UntitledGame.Environment
             var front = transform.Find("Front");
             if (front != null)
                 foreach (var t in front.GetComponentsInChildren<Transform>(true))
-                    if (t.name == "door") _door = t;
+                    if (t.name == "door") _doors.Add(t);
             var light = transform.Find("InteriorLight");
             if (light != null)
             {
@@ -151,7 +151,7 @@ namespace UntitledGame.Environment
 
         private void UpdateDoor()
         {
-            if (_door == null) return;
+            if (_doors.Count == 0) return;
             Vector3 doorway = transform.TransformPoint(new Vector3(DoorX, 0f, HalfDepth));
             bool open = false;
             // Anyone nearby: the player, Mei or Tangyuan.
@@ -167,7 +167,7 @@ namespace UntitledGame.Environment
                 AudioManager.Instance?.PlayAt(open ? "SFX/rpg_creak1" : "SFX/rpg_creak2", doorway, 0.35f, 0.1f);
             }
             _doorAngle = Mathf.MoveTowards(_doorAngle, open ? doorOpenAngle : 0f, 260f * Time.deltaTime);
-            _door.localRotation = Quaternion.Euler(0f, _doorAngle, 0f);
+            foreach (var d in _doors) d.localRotation = Quaternion.Euler(0f, _doorAngle, 0f);
         }
 
         private static float Flat(Vector3 v)

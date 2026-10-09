@@ -22,6 +22,9 @@ namespace UntitledGame.Economy
         public const float RarityStep = 1.5f, FillQuality = 0.8f;
 
         /// <summary>A fish's points on the scale: rarer and bigger fish fill the bar faster. Junk barely counts.</summary>
+        /// <summary>+20% when the cook buying your fish here is an old friend (Progression.Perks).</summary>
+        public static float PerkMultiplier => Progression.Perks.Has("fish") ? 1f + Progression.Perks.FishSaleBonus : 1f;
+
         public static float Points(FishSpecies s, float kg)
         {
             if (s == null || !s.IsFish) return 0.2f;
@@ -97,7 +100,7 @@ namespace UntitledGame.Economy
             q.baseValue = q.fish.Sum(f => f.value);
             q.fills = Fills(q.points);
             q.multiplier = 1f + q.fills * q.perFill;
-            q.total = Mathf.RoundToInt(q.baseValue * (1f + q.friendshipPct / 100f) * q.multiplier);
+            q.total = Mathf.RoundToInt(q.baseValue * (1f + q.friendshipPct / 100f) * q.multiplier * PerkMultiplier); // (+20% for an old friend: Perks)
             return q;
         }
 

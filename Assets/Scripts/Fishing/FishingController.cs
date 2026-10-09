@@ -139,6 +139,8 @@ namespace UntitledGame.Fishing
         private bool _simulateDown;
         public void SimulateClick() => _simulateDown = true;
         public void DebugBiteNow() => _biteTimer = Mathf.Min(_biteTimer, 0.05f);
+        /// <summary>Test hook: the next bite is this species (then back to random).</summary>
+        public string DebugNextSpecies;
 
         private bool PointerOverUI => EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
 
@@ -426,7 +428,8 @@ namespace UntitledGame.Fishing
             if (_biteTimer <= 0f)
             {
                 var ctx = Context();
-                _species = FishDatabase.Roll(ctx);
+                _species = !string.IsNullOrEmpty(DebugNextSpecies) ? FishDatabase.Get(DebugNextSpecies) : FishDatabase.Roll(ctx);
+                DebugNextSpecies = null;
                 if (_species == null)
                 {
                     // Nothing that can live here wants this bait / line / time: say so, and keep waiting.

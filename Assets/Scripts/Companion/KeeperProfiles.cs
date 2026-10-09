@@ -306,7 +306,35 @@ namespace UntitledGame.Companion
                     new[] { "你觉得住在海边好不好？为什么？", "如果你有一条船，你想去哪儿？" },
                 },
             },
+            new KeeperProfile
+            {
+                shopId = "bus",
+                personality = "a cheerful bus driver, about forty, who drives the little bus up and down the coast, knows every town on the way, " +
+                              "loves music on the radio and the view from the road, and takes his fare in fish because his wife runs a restaurant",
+                speakingStyle = "lively and friendly; says 上车吧 (get on!) and 没问题; talks about the road, towns along the coast and the weather for driving",
+                likes = new[] { "咖啡", "手表" }, dislikes = new[] { "糖" },
+                likeReason = "开车的时候喝咖啡，不会想睡觉！", dislikeReason = "我在减肥，不能吃糖。",
+                facts = new[]
+                {
+                    new KeeperFact { id = "hometown", chinese = "我家在沙漠旁边的一个小城市。", english = "Lives in a little town by the desert.", minLevel = 0 },
+                    new KeeperFact { id = "siblings", chinese = "我有一个姐姐，她是医生。", english = "Has an older sister who is a doctor.", minLevel = 1 },
+                    new KeeperFact { id = "hobby", chinese = "我喜欢一边开车一边听音乐。", english = "Loves listening to music while he drives.", minLevel = 1 },
+                    new KeeperFact { id = "food", chinese = "我最喜欢吃我妻子做的鱼。", english = "His favourite food is the fish his wife cooks.", minLevel = 2 },
+                    new KeeperFact { id = "family", chinese = "我结婚了，我妻子开了一个饭馆，所以我要鱼。", english = "Married; his wife runs a restaurant - that's why he takes fish.", minLevel = 2 },
+                    new KeeperFact { id = "birthday", chinese = "我的生日是十月一号。", english = "Birthday: 1 October.", minLevel = 3 },
+                    new KeeperFact { id = "dream", chinese = "我希望有一天开车去很多国家。", english = "Hopes to drive through many countries one day.", minLevel = 3 },
+                },
+                topics = new[] { "开车", "汽车", "路", "音乐", "城市", "沙漠", "天气", "旅游", "饭馆" },
+                questions = new[]
+                {
+                    new[] { "你喜欢坐车吗？", "你今天去哪儿？" },
+                    new[] { "你去过沙漠吗？", "你会开车吗？" },
+                    new[] { "你觉得住在城市好，还是住在海边好？", "如果可以去任何地方旅游，你想去哪儿？" },
+                },
+            },
         };
+
+        static KeeperProfiles() => All.AddRange(RegionKeepers.Profiles); // the other stops' keepers
 
         public static KeeperProfile For(string shopId) => All.FirstOrDefault(p => p.shopId == shopId);
     }

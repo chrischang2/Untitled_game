@@ -617,3 +617,141 @@ Benchmarked with the player's real conversation: 72 turns to Mei from their chat
   - **Starter-fish check:** it no longer assumes no books have been read.
   - **Unglossed words:** Mei sometimes teaches a word without its [meaning] gloss (the run where she taught 你好 and 我想买蚯蚓 that way failed "Mei taught words"). The notebook now also records HSK words in her English lines, with the HSK meaning, plus a few everyday phrases outside the HSK list (你好, 早上好, 好的, 加油...).
   - **Misheard item names:** speech recognition heard 力量训练 as 力尿训练, so Coach Wu offered nothing. `ShopIntentParser.FindItem` now allows one misheard syllable in names of 4+ characters, as long as half match exactly and only one item fits best (`FuzzyScore`).
+
+## Session 16: the bus route, Golden Sand Bay (desert), and lesson-gated upgrades
+- **The island is gone** (`IslandCamp`, `WorldShape.Island*`, its terrain, scene objects, checks and texts). The new boat now just goes past any current.
+- **Regions** (`Environment/Regions.cs`): 柳湾 Willow Bay (forest beach) and 金沙湾 Golden Sand Bay (desert coast).
+  - Every region shares the layout (dock, cabin, market, seafront, bus stop). The scene holds each region's look side by side under `RegionStyle` objects, and `Regions.Apply` shows the current one (at load, and on arrival).
+  - Saved as `SaveData.location` / `regionReached`.
+  - **Fish per region:** each sea holds fish up to its own tier (`Regions.FishTierCap`). The last region built so far has every tier left, so all fish stay catchable. `FishDatabase.Missing` says "doesn't live here (only in …)", the fish book adds ", in Golden Sand Bay", and Auntie Chen's requests only pick local fish.
+  - **Desert weather:** a warm haze by day (`DayNightCycle`) and rain chance 0.04.
+- **The bus** (`Economy/BusTrip.cs`, `Environment/BusStop.cs`): a stop south of the camp-market path (`WorldShape.BusStopCenter`), with a procedural green-and-cream bus, a bench, a 汽车站 sign and a dirt road inland.
+  - **Driver:** 张师傅 (shop 10, `ShopDef.busDriver`, no stall; he has a blue cap) only appears after the HSK 1 test. F at the bus explains.
+  - **Fare:** to leave region r you need the HSK r+1 test plus 10 fish of the rarest rarity in tier r. In Willow Bay that's any uncommon fish: pufferfish, sea bream, sea bass or hairtail.
+  - **All spoken:** 给你鱼 hands over as many as are still needed, in parts if you like. 我想去… / 走吧 offers the ride, and 好 rides (a fade, then you get off at the same stop). 回… goes back for free, and a paid leg stays paid.
+  - **End of the line:** the desert is the last stop for now ("the road isn't built yet").
+  - **Driver content:** keeper profile, persona, classifier intents (sell_fish, travel), a shop window with fare progress, and a Mei topic note.
+- **Upgrade tiers open with lessons, not tests** (`Hsk.LessonsForTier`, `PlayerStats.CanTrainNext`).
+  - The first lesson opens tier 0, and the other 40 lessons are spread evenly so the last tier needs all 41: tiers open at 1, 14, 28 and 41 lessons.
+  - This covers Coach Wu's training and 海叔's crab upgrades. Shop goods still use HSK tests.
+- **Desert dressing** (`SceneBuilder`):
+  - **Ground:** sand-and-ochre terrain with red rock on slopes and dry scrub patches.
+  - **Plants and rocks:** palm groves along the beach and round the camp, cacti, sandstone, red mesas on the hills, and ruined columns with an obelisk.
+  - **Wildlife:** foxes and crabs instead of deer and bunnies.
+  - **Stalls:** the same models with a recoloured atlas (`KenneyMaterials` style "desert": teal becomes saffron, red becomes indigo), plus rugs, clay jars and cacti. This applies to the games stalls too.
+  - **New Kenney models:** cactus, palm, statue, sand-patch and sand-rock models were added to `fetch-assets.ps1`.
+- **Captures:** `CaptureTools -captureRegion 1` renders the desert (files prefixed `desert_`), and new views `busstop` and `driver` were added.
+- **Tested** (scoped: `-only parser,balance,fish,market,crabs,bus`), all passing. New `bus` section:
+  - the fare species, and tier-1 fish absent at home
+  - no driver before HSK 1
+  - parser lines
+  - no ride without the fare
+  - paying 7 then 3 (only fare fish taken)
+  - riding to the desert (look switched, arrival spot, fish), every shop present
+  - end of the line, the free ride back, and no second fare
+  - screenshots 29a-30c
+  - The training and crab tier checks now use lessons. The full suite wasn't run.
+
+## Session 17: tickets in money, Snow Bay, per-level lesson gates, surprise goods, climate clothes
+- **Bus tickets cost money** (`BusTrip.Fare`): what ten of the region's most valuable fish sell for at their biggest.
+  - Willow Bay is ¥720 (ten top-size hairtail); the desert is ¥7200 (ten top-size grouper).
+  - 我想去… / 买票 offers the ticket and 好 pays and rides. A leg you've bought stays free, and going back is free.
+  - The fare-fish hand-over and its save fields are gone.
+- **Snow Bay 雪湾** (region 2, the new end of the line; the desert now leads to it with the HSK 2 test).
+  - **Fish:** the desert's sea is tier 1 only; Snow Bay has tiers 2 and 3.
+  - **Land:** snow terrain with grey shingle at the water, and snow-laden pines (Kenney Holiday Kit).
+  - **Props:** drifts, snowmen and a sled, ice floes along the shore (clear of the dock), and snow on the cabin and bus roofs.
+  - **Wildlife:** penguins, a polar bear and a fox.
+  - **Stalls:** white canopies (`KenneyMaterials` "snow" style), with drifts, firewood and snowmen.
+  - **Weather:** always some snowfall and heavier "showers" (`Weather.Snowy`), a cold haze, darker water (`Regions.TintSea`), and no fireflies.
+- **Upgrades per HSK level** (`Hsk.UpgradeLevelOpen`):
+  - Tier t's five levels open with HSK t+1's lessons: the first after 1 lesson, then evenly, so the fifth needs all of that level's lessons.
+  - Thresholds: HSK 1 is 1/4/6/9/11, HSK 2 is 1/4/6/8/10, HSK 3 is 1/6/11/16/20.
+  - The last tier needs the HSK 3 test.
+  - A tier also waits for its region, shown as "max for now".
+- **Surprise goods** (`Economy/ShopStock.cs`): goods needing the HSK t test only appear once region t has been reached. In the last region, HSK 3 goods appear when that test is passed.
+  - Hidden goods are left out of the shop window, the counter displays (`PriceTag.Known`), keeper prompts and classifier lists, browse lines, and Mei's notes (topic notes are now built per turn from the goods on show).
+  - Asking for one gets "we don't have that".
+  - The test centre's unlock text no longer lists goods.
+- **Climate clothes** (`Editor/OutfitBuilder.cs`, `Environment/RegionOutfit.cs`) for the player, Mei, all ten keepers and the driver.
+  - **Recolouring:** the Kenney characters are one body mesh coloured from a shared palette, so each region gets a copy of the body mesh with the clothing UVs moved to new palette colours, keeping their shading.
+  - **What counts as skin:** skin is detected by hue. In the snow, bare arms (except hands) and legs are covered too.
+  - **Desert:** linen tops, khaki and straw sun hats.
+  - **Snow:** bright coats, dark trousers, knitted beanies with pompoms, and scarves.
+  - **Exceptions:** Mei's region hat steps aside for her cosmetic hat, and the driver keeps his cap.
+  - **Head size:** measured by skinning the head mesh by hand. A skinned mesh's own bounds were loose in the editor, and BakeMesh lost the scale.
+- **Captures:** `-captureRegion 2` renders the snow (prefix `snow_`). `Regions.Show` dresses the scene for any region.
+- **Tested** (scoped: `-only bus` and `-only parser,balance,fish,market,crabs,sale`), all passing. The bus section now covers:
+  - tickets (not enough money, then buying)
+  - the desert: look, fish, blue line out, black line hidden, everyone in desert clothes
+  - HSK 2 needed, then the snow: snowing, tier-2 fish, HSK 2 goods out, coats and hats
+  - HSK 3 goods after the test, the end of the line, the free ride back, no second ticket
+  - Screenshots 29a-31c.
+  - **Other tests updated:** the per-level training and crab gates, and the hidden blue line in Willow Bay (full suite).
+  - The arrival check failed once and passed on the re-run (0.0 m from the stop); it now prints its values. The full suite wasn't run.
+
+## Session 18: Mars (purple sea), 80 fish, and the full suite
+- **Mars 火星** (region 3, the new end of the line; Snow Bay leads to it with the HSK 3 test and a ¥72,000 ticket).
+  - **Ground:** rust and ochre with dark basalt slopes and 34 craters (pale rims, dark floors), plus maroon sand at the shore.
+  - **Sea and sky:** a purple sea (`RegionDef.shallowWater/deepWater`), a butterscotch haze, and no rain.
+  - **Props:** red rock spires, glowing violet and cyan crystal clusters (some light up at night), purple alien plants and cyan mushrooms (`KenneyMaterials` "mars" palette), three habitat domes with solar panels, an antenna mast with a blinking light, a six-wheeled rover, and a rocket on a launch pad by the bus stop.
+  - **Market:** white-and-orange stall canopies, with air tanks, antennas and crystals.
+  - **Clothes:** everyone wears a white space suit (sleeves and trousers cover any skin), a glass bubble helmet with a collar and antenna (alpha material from the splash particle), and an air pack on the torso (`RegionOutfit.bodyExtras`).
+- **80 fish, 20 per region** (generated by `Tools/gen_fish.py`; 8 common, 6 uncommon, 4 rare, 2 legendary each). Each sea now has only its own tier (`Regions.FishTier`).
+  - **Willow Bay:** the old 11 plus herring, cuttlefish, red gurnard, black porgy, turbot, John Dory, yellowtail, the seven-star bass and the Willow Spirit Fish.
+  - **Golden Sand Bay:** reef fish (clownfish, angelfish, parrotfish, lionfish...), octopus, conger, grouper, skipjack, sailfish and blue shark (moved here, within tier-1 gear), plus the Golden Sand Dragon.
+  - **Snow Bay:** capelin, cod, haddock, salmon, halibut, wolffish, ice pike, aurora trout, Greenland shark, narwhal, and the bluefin tuna and oarfish (moved here).
+  - **Mars:** dust minnows, star sardines, robot fish, crystal fish, meteor eels, a two-headed trout, the Galaxy Marlin, a space whale shark, the Martian Leviathan (glow lure only) and the Golden Star Koi.
+  - **Gear:** every fish is catchable with its own tier's gear. The glow lure is now HSK 2, for the oarfish. In each tier the commonest swims Mixed or Sinker and the rarest Mixed, Dart or Floater, so the balance targets hold.
+  - **Books:** 12, three per tier (new: Secrets of Willow Bay, Coral Reef, Warm Sea, Under the Ice, the North, From Space, Legends of the Stars; Legends of the Sea became Fish of Mars), with parser aliases.
+  - **Journal and prompts:** the journal's fish page shows only the current region's 20. The shopkeeper classifier's fish lists and Mei's "fish you know" cover only local and carried fish, which keeps prompts small.
+- **Full suite run (as asked):** the final run passed all 347 checks. The bus section now goes all the way to Mars (HSK 3, a ¥72,000 ticket, the Martian fish, HSK 3 goods out, space suits; shots 32a-d).
+  - **Earlier runs and fixes:**
+    - The ticket checks compared exact money totals, but other sections had added a little money. They now compare with the money just before buying.
+    - The reeling-minigame check hooked a random fish that the crude test bot sometimes lost. It now forces a goby (`FishingController.DebugNextSpecies`).
+    - One run failed "Mei says what Old Wang likes" because speech recognition heard "old wine". That was AI variance, and it passed in the other runs.
+- **`Tools/gen_fish.py`** regenerates the fish list and books; re-running it reproduces the files exactly.
+
+## Session 19: a house and new people at every stop, perks, and the bus as a night's sleep
+- **A house per region** (`SceneBuilder.BuildHouseStyles`), all on the cabin's footprint and colliders. Each region's pieces sit in RegionStyle roots under the same Front/Back/Left/Right/Roof/Floor groups, so Cabin still hides the walls between the camera and the player. Cabin swings every leaf named "door".
+  - **Golden Sand Bay:** a Taklamakan oasis adobe house: thick earthen walls, a flat roof with beam ends, blue framed windows, a painted blue door with gold studs, a grapevine trellis over the porch, and a carpet on the floor.
+  - **Snow Bay:** a Dongbei red-brick house: a steep grey roof under snow, brick gables and chimney, icicles, red lanterns (lit at night), couplets and a 福 on the door, paper-cut windows, and strings of corn.
+  - **Mars:** a habitat module: white panels with an orange stripe, a barrel-vault roof with ribs, a solar panel and an antenna, portholes, an airlock door, and a metal grid floor.
+- **Furniture and energy per house:**
+  - `PlacedItem.region` means each house shows only its own furniture (`HomeItems.Respawn` on `Regions.Changed`).
+  - Comfort counts the current house; `Energy.Bed` is the best owned bed for this region (`ItemDef.region`).
+  - Every house starts with the sleeping mat (100 energy).
+  - Willow Bay's furniture and beds are region 0 and no longer HSK-gated.
+- **Themed furniture and beds** (`Companion/RegionKeepers.Items`; Kenney Furniture Kit models plus the new **Space Kit**, both in `fetch-assets.ps1`):
+  - **Desert:** carpets, floor cushions, a low tea table, a copper lantern, a clay jar, a dutar, a pomegranate tree and a naan oven.
+  - **Snow:** an iron stove, a red lantern, an old TV, an armchair, a tea table, a pickled-cabbage jar, a floral rug, a bookcase, and a heated kang as the best bed.
+  - **Mars:** a computer desk, a space chair, a potato plant, a heater, a space radio, a crystal lamp, a water tank, a design sofa, a bunk bed, a cabin bed and a sleep pod.
+  - **Lights and models:** anything marked `glows` lights up at night. New procedural models are in ItemVisuals.
+- **The bus takes the night:** you arrive the next day at 6:00 with energy refilled to that region's house maximum (`BusStop.RideRoutine`).
+- **New people at every stop** (`Companion/RegionKeepers`: 30 ShopDefs and keeper profiles; `ShopDef.role/region/stall/female`, `Catalog.ShopFor/StallShops/PeopleIn`).
+  - **Golden Sand Bay:** Uncle Maimaiti (an ex-camel driver from Hotan), Ayigul (a grill cook from Kashgar), Master Ali (painted doors and carpets, Turpan), Guli (a camel girl), Teacher Tursun (Silk Road scholar), Coach Rehman (dawaz tightrope), Patigul (Atlas silk), Granny Anarhan (dried fruit), Teacher Wang (from Urumqi) and Uncle Ma (a Hui noodle-maker and crabber).
+  - **Snow Bay:** Old Zhao (ice fisherman), Big Sister Zhang (iron-pot stew), Master Liu (kang builder), Xiaoxue (tiger-park volunteer), Teacher Anna (Russian-heritage librarian), Coach Dagang (winter swimming), Erya (errenzhuan floral prints), Auntie Wang (candied hawthorns), Teacher Sun and Uncle Tie (sea-ice crab pots).
+  - **Mars:** Zhurong (the rover robot), Xiaoyue (Chengdu space chef), Engineer Qian, Xiaotian (space hamsters), Tianwen (AI librarian), Instructor Yang (ex-astronaut), Xingxing (spacesuit designer), Auntie Chang (greenhouse botanist), Teacher Lu (a hologram from Beijing) and Uncle Niu (Mars potato farmer).
+  - **Building:** every stall builds one keeper per region (RegionStyle), with region-appropriate models and outfits and their own counter displays. Bookshops sell their own region's books.
+  - **Friendship:** it starts over with each keeper. The HSK requirement is capped at the region's own test (`Affinity.HskNeeded(shopId, level)` = min(level - 1, region + 1)).
+  - **Elsewhere:** Mei, the gift keeper's gossip, the journal's People page, the phrasebook and prompts all use the current region's people.
+- **Old-friend perks** (`Progression/Perks.cs`, active in that keeper's region):
+  - **tackle:** a pack of the best bait every morning
+  - **cook:** +20% on fish sales
+  - **furniture:** a signature piece (rocking chair, Atlas silk carpet, floral quilt sofa or starlight projector)
+  - **pet:** twice the cat's bait
+  - **books:** rare and legendary fish bite 30% more often
+  - **gym:** training 25% cheaper
+  - **colours:** an exclusive boat paint (willow green, sand gold, ice blue or Mars red)
+  - **gifts:** a free gift every morning
+  - **teacher:** a bigger present after every lesson
+  - **crabber:** +25% crabs
+  - Shown in the shop window, the keeper's level-up line and Mei's notes.
+- **Fish guide:** `docs/fish-guide.md`, generated from `Tools/gen_fish.py`.
+- **Fixes:**
+  - Display materials were deleted and recreated per call, so each region's rebuild left the others magenta. They're now `SolidMat` (load if present).
+  - The snow house's lanterns are now world-sized.
+- **Tested** (scoped: `-only parser,balance,market,crabs,bus`).
+  - **New checks:** the next morning on arrival; energy as if slept in the desert house (100 vs Willow Bay's 180); Willow Bay's furniture stays there; a desert bed counts only there; ten new keepers; perks from old friends (x1.20 fish, the Atlas carpet).
+  - **Updated checks:** the per-region friendship HSK caps, plus stall indices and counts.
+- **Full suite:** all 352 checks passed (after the scoped runs).

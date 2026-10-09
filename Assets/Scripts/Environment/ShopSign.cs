@@ -36,7 +36,7 @@ namespace UntitledGame.Environment
         {
             var shop = keeper.Shop;
             var stall = keeper.transform.parent;
-            if (shop == null || stall == null) return null;
+            if (shop == null || stall == null || shop.busDriver) return null; // the bus stop puts up its own sign (BusStop)
             if (stall.Find("ShopSign") != null) return stall.Find("ShopSign").gameObject;
 
             // The keeper stands behind the counter, looking out: the sign faces the same way.

@@ -315,14 +315,15 @@ namespace UntitledGame.Companion
                     teacher.SayDirect(firstTry.Count > 0 ? $"太好了！「{string.Join("」「", firstTry)}」你说得很好！" : "太好了！这一课你学会了！");
                     // No fixed pay: sometimes she has a little surprise for you.
                     string surprise = null;
-                    if (ForceSurprise ?? (UnityEngine.Random.value < (first ? 0.6f : 0.3f)))
+                    bool friend = Progression.Perks.Has("school"); // an old friend always has a present, and a bigger one
+                    if (ForceSurprise ?? (friend || UnityEngine.Random.value < (first ? 0.6f : 0.3f)))
                     {
-                        surprise = Surprise.Give("Teacher Gao", 1, moneyScale: 0.4f); // small: learning is its own reward
+                        surprise = Surprise.Give(teacher.DisplayNameEnglish, 1, moneyScale: friend ? 0.8f : 0.4f); // small: learning is its own reward
                         teacher.SayDirect("这是给你的小礼物！");
                     }
                     GameEvents.Banner("Lesson passed!", $"{session.Title}\nQuiz: {session.RecallRight}/{session.RecallAsked} right" +
                                       (firstTry.Count > 0 ? $"  ·  first try: {string.Join(" ", firstTry)}" : "") +
-                                      (surprise != null ? $"\nTeacher Gao has a little present for you: {surprise}" : "") +
+                                      (surprise != null ? $"\n{teacher.DisplayNameEnglish} has a little present for you: {surprise}" : "") +
                                       $"\nHSK {session.level} lessons passed: {Hsk.LessonsDone(session.level)}/{Hsk.LessonCounts[session.level]}", true);
                     break;
                 }

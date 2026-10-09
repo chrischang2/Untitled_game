@@ -200,10 +200,13 @@ namespace UntitledGame.Home
         }
 
         /// <summary>A bait Old Wang would sell you right now, weighted towards cheap ones (weight = 1 / price).</summary>
+        /// <summary>Twice the bait when the pet-shop keeper here is an old friend (Perks).</summary>
+        private static int PerkFactor => Progression.Perks.Has("pet") ? 2 : 1;
+
         public static (ItemDef bait, int count) PickBaitGift()
         {
-            var shop = Catalog.Shop("tackle");
-            int friendship = Progression.Affinity.Level("tackle");
+            var shop = Catalog.ShopFor("tackle", Regions.Current);
+            int friendship = Progression.Affinity.Level(shop.id);
             var baits = shop.items.Select(Catalog.Get).Where(i => i != null && i.category == ItemCategory.Bait && i.minAffinity <= friendship).ToList();
             if (baits.Count == 0) return (null, 0);
             float total = baits.Sum(b => 1f / Mathf.Max(1, b.price));
@@ -211,10 +214,10 @@ namespace UntitledGame.Home
             foreach (var b in baits)
             {
                 roll -= 1f / Mathf.Max(1, b.price);
-                if (roll <= 0f) return (b, b.price <= 30 ? 5 : 3);
+                if (roll <= 0f) return (b, (b.price <= 30 ? 5 : 3) * PerkFactor);
             }
             var last = baits[baits.Count - 1];
-            return (last, last.price <= 30 ? 5 : 3);
+            return (last, (last.price <= 30 ? 5 : 3) * PerkFactor);
         }
 
         private void UpdateNeeds()

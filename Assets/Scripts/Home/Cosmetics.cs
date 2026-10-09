@@ -81,6 +81,8 @@ namespace UntitledGame.Home
             _catHat = ApplyHat(_catHat, PetController.Instance != null ? PetController.Instance.transform : null, Chosen("cat"), 0.55f, cat: true);
             var mei = CompanionBrain.Current;
             _meiHat = ApplyHat(_meiHat, mei != null ? mei.transform : null, Chosen("mei"), 1f, cat: false);
+            // Her region hat (sun hat, beanie) comes off while she wears one of these.
+            if (mei != null) mei.GetComponent<RegionOutfit>()?.Apply(Regions.Current);
         }
 
         private static void Tint(Renderer r, Color? c, float vertexWeight)
@@ -109,7 +111,8 @@ namespace UntitledGame.Home
         private void ApplyHouse()
         {
             var cabin = FindFirstObjectByType<Cabin>();
-            var roof = cabin != null ? cabin.transform.Find("Roof") : null;
+            var roofGroup = cabin != null ? cabin.transform.Find("Roof") : null;
+            var roof = roofGroup != null ? (roofGroup.Find("Style_willowbay") ?? roofGroup) : null; // the log cabin's roof
             if (roof == null) return;
             string id = Chosen("house");
             foreach (var r in roof.GetComponentsInChildren<Renderer>()) Tint(r, id != null ? ColorOf(id) : (Color?)null, 0.25f);

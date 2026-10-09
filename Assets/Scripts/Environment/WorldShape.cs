@@ -3,14 +3,14 @@ using UnityEngine;
 namespace UntitledGame.Environment
 {
     /// <summary>
-    /// Deterministic description of the seaside world (Willow Bay): a beach running east-west with the sea to the
+    /// Deterministic description of the seaside world (every region on the bus route shares it: Regions): a beach running east-west with the sea to the
     /// north, getting deeper the further out you go. Used by the editor world generator to build the terrain mesh
     /// and at runtime for cheap "is this water / how deep / where's the ground / how far from shore" queries.
     /// </summary>
     public static class WorldShape
     {
         public const float WaterLevel = 0f;
-        public const float TerrainSize = 360f; // big enough that its edge stays out of sight past the island
+        public const float TerrainSize = 360f; // big enough that its edge stays out of sight from the boat
         public const float PlayableRadius = 82f;
         /// <summary>The shoreline runs east-west at about this z; the sea is north of it (bigger z).</summary>
         public const float CoastZ = -28f;
@@ -61,9 +61,32 @@ namespace UntitledGame.Environment
         // Nine stalls 37.5 degrees apart around the plaza, leaving the west side open as the entrance. In shop order:
         // tackle, fish, furniture, pet, books, gym, colours, gifts, and the test centre straight across from the entrance.
         private static readonly float[] StallAngles = { -75f, -37.5f, 37.5f, 75f, -112.5f, 112.5f, 150f, -150f, 0f };
-        /// <summary>The nine plaza stalls, then 海叔's crab stall (stall 9) down the beach.</summary>
+        /// <summary>The nine plaza stalls, then 海叔's crab stall (stall 9) down the beach. (The bus driver, shop 10, has no stall.)</summary>
         public static int StallCount => StallAngles.Length + 1;
         public const int CrabberStall = 9;
+        public const int BusStall = 10;
+
+        // ---- The bus stop (汽车站): south of the camp-market path, the bus parked facing west with its door on the path side.
+        public static Vector2 BusStopCenter => CampCenter + new Vector2(12f, -9f);
+        public const float BusStopRadius = 6.5f;
+        public const float BusStopHeight = 1.0f;
+        /// <summary>Middle of the parked bus (7 m long, along x), and the way it faces.</summary>
+        public static Vector2 BusPosition => BusStopCenter + new Vector2(0f, -2.2f);
+        public static Vector2 BusForward => new Vector2(-1f, 0f);
+        /// <summary>The driver waits by the bus door (front right of the bus), facing the path.</summary>
+        public static Vector2 BusDriverPosition => BusStopCenter + new Vector2(-2.6f, -0.2f);
+        public static Vector2 BusArrivalSpot => BusStopCenter + new Vector2(-0.6f, 2.0f);
+        public static Vector3 BusSignSpot3D() => new Vector3(BusStopCenter.x + 2.8f, BusStopHeight + 1.75f, BusStopCenter.y + 0.6f);
+
+        public static float DistanceToBusPath(float x, float z)
+        {
+            Vector2 a = new Vector2(BusStopCenter.x, Mathf.Lerp(CampCenter.y + 1f, MarketCenter.y, 0.55f));
+            Vector2 b = BusStopCenter + new Vector2(0f, 1.2f);
+            return DistanceToSegment(new Vector2(x, z), a, b);
+        }
+
+        public static bool InBusStop(float x, float z, float margin = 0f) =>
+            Vector2.Distance(new Vector2(x, z), BusStopCenter) < BusStopRadius + margin;
 
         // ---- The seafront east of the market: a beach path to 海叔's crab stall, past the three games stalls.
         public static Vector2 CrabberPosition => new Vector2(MarketCenter.x + 26f, ShoreZ(MarketCenter.x + 26f) - 4.5f);
@@ -96,12 +119,13 @@ namespace UntitledGame.Environment
         public static Vector2 StallPosition(int i)
         {
             if (i == CrabberStall) return CrabberPosition;
+            if (i == BusStall) return BusDriverPosition;
             float a = StallAngles[i] * Mathf.Deg2Rad;
             return MarketCenter + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * StallRing;
         }
 
         /// <summary>The way stall i's counter faces (towards its customers).</summary>
-        public static Vector2 StallFront(int i) => i == CrabberStall ? new Vector2(0f, -1f) : (MarketCenter - StallPosition(i)).normalized;
+        public static Vector2 StallFront(int i) => i == CrabberStall ? new Vector2(0f, -1f) : i == BusStall ? new Vector2(0f, 1f) : (MarketCenter - StallPosition(i)).normalized;
 
         /// <summary>Where a player stands to talk to shop i (in front of the counter).</summary>
         public static Vector2 CustomerSpot(int i) => StallPosition(i) + StallFront(i) * (StallRing * 0.38f);
@@ -114,16 +138,6 @@ namespace UntitledGame.Environment
             float wavesAtDock = 4.2f * Mathf.Sin(0.7f) + 2.2f * Mathf.Sin(2.1f) + 0.9f * Mathf.Sin(0.3f);
             return CoastZ + Mathf.Lerp(0f, waves - wavesAtDock, calm);
         }
-
-        // ---- The island, far out to sea (only the best boat gets past the currents to reach it).
-        public static Vector2 IslandCenter => new Vector2(30f, CoastZ + 140f);
-        public const float IslandRadius = 13f;   // roughly where its beach meets the water
-
-        public static float IslandDistance(float x, float z) => Vector2.Distance(new Vector2(x, z), IslandCenter);
-        public static bool OnIsland(float x, float z, float margin = 0f) => IslandDistance(x, z) < IslandRadius + 4f + margin;
-
-        /// <summary>Height of the island's hill and beaches at a distance from its centre.</summary>
-        private static float IslandProfile(float r) => 2.4f - 3.6f * (r / 14f) * (r / 14f);
 
         /// <summary>The point on the waterline at x.</summary>
         public static Vector2 ShorePoint(float x) => new Vector2(x, ShoreZ(x));
@@ -197,19 +211,25 @@ namespace UntitledGame.Environment
                 for (int k = 0; k < 3; k++) h = Mathf.Lerp(SeafrontHeight + 0.1f, h, Smooth(3f, 5f, Vector2.Distance(p2, GameStallPosition(k))));
             }
 
+            // The bus stop: a level gravel pad, and a path up to the camp-market path.
+            if (d > 0f)
+            {
+                float stop = Vector2.Distance(new Vector2(x, z), BusStopCenter);
+                h = Mathf.Lerp(BusStopHeight, h, Smooth(BusStopRadius * 0.75f, BusStopRadius * 1.3f, stop));
+                h = Mathf.Lerp(Mathf.Lerp(BusStopHeight, (CampHeight + MarketHeight) * 0.5f, 0.5f), h, Smooth(1.5f, 3.5f, DistanceToBusPath(x, z)));
+            }
+
             // Last: level the ground just under the cabin floor so no terrain pokes through it
             // (the floor sits at CampHeight; the hill behind the camp used to show inside the house).
             float cabinDist = DistanceOutsideCabin(x, z);
             if (cabinDist < 4f) h = Mathf.Lerp(CampHeight - 0.08f, h, Smooth(0.6f, 4f, cabinDist));
 
-            // The island rises out of the deep sea.
-            float ir = IslandDistance(x, z);
-            if (ir < 30f) h = Mathf.Max(h, IslandProfile(ir) + (Fbm(x * 0.2f, z * 0.2f, 2) - 0.5f) * 0.3f * Mathf.Clamp01(1f - ir / 14f));
             return h;
         }
 
         /// <summary>Distance to the nearest footpath (camp-dock or camp-market).</summary>
-        public static float DistanceToPath(float x, float z) => Mathf.Min(Mathf.Min(DistanceToDockPath(x, z), DistanceToMarketPath(x, z)), DistanceToSeafrontPath(x, z));
+        public static float DistanceToPath(float x, float z) =>
+            Mathf.Min(Mathf.Min(Mathf.Min(DistanceToDockPath(x, z), DistanceToMarketPath(x, z)), DistanceToSeafrontPath(x, z)), DistanceToBusPath(x, z));
 
         public static float DistanceToMarketPath(float x, float z)
         {

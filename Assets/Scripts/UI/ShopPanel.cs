@@ -4,6 +4,7 @@ using UnityEngine;
 using UntitledGame.Companion;
 using UntitledGame.Core;
 using UntitledGame.Economy;
+using UntitledGame.Fishing;
 using UntitledGame.Language;
 using UntitledGame.Progression;
 
@@ -38,8 +39,8 @@ namespace UntitledGame.UI
             _subtitle = UIFactory.Text(_root, "Subtitle", "", 20, UITheme.InkSoft, TextAlignmentOptions.TopLeft);
             _subtitle.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(30, -62), new Vector2(540, 30));
             _friendship = UIFactory.Text(_root, "Friendship", "", 21, UITheme.Ink, TextAlignmentOptions.TopLeft);
-            _friendship.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(30, -92), new Vector2(540, 56));
-            var area = UIFactory.Rect("Area", _root).Stretch(22, 16, 154, 150);
+            _friendship.rectTransform.Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(30, -92), new Vector2(540, 76));
+            var area = UIFactory.Rect("Area", _root).Stretch(22, 16, 174, 150);
             _content = UIFactory.ScrollList(area, 6);
             _question = UIFactory.Text(_root, "Question", "", 20, UITheme.TealDark, TextAlignmentOptions.Center);
             _question.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 80), new Vector2(560, 64));
@@ -104,8 +105,8 @@ namespace UntitledGame.UI
             var shop = _keeper.Shop;
             if (shop == null) return;
             _title.text = $"{shop.english}  <size=22><color=#8A7563>{_keeper.DisplayName} ({_keeper.DisplayNameEnglish})</color></size>";
-            string stats = shop.id == "tackle" ? $"  ·  line {Inventory.LineKg:0} kg"
-                : shop.id == "books" ? $"  ·  {PlayerStats.DiscoveredFishCount}/{PlayerStats.TotalFishCount} fish discovered" : "";
+            string stats = shop.role == "tackle" ? $"  ·  line {Inventory.LineKg:0} kg"
+                : shop.role == "books" ? $"  ·  {PlayerStats.DiscoveredFishCount}/{PlayerStats.TotalFishCount} fish discovered" : "";
             if (shop.school) stats = $"  ·  {UiText.T("passed", "通过了", 2)} <b>HSK {Hsk.Level}</b>";
             _subtitle.text = UiText.T($"You have <b>¥{Inventory.Money}</b>", $"你有<b>{Inventory.Money}</b>块", 1) + stats;
 
@@ -114,7 +115,10 @@ namespace UntitledGame.UI
             int done = nextLevel <= Affinity.MaxLevel ? Affinity.Requirements(shop.id, nextLevel).Count(r => r.done) : 0;
             int total = nextLevel <= Affinity.MaxLevel ? Affinity.Requirements(shop.id, nextLevel).Count : 0;
             _friendship.text = $"Friendship <color=#E0604E>{level}/{Affinity.MaxLevel}</color>  <b>{Affinity.LevelLabel(level)}</b>\n" +
-                               $"<size=17><color=#8A7563>{(nextLevel <= Affinity.MaxLevel ? $"{done}/{total} done for {Affinity.LevelHanzi[nextLevel]} (see below)" : "As close as can be!")}</color></size>";
+                               $"<size=17><color=#8A7563>{(nextLevel <= Affinity.MaxLevel ? $"{done}/{total} done for {Affinity.LevelHanzi[nextLevel]} (see below)" : "As close as can be!")}</color></size>" +
+                               (shop.busDriver ? "" : level >= Affinity.MaxLevel
+                                   ? $"\n<size=17><color=#2E7D5B>Old friends: {Progression.Perks.Describe(shop.role)}</color></size>"
+                                   : $"\n<size=17><color=#8A7563>At {Affinity.LevelHanzi[Affinity.MaxLevel]}: {Progression.Perks.Describe(shop.role)}</color></size>");
             UpdateQuestion();
 
             if (!shop.school || HskSchool.Current == null) FriendshipRow(level);
@@ -125,6 +129,11 @@ namespace UntitledGame.UI
                 return;
             }
             GiftRow();
+            if (shop.busDriver)
+            {
+                BuildBusRows();
+                return;
+            }
             if (shop.crabber)
             {
                 int pending = CrabPots.Pending;
@@ -134,19 +143,43 @@ namespace UntitledGame.UI
                 Row($"<b>Fish as bait</b>: give him fish (给你鱼) and tomorrow's haul grows\n<size=17><color=#8A7563>" +
                     (CrabPots.BaitToday > 0 ? $"Already +¥{CrabPots.BaitToday:0} for tomorrow (up to ¥{CrabPots.BaitCapNow:0})." : $"Up to +¥{CrabPots.BaitCapNow:0} a day.") +
                     "</color></size>", null, false);
-                foreach (var def in shop.items.Select(Catalog.Get).Where(d => d != null))
+                foreach (var def in ShopStock.Goods(shop))
                     ItemRow(def, level);
                 return;
             }
             if (shop.buysFish)
             {
                 BuildFishRows(level);
-                foreach (var def in shop.items.Select(Catalog.Get).Where(d => d != null))
+                foreach (var def in ShopStock.Goods(shop))
                     ItemRow(def, level);
                 return;
             }
-            foreach (var def in shop.items.Select(Catalog.Get).Where(d => d != null))
+            foreach (var def in ShopStock.Goods(shop))
                 ItemRow(def, level);
+        }
+
+        /// <summary>张师傅's window: where the bus goes, the ticket, and the way back.</summary>
+        private void BuildBusRows()
+        {
+            var here = UntitledGame.Environment.Regions.Here;
+            if (BusTrip.Next >= 0)
+            {
+                var to = UntitledGame.Environment.Regions.Get(BusTrip.Next);
+                int region = UntitledGame.Environment.Regions.Current;
+                string need = Hsk.Level < BusTrip.HskToLeave(region) ? $" You also need the HSK {BusTrip.HskToLeave(region)} test." : "";
+                string fare = BusTrip.NextPaid
+                    ? "Ticket already bought: say 走吧 or 我想去" + to.hanzi + " to ride." + need
+                    : $"Ticket: ¥{BusTrip.Fare(region)}, what {BusTrip.FareFishEnglish(region)} would sell for (you have ¥{Inventory.Money}). " +
+                      "Say 我想去" + to.hanzi + " or 买票. You only pay once." + need;
+                Row($"<b>Next stop: {to.english} {to.hanzi}</b>  <size=18>{to.blurb}</size>\n<size=17><color=#8A7563>{fare}</color></size>", null, false, 110);
+            }
+            else
+                Row($"<b>End of the line</b>\n<size=17><color=#8A7563>The road on from {here.english} isn't built yet.</color></size>", null, false);
+            if (BusTrip.Previous >= 0)
+            {
+                var back = UntitledGame.Environment.Regions.Get(BusTrip.Previous);
+                Row($"<b>Back to {back.english} {back.hanzi}</b>: free\n<size=17><color=#8A7563>Say 回{back.hanzi}.</color></size>", null, false);
+            }
         }
 
         private void ItemRow(ItemDef def, int level)
@@ -159,7 +192,8 @@ namespace UntitledGame.UI
                 state = friendLocked && hskLocked ? $"{Affinity.LevelHanzi[def.minAffinity]}\n+ HSK {def.minHsk}"
                     : friendLocked ? $"locked: {Affinity.LevelHanzi[def.minAffinity]}" : $"locked: HSK {def.minHsk}";
             else if (def.category == ItemCategory.Upgrade && PlayerStats.Level(def.stat) >= PlayerStats.MaxLevel) state = "max level";
-            else if (def.category == ItemCategory.Upgrade && !PlayerStats.CanTrainNext(def.stat)) state = $"locked: HSK {PlayerStats.HskNeededForNext(def.stat)}";
+            else if (def.category == ItemCategory.Upgrade && PlayerStats.NextHidden(def.stat)) state = "max for now";
+            else if (def.category == ItemCategory.Upgrade && !PlayerStats.CanTrainNext(def.stat)) state = $"needs {PlayerStats.NextNeeds(def.stat)}";
             else if (def.category == ItemCategory.Line && Inventory.LineKg >= def.lineKg) state = Inventory.Owns(def.id) ? "owned" : "weaker";
             else if (def.category == ItemCategory.Book && PlayerStats.HasRead(def.id)) state = "read";
             else if (def.unique && Inventory.Owns(def.id)) state = def.category == ItemCategory.Book ? "in your bag" : "owned";

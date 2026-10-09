@@ -53,6 +53,10 @@ namespace UntitledGame.Economy
 
         // Books: the fish you discover by reading it.
         public string[] teachesFish;
+        /// <summary>Furniture and beds belong to one region's house (-1 = any region, like the sleeping mat).</summary>
+        public int region = -1;
+        /// <summary>Gives off light at night (lamps, lanterns, stoves).</summary>
+        public bool glows;
 
         /// <summary>Friendship level (Progression.Affinity) the shopkeeper needs before they'll sell it.</summary>
         public int minAffinity;
@@ -75,6 +79,14 @@ namespace UntitledGame.Economy
         public bool buysFish;
         public bool school;             // 高老师's test centre: lessons, practice and HSK tests (no goods)
         public bool crabber;            // 海叔's crab pots: passive income, collected at his stall (CrabPots)
+        public bool busDriver;          // 张师傅 at the bus stop: sells tickets and drives you on (BusTrip)
+        /// <summary>What kind of stall ("tackle", "fish", ... "crabber", "bus"); Willow Bay's keepers' ids are their role.</summary>
+        public string role;
+        /// <summary>The region the keeper lives in (-1 = travels with you: the bus driver).</summary>
+        public int region;
+        /// <summary>The stall they keep (WorldShape.StallPosition), the same in every region.</summary>
+        public int stall;
+        public bool female;
         public string[] items;
     }
 
@@ -103,7 +115,7 @@ namespace UntitledGame.Economy
                 biteSpeed = 1.1f, description = "Rock-dwellers like octopus and grouper go mad for crab." },
             new ItemDef { id = "bait_fish", minHsk = 2, minAffinity = 2, english = "Live Baitfish", hanzi = "小活鱼", category = ItemCategory.Bait, price = 120, packSize = 5,
                 description = "Big predators of the open sea only want something alive." },
-            new ItemDef { id = "bait_glow", minHsk = 3, minAffinity = 2, english = "Glow Lure", hanzi = "夜光饵", category = ItemCategory.Bait, price = 150, packSize = 5,
+            new ItemDef { id = "bait_glow", minHsk = 2, minAffinity = 2, english = "Glow Lure", hanzi = "夜光饵", category = ItemCategory.Bait, price = 150, packSize = 5,
                 description = "Glows in the dark water. Said to call up something strange." },
 
             // ---- Lines: big fish need a stronger line (you start with a 3 kg white line)
@@ -123,32 +135,32 @@ namespace UntitledGame.Economy
             new ItemDef { id = "bucket_huge", minHsk = 1, minAffinity = 1, english = "Huge Bucket (12 slots)", hanzi = "很大的水桶", category = ItemCategory.Accessory, price = 600, unique = true, bagSlots = 12,
                 description = "Carry 12 slots of things." },
             new ItemDef { id = "bucket_giant", minHsk = 2, minAffinity = 2, english = "Giant Bucket (16 slots)", hanzi = "最大的水桶", category = ItemCategory.Accessory, price = 1500, unique = true, bagSlots = 16,
-                description = "Carry 16 slots: enough for a long trip to the island." },
+                description = "Carry 16 slots: enough for a long day out at sea." },
             new ItemDef { id = "line_strong", english = "Strong Line (old)", hanzi = "鱼线", category = ItemCategory.Accessory, price = 160, unique = true },
             new ItemDef { id = "bobber_fancy", english = "Fancy Float", hanzi = "浮漂", category = ItemCategory.Accessory, price = 60, unique = true,
                 description = "Easier to see: more time to react to bites." },
 
             // ---- Furniture (placeable around the camp)
-            new ItemDef { id = "chair", comfort = 1, english = "Cushioned Chair", hanzi = "椅子", category = ItemCategory.Furniture, price = 80, placeable = true, model = "FurnitureKit/chairCushion", modelScale = 0.22f },
-            new ItemDef { id = "table", comfort = 1, english = "Round Table", hanzi = "桌子", category = ItemCategory.Furniture, price = 120, placeable = true, model = "FurnitureKit/tableRound", modelScale = 0.22f },
-            new ItemDef { id = "sofa", minHsk = 1, comfort = 3, minAffinity = 2, english = "Sofa", hanzi = "沙发", category = ItemCategory.Furniture, price = 300, placeable = true, model = "FurnitureKit/loungeSofa", modelScale = 0.22f },
-            new ItemDef { id = "floor_lamp", comfort = 2, english = "Floor Lamp", hanzi = "灯", category = ItemCategory.Furniture, price = 150, placeable = true, model = "FurnitureKit/lampRoundFloor", modelScale = 0.22f },
-            new ItemDef { id = "plant", comfort = 1, english = "Potted Plant", hanzi = "盆栽", category = ItemCategory.Furniture, price = 60, placeable = true, model = "FurnitureKit/pottedPlant", modelScale = 0.2f },
-            new ItemDef { id = "rug", comfort = 2, english = "Round Rug", hanzi = "地毯", category = ItemCategory.Furniture, price = 90, placeable = true, model = "FurnitureKit/rugRound", modelScale = 0.22f },
-            new ItemDef { id = "bookcase", comfort = 2, minAffinity = 1, english = "Bookcase", hanzi = "书架", category = ItemCategory.Furniture, price = 200, placeable = true, model = "FurnitureKit/bookcaseOpen", modelScale = 0.2f },
-            new ItemDef { id = "bench", comfort = 1, english = "Garden Bench", hanzi = "长椅", category = ItemCategory.Furniture, price = 140, placeable = true, model = "HolidayKit/bench", modelScale = 1.4f },
-            new ItemDef { id = "street_lamp", comfort = 1, english = "Lamp Post", hanzi = "路灯", category = ItemCategory.Furniture, price = 110, placeable = true, model = "FantasyTown/lantern", modelScale = 1.25f },
-            new ItemDef { id = "radio", minHsk = 1, comfort = 2, minAffinity = 2, english = "Radio", hanzi = "收音机", category = ItemCategory.Furniture, price = 180, placeable = true, model = "FurnitureKit/radio", modelScale = 0.18f },
-            new ItemDef { id = "teddy", comfort = 1, english = "Teddy Bear", hanzi = "玩具熊", category = ItemCategory.Furniture, price = 70, placeable = true, model = "FurnitureKit/bear", modelScale = 0.15f },
+            new ItemDef { id = "chair", region = 0, comfort = 1, english = "Cushioned Chair", hanzi = "椅子", category = ItemCategory.Furniture, price = 80, placeable = true, model = "FurnitureKit/chairCushion", modelScale = 0.22f },
+            new ItemDef { id = "table", region = 0, comfort = 1, english = "Round Table", hanzi = "桌子", category = ItemCategory.Furniture, price = 120, placeable = true, model = "FurnitureKit/tableRound", modelScale = 0.22f },
+            new ItemDef { id = "sofa", region = 0, comfort = 3, minAffinity = 2, english = "Sofa", hanzi = "沙发", category = ItemCategory.Furniture, price = 300, placeable = true, model = "FurnitureKit/loungeSofa", modelScale = 0.22f },
+            new ItemDef { id = "floor_lamp", region = 0, comfort = 2, english = "Floor Lamp", hanzi = "灯", category = ItemCategory.Furniture, price = 150, placeable = true, model = "FurnitureKit/lampRoundFloor", modelScale = 0.22f, glows = true },
+            new ItemDef { id = "plant", region = 0, comfort = 1, english = "Potted Plant", hanzi = "盆栽", category = ItemCategory.Furniture, price = 60, placeable = true, model = "FurnitureKit/pottedPlant", modelScale = 0.2f },
+            new ItemDef { id = "rug", region = 0, comfort = 2, english = "Round Rug", hanzi = "地毯", category = ItemCategory.Furniture, price = 90, placeable = true, model = "FurnitureKit/rugRound", modelScale = 0.22f },
+            new ItemDef { id = "bookcase", region = 0, comfort = 2, minAffinity = 1, english = "Bookcase", hanzi = "书架", category = ItemCategory.Furniture, price = 200, placeable = true, model = "FurnitureKit/bookcaseOpen", modelScale = 0.2f },
+            new ItemDef { id = "bench", region = 0, comfort = 1, english = "Garden Bench", hanzi = "长椅", category = ItemCategory.Furniture, price = 140, placeable = true, model = "HolidayKit/bench", modelScale = 1.4f },
+            new ItemDef { id = "street_lamp", region = 0, comfort = 1, english = "Lamp Post", hanzi = "路灯", category = ItemCategory.Furniture, price = 110, placeable = true, model = "FantasyTown/lantern", modelScale = 1.25f, glows = true },
+            new ItemDef { id = "radio", region = 0, comfort = 2, minAffinity = 2, english = "Radio", hanzi = "收音机", category = ItemCategory.Furniture, price = 180, placeable = true, model = "FurnitureKit/radio", modelScale = 0.18f },
+            new ItemDef { id = "teddy", region = 0, comfort = 1, english = "Teddy Bear", hanzi = "玩具熊", category = ItemCategory.Furniture, price = 70, placeable = true, model = "FurnitureKit/bear", modelScale = 0.15f },
 
             // ---- Beds (Master Li): the house comes with a sleeping mat; better beds give more energy each day
             new ItemDef { id = "bed_mat", english = "Sleeping Mat", hanzi = "床垫", category = ItemCategory.Bed, price = 0, unique = true, bedLevel = 0,
                 model = "SurvivalKit/bedroll", modelScale = 2.6f, description = "Thin, but it's yours. 100 energy." },
-            new ItemDef { id = "bed_single", english = "Single Bed", hanzi = "单人床", category = ItemCategory.Bed, price = 300, unique = true, bedLevel = 1,
+            new ItemDef { id = "bed_single", region = 0, english = "Single Bed", hanzi = "单人床", category = ItemCategory.Bed, price = 300, unique = true, bedLevel = 1,
                 model = "FurnitureKit/bedSingle", modelScale = 0.22f, description = "A real bed. 140 energy each morning." },
-            new ItemDef { id = "bed_double", minHsk = 1, minAffinity = 1, english = "Double Bed", hanzi = "双人床", category = ItemCategory.Bed, price = 800, unique = true, bedLevel = 2,
+            new ItemDef { id = "bed_double", region = 0, minAffinity = 1, english = "Double Bed", hanzi = "双人床", category = ItemCategory.Bed, price = 800, unique = true, bedLevel = 2,
                 model = "FurnitureKit/bedDouble", modelScale = 0.22f, description = "Wide and soft. 180 energy each morning." },
-            new ItemDef { id = "bed_big", minHsk = 2, minAffinity = 2, english = "Big Soft Bed", hanzi = "大床", category = ItemCategory.Bed, price = 2000, unique = true, bedLevel = 3,
+            new ItemDef { id = "bed_big", region = 0, minAffinity = 2, english = "Big Soft Bed", hanzi = "大床", category = ItemCategory.Bed, price = 2000, unique = true, bedLevel = 3,
                 model = "FurnitureKit/bedDouble", modelScale = 0.27f, description = "Master Li's finest. 230 energy each morning." },
 
             // ---- Pet shop
@@ -164,20 +176,41 @@ namespace UntitledGame.Economy
             // ---- Bookshop: reading a book discovers new fish (you can only catch fish you know about)
             // Each book teaches its fish: where they swim, what bait they like and what line they need (see the journal).
             new ItemDef { id = "book_basics", english = "Fishing for Beginners", hanzi = "钓鱼入门", category = ItemCategory.Book, price = 40, unique = true,
-                teachesFish = new[] { "croaker", "flounder", "mackerel", "pufferfish" }, model = "FurnitureKit/books", modelScale = 0.2f,
-                description = "Everyday fish near the beach." },
+                teachesFish = new[] { "croaker", "flounder", "mackerel", "herring", "pufferfish", "redgurnard" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "The fish you meet first, and how to catch them." },
             new ItemDef { id = "book_shore", english = "Fish of the Shore", hanzi = "海边的鱼", category = ItemCategory.Book, price = 150, unique = true,
-                teachesFish = new[] { "seabream", "seabass", "hairtail" }, model = "FurnitureKit/books", modelScale = 0.2f,
-                description = "Sea bream, sea bass and the silver hairtail." },
-            new ItemDef { id = "book_rocks", minHsk = 1, minAffinity = 1, english = "Fish under the Rocks", hanzi = "石头下的鱼", category = ItemCategory.Book, price = 260, unique = true,
-                teachesFish = new[] { "octopus", "conger", "grouper" }, model = "FurnitureKit/books", modelScale = 0.2f,
-                description = "Octopus, conger eels and grouper." },
-            new ItemDef { id = "book_open", minHsk = 2, minAffinity = 2, english = "Fish of the Open Sea", hanzi = "远海的鱼", category = ItemCategory.Book, price = 420, unique = true,
-                teachesFish = new[] { "skipjack", "sailfish", "shark" }, model = "FurnitureKit/books", modelScale = 0.2f,
-                description = "Tuna, sailfish and sharks, far out at sea." },
-            new ItemDef { id = "book_legends", minHsk = 3, minAffinity = 3, english = "Legends of the Sea", hanzi = "海的传说", category = ItemCategory.Book, price = 800, unique = true,
-                teachesFish = new[] { "tuna", "oarfish" }, model = "FurnitureKit/books", modelScale = 0.2f,
-                description = "The giant bluefin tuna and the oarfish. Are they real?" },
+                teachesFish = new[] { "seabream", "seabass", "hairtail", "cuttlefish", "blackporgy" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Bigger fish along the shore, for a stronger line." },
+            new ItemDef { id = "book_bay", minAffinity = 1, english = "Secrets of Willow Bay", hanzi = "柳湾的秘密", category = ItemCategory.Book, price = 260, unique = true,
+                teachesFish = new[] { "turbot", "johndory", "yellowtail", "spottedbass", "willowspirit" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "The bay's rare fish, and the legend of the willow spirit." },
+            new ItemDef { id = "book_rocks", minHsk = 1, minAffinity = 1, english = "Fish under the Rocks", hanzi = "石头下的鱼", category = ItemCategory.Book, price = 300, unique = true,
+                teachesFish = new[] { "octopus", "conger", "grouper", "sweetlips", "goatfish", "triggerfish", "stingray" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "What hides among the warm rocks of Golden Sand Bay." },
+            new ItemDef { id = "book_reef", minHsk = 1, minAffinity = 1, english = "Fish of the Coral Reef", hanzi = "珊瑚里的鱼", category = ItemCategory.Book, price = 360, unique = true,
+                teachesFish = new[] { "clownfish", "butterflyfish", "bluetang", "angelfish", "parrotfish", "lionfish", "rabbitfish" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "The bright little fish of the coral reef." },
+            new ItemDef { id = "book_warm", minHsk = 1, minAffinity = 2, english = "Fish of the Warm Sea", hanzi = "热海的鱼", category = ItemCategory.Book, price = 450, unique = true,
+                teachesFish = new[] { "sandsmelt", "flyingfish", "skipjack", "sailfish", "shark", "goldendragon" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Fast fish of the warm open sea, and the golden sand dragon." },
+            new ItemDef { id = "book_open", minHsk = 2, minAffinity = 2, english = "Fish of the Open Sea", hanzi = "远海的鱼", category = ItemCategory.Book, price = 500, unique = true,
+                teachesFish = new[] { "tuna", "halibut", "sablefish", "greenlandshark", "narwhal", "pollock" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Giants of the cold open sea. You will need the boat." },
+            new ItemDef { id = "book_ice", minHsk = 2, minAffinity = 2, english = "Fish under the Ice", hanzi = "冰海的鱼", category = ItemCategory.Book, price = 600, unique = true,
+                teachesFish = new[] { "capelin", "icefish", "arcticcod", "char", "grayling", "icepike", "auroratrout" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Fish that love the coldest water." },
+            new ItemDef { id = "book_north", minHsk = 2, minAffinity = 3, english = "Fish of the North", hanzi = "北方的鱼", category = ItemCategory.Book, price = 700, unique = true,
+                teachesFish = new[] { "cod", "haddock", "saury", "salmon", "lumpfish", "wolffish", "oarfish" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Northern favourites, and the oarfish of the deep." },
+            new ItemDef { id = "book_legends", minHsk = 3, minAffinity = 3, english = "Fish of Mars", hanzi = "火星的鱼", category = ItemCategory.Book, price = 900, unique = true,
+                teachesFish = new[] { "dustminnow", "volcanocarp", "irongoby", "purplepuff", "rocketfish", "robotfish", "moonfish" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "What swims in the purple sea of Mars." },
+            new ItemDef { id = "book_space", minHsk = 3, minAffinity = 3, english = "Fish from Space", hanzi = "太空的鱼", category = ItemCategory.Book, price = 1100, unique = true,
+                teachesFish = new[] { "starsardine", "meteoreel", "crystalfish", "twohead", "sunfish", "alienoctopus", "gravitygrouper" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "Strange fish that fell from the stars." },
+            new ItemDef { id = "book_stars", minHsk = 3, minAffinity = 3, english = "Legends of the Stars", hanzi = "星星的传说", category = ItemCategory.Book, price = 1400, unique = true,
+                teachesFish = new[] { "galaxymarlin", "whaleshark", "nebula", "mooneel", "leviathan", "starkoi" }, model = "FurnitureKit/books", modelScale = 0.2f,
+                description = "The rarest fish in the universe. Bring your best line." },
 
             // ---- Old Wang's rowboat: lets you row out to deep water, where the big fish are
             new ItemDef { id = "boat", english = "Rowboat (use of Old Wang's boat)", hanzi = "小船", category = ItemCategory.Boat, price = 300, unique = true, minAffinity = 1,
@@ -186,8 +219,8 @@ namespace UntitledGame.Economy
                 boatRange = 40f, description = "Row against the currents out to 40 m from shore." },
             new ItemDef { id = "boat_sail", minHsk = 2, english = "Sail (60 m)", hanzi = "船帆", category = ItemCategory.Boat, price = 1000, unique = true, minAffinity = 2,
                 boatRange = 60f, description = "A little sail: 60 m out, where the bluefin tuna swim." },
-            new ItemDef { id = "boat_new", minHsk = 3, english = "New Boat (the island)", hanzi = "新船", category = ItemCategory.Boat, price = 2500, unique = true, minAffinity = 3,
-                boatRange = 150f, description = "Strong enough for any current: all the way to the island, where you can camp." },
+            new ItemDef { id = "boat_new", minHsk = 3, english = "New Boat (any current)", hanzi = "新船", category = ItemCategory.Boat, price = 2500, unique = true, minAffinity = 3,
+                boatRange = 150f, description = "Strong enough for any current: as far out to sea as you like." },
 
             // ---- Gift shop (刘奶奶): give gifts to shopkeepers by saying so (送给你...); everyone likes different things
             new ItemDef { id = "gift_flowers", english = "Flowers", hanzi = "花", category = ItemCategory.Gift, price = 30, description = "A bunch of fresh flowers." },
@@ -274,7 +307,7 @@ namespace UntitledGame.Economy
             new ShopDef { id = "books", english = "Bookshop", hanzi = "书店", keeperName = "周老师", keeperEnglish = "Teacher Zhou",
                 voice = "zh_female", pitch = 0.98f,
                 personality = "a gentle retired schoolteacher who has read every fishing book ever written and loves recommending the right one",
-                items = new[] { "book_basics", "book_shore", "book_rocks", "book_open", "book_legends" } },
+                items = new[] { "book_basics", "book_shore", "book_bay" } },
             new ShopDef { id = "gym", english = "Fitness Trainer", hanzi = "健身房", keeperName = "武教练", keeperEnglish = "Coach Wu",
                 voice = "zh_male", pitch = 0.98f,
                 personality = "an energetic fitness coach who is always cheerful, loves push-ups and believes anyone can get strong",
@@ -299,7 +332,42 @@ namespace UntitledGame.Economy
                 voice = "zh_male", pitch = 0.88f, crabber = true,
                 personality = "a sunburnt, easy-going crab fisherman who keeps pots off the beach, looks after the player's pots too and pays them for the catch",
                 items = new[] { "crab_pots", "crab_size", "crab_lure", "crab_deep", "crab_bait", "crab_cooler", "crab_helper" } },
+            // Shop 10: the bus driver at the bus stop (no stall; he turns up once the first HSK test is passed).
+            new ShopDef { id = "bus", english = "Bus Stop", hanzi = "汽车站", keeperName = "张师傅", keeperEnglish = "Driver Zhang",
+                voice = "zh_male", pitch = 1.0f, busDriver = true,
+                personality = "a cheerful bus driver who drives the little bus along the coast and takes his fare in fish",
+                items = new string[0] },
         };
+
+        static Catalog()
+        {
+            // Willow Bay's keepers are the first ten shops (their ids are their roles); the bus driver travels with you.
+            for (int i = 0; i < Shops.Count; i++)
+            {
+                var s = Shops[i];
+                s.role = s.busDriver ? "bus" : s.id;
+                s.region = s.busDriver ? -1 : 0;
+                s.stall = s.busDriver ? Environment.WorldShape.BusStall : i;
+                s.female = s.voice == "zh_female";
+            }
+            // The other stops' keepers and their goods (Companion.RegionKeepers).
+            Items.AddRange(Companion.RegionKeepers.Items);
+            foreach (var s in Companion.RegionKeepers.Shops)
+            {
+                if (s.items == null) s.items = Shops.First(w => w.role == s.role && w.region == 0).items;
+                Shops.Add(s);
+            }
+        }
+
+        /// <summary>The keeper of this kind of stall in a region (the bus driver for "bus").</summary>
+        public static ShopDef ShopFor(string role, int region) =>
+            Shops.FirstOrDefault(s => s.role == role && (s.region == region || s.region < 0));
+
+        /// <summary>The ten stall keepers of a region, in stall order.</summary>
+        public static IEnumerable<ShopDef> StallShops(int region) => Shops.Where(s => s.region == region).OrderBy(s => s.stall);
+
+        /// <summary>The keepers you can meet in a region: its ten, and the bus driver.</summary>
+        public static IEnumerable<ShopDef> PeopleIn(int region) => Shops.Where(s => s.region == region || s.region < 0);
 
         /// <summary>The gift item with this Chinese name (what keepers like and dislike), if it's sold.</summary>
         public static ItemDef GiftByHanzi(string hanzi) => Items.FirstOrDefault(i => i.category == ItemCategory.Gift && i.hanzi == hanzi);

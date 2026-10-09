@@ -461,7 +461,8 @@ namespace UntitledGame.UI
             bg.rectTransform.Stretch();
             _intro = bg.gameObject.AddComponent<CanvasGroup>();
             _intro.blocksRaycasts = false;
-            var title = UIFactory.Text(bg.transform, "Title", "Willow Bay  <size=70>柳湾</size>", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
+            var here = UntitledGame.Environment.Regions.Here;
+            var title = UIFactory.Text(bg.transform, "Title", $"{here.english}  <size=70>{here.hanzi}</size>", 120, UITheme.Cream, TextAlignmentOptions.Center, title: true);
             title.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 70), new Vector2(1400, 160));
             var sub = UIFactory.Text(bg.transform, "Sub", "fish, learn Mandarin with Mei, and make friends at the market\n<size=26><color=#E8D8C0>hold <b>V</b> to talk · <b>B</b> to ask Mei · hold the mouse to cast</color></size>", 36, UITheme.Cream, TextAlignmentOptions.Center);
             sub.rectTransform.Anchor(new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -40), new Vector2(1400, 120));

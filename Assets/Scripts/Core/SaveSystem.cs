@@ -96,6 +96,7 @@ namespace UntitledGame.Core
     {
         public string id;
         public float x, y, z, yaw;
+        public int region;          // whose house / camp it's in (Environment.Regions)
     }
 
     [Serializable]
@@ -202,7 +203,13 @@ namespace UntitledGame.Core
         public List<string> discoveredFish;
         public List<KeeperState> keepers = new List<KeeperState>();
         public float energy = -1f;   // -1 = full (a new game)
-        public bool islandCamp;      // the camp on the island has been set up
+        // The bus route (Environment.Regions, Economy.BusTrip): where you are, and the furthest you've been (legs up to
+        // there are paid for).
+        public int location;
+        public int regionReached;
+        // Perks at the highest friendship (Progression.Perks): one-time rewards given, and the last morning handled.
+        public List<string> perksGranted = new List<string>();
+        public int perkDay = -1;
         public string cosBoat = "", cosCat = "", cosMei = "", cosHouse = ""; // cosmetics being used
 
         // HSK lessons and tests at the test centre (see Progression.Hsk).
