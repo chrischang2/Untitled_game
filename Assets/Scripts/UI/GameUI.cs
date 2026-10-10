@@ -54,6 +54,13 @@ namespace UntitledGame.UI
         private readonly List<SpeechBubble> _bubbles = new List<SpeechBubble>();
         private ShopPanel _shop;
         public ShopPanel Shop => _shop;
+        private ReviewPanel _review;
+        public ReviewPanel Review => _review;
+        private void ShowReview(LessonSession session)
+        {
+            _banner.gameObject.SetActive(false); // the review carries the pass/fail message itself
+            _review?.Show(session);
+        }
         private WorldLabels _labels;
         private RectTransform _playerBubble;
         private CanvasGroup _playerBubbleGroup;
@@ -111,6 +118,12 @@ namespace UntitledGame.UI
             _journal.ShowPhrasebook();
             if (!_journal.IsOpen) _journal.Toggle();
         }
+        public void OpenSchool(bool used = false)
+        {
+            _journal.ShowSchool(used);
+            if (!_journal.IsOpen) _journal.Toggle();
+        }
+        public int SchoolWordCells => _journal.SchoolWordCells;
         public void CloseJournal() => _journal.Close();
         public void ToggleSettings() => _settings.Toggle();
         public void OpenSaves() => _saves.Open();
@@ -141,6 +154,7 @@ namespace UntitledGame.UI
 
             GameEvents.ToastRequested += ShowToast;
             GameEvents.BannerRequested += ShowBanner;
+            HskSchool.ReviewRequested += ShowReview;
             Progression.Affinity.LevelChanged += OnFriendshipLevel;
             FishingController.FishCaught += OnFishCaught;
             ShopkeeperBrain.TransactionDone += OnTransaction;
@@ -154,6 +168,7 @@ namespace UntitledGame.UI
         {
             GameEvents.ToastRequested -= ShowToast;
             GameEvents.BannerRequested -= ShowBanner;
+            HskSchool.ReviewRequested -= ShowReview;
             _scale?.Dispose();
             Progression.Affinity.LevelChanged -= OnFriendshipLevel;
             FishingController.FishCaught -= OnFishCaught;
@@ -198,6 +213,7 @@ namespace UntitledGame.UI
             tl.childAlignment = TextAnchor.UpperCenter;
             tl.childForceExpandWidth = false;
             BuildBanner();
+            _review = new ReviewPanel(_hud);
             _scale = new SaleScaleView(_hud);
 
             _card = new CatchCard(_root);
@@ -676,6 +692,9 @@ namespace UntitledGame.UI
                 ShowToast($"Saved (slot {SaveSystem.ActiveSlot}).", 2f);
             }
 
+            // A failed lesson's or test's review stays until you close it (the button, or X).
+            if (_review != null && _review.IsOpen && Input.GetKeyDown(KeyCode.X)) _review.Close();
+
             // HSK test: confirm (Y) or throw away (N) what was heard before it's graded.
             if (HskSchool.Current?.pending != null)
             {
@@ -761,7 +780,7 @@ namespace UntitledGame.UI
         {
             if (PlacementController.Active)
             {
-                _hint.text = $"Placing <b>{PlacementController.Instance.ItemEnglish}</b>:  <b>[LMB]</b> Place   <b>[R / scroll]</b> Rotate   <b>[RMB / Esc]</b> Cancel";
+                _hint.text = $"Placing <b>{PlacementController.Instance.ItemEnglish}</b>:  <b>[LMB]</b> {UiText.T("Place", "放", 3)}   <b>[R / scroll]</b> {UiText.T("Rotate", "转", 3)}   <b>[RMB / Esc]</b> {UiText.T("Cancel", "取消", 3)}";
                 return;
             }
             var shopping = ShopConversation.Active;
@@ -782,10 +801,10 @@ namespace UntitledGame.UI
             }
             string text = fishing == null ? talk : fishing.State switch
             {
-                FishingState.Idle => $"<b>[Hold LMB]</b> {UiText.T("Cast", "钓鱼", 2)}   {talk}   <b>[I]</b> {UiText.T("Bag", "包", 3)}   <b>[N]</b> {UiText.T("Words", "词语", 3)}   <b>[J]</b> Journal   <b>[Esc]</b> {UiText.T("Menu", "菜单", 3)}",
+                FishingState.Idle => $"<b>[Hold LMB]</b> {UiText.T("Cast", "钓鱼", 2)}   {talk}   <b>[I]</b> {UiText.T("Bag", "包", 3)}   <b>[N]</b> {UiText.T("Words", "词语", 3)}   <b>[J]</b> {UiText.T("Journal", "日记", 3)}   <b>[Esc]</b> {UiText.T("Menu", "菜单", 3)}",
                 FishingState.Charging => "Release to cast!   <b>[A]/[D]</b> aim left/right (or turn the camera with <b>RMB</b>): the ring shows where it lands",
                 FishingState.Casting => "Wheee...",
-                FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> Reel in   {talk}",
+                FishingState.Waiting => $"Watch the bobber... click when it dives!   <b>[E]</b> {UiText.T("Reel in", "收线", 3)}   {talk}",
                 FishingState.Bite => $"<b>{UiText.T("CLICK NOW!", "快！", 1)}</b>",
                 FishingState.Reeling => "Hold <b>LMB</b> to lift the green bar, let go to drop it: keep the fish inside until the meter fills!",
                 FishingState.Landing => UiText.T("Nice catch! Click to put it in your bucket", "太好了！点一下，放到包里", 3),
@@ -932,7 +951,7 @@ namespace UntitledGame.UI
 
             var cur = interaction != null ? interaction.Current : null;
             var keeper = ShopConversation.Instance != null ? ShopConversation.Instance.Candidate : null;
-            string promptText = keeper != null ? $"[E] Talk to {keeper.DisplayName} ({keeper.DisplayNameEnglish}) and see the {keeper.Shop?.english.ToLower()}" : cur?.Prompt;
+            string promptText = keeper != null ? TalkPrompt(keeper) : cur?.Prompt;
             bool prompt = promptText != null && !offer && (fishing == null || fishing.State == FishingState.Idle);
             _prompt.gameObject.SetActive(prompt);
             if (prompt)
@@ -941,6 +960,9 @@ namespace UntitledGame.UI
                 _prompt.sizeDelta = new Vector2(Mathf.Clamp(_promptText.GetPreferredValues(promptText, 900, 40).x + 50, 260, 900), 50);
             }
         }
+
+        /// <summary>Approaching a stall: just who to talk to (what they do is for the player to find out).</summary>
+        public static string TalkPrompt(ShopkeeperBrain keeper) => $"[E] Talk to {keeper.DisplayName} ({keeper.DisplayNameEnglish})";
 
         private void UpdateToasts()
         {

@@ -71,7 +71,7 @@ namespace UntitledGame.Core
         }
 
         /// <summary>The newer sections that aren't part of the original run (the full suite runs them at the end).</summary>
-        public static readonly string[] ExtraSections = { "mastery", "requests", "market", "sale", "fish", "balance", "hud", "crabs", "pitchpot", "bus", "home" };
+        public static readonly string[] ExtraSections = { "mastery", "requests", "market", "sale", "fish", "balance", "hud", "crabs", "pitchpot", "bus", "home", "asr" };
 
         private IEnumerator RunSections(string[] sections)
         {
@@ -158,6 +158,9 @@ namespace UntitledGame.Core
                         FishUnitChecks();
                         yield return TrophyChecks(player, cam);
                         break;
+                    case "asr":
+                        yield return AsrChecks();
+                        break;
                     case "home":
                         yield return StrandedItemChecks(player, cam);
                         ui.OpenPhrasebook();
@@ -225,6 +228,27 @@ namespace UntitledGame.Core
             d.day = day + 1; Hsk.RecordAnswer("苹果", true, true);
             d.day = day + 2; Hsk.RecordAnswer("苹果", true, true);
             Check(Hsk.Known("苹果") && Hsk.KnownCount(1) == 1, $"after a few days of right answers it counts as known (box {Hsk.Box("苹果")}; HSK 1 known: {Hsk.KnownCount(1)}/150)");
+            d.day = day + 3; Hsk.RecordAnswer("呢", true, recall: false);
+            d.day = day + 4; Hsk.RecordAnswer("呢", true, recall: false);
+            Check(Hsk.Box("呢") == 2, $"a particle (never asked from English) moves up by repeating it right, a box a day (box {Hsk.Box("呢")})");
+            // A mastered word's label turns Chinese, whatever the HSK level.
+            int hskWas = d.hskLevel;
+            d.hskLevel = 0;
+            UiText.ForgetCache();
+            bool englishFirst = UiText.Plain("Journal", "日记", 3) == "Journal";
+            foreach (var w in new[] { "日记", "说过的话" }.SelectMany(t => HskVocab.Segment(t)).Select(x => x.word).Distinct().Where(w => w != "话"))
+            {
+                var m = d.mastery.FirstOrDefault(x => x.word == w) ?? new WordMastery { word = w };
+                if (!d.mastery.Contains(m)) d.mastery.Add(m);
+                m.box = Hsk.MaxBox;
+            }
+            UiText.ForgetCache();
+            bool journal = UiText.Plain("Journal", "日记", 3) == "日记";
+            bool notYet = UiText.Plain("Transcript", "说过的话", 2) == "Transcript" && UiText.WordsToMaster("说过的话").SequenceEqual(new[] { "话" });
+            d.hskLevel = hskWas;
+            d.day = day;
+            UiText.ForgetCache();
+            Check(englishFirst && journal && notYet, "a label turns Chinese as soon as all its words are mastered (日记 shows as 日记; 说过的话 waits for 话)");
             Hsk.RecordAnswer("苹果", false, true);
             Check(Hsk.Box("苹果") == 2, $"a wrong answer drops it two boxes (box {Hsk.Box("苹果")})");
             Check(!Hsk.Due("苹果") && Hsk.Seen("苹果"), "it isn't due again the same day");
@@ -392,7 +416,7 @@ namespace UntitledGame.Core
             bool lastOpen = PlayerStats.CanTrainNext("luck");
             string Thresholds(int tier) => string.Join("/", Enumerable.Range(tier * 5 + 1, 5).Select(Hsk.LessonsForUpgrade));
             Check(noneYet && first && secondLocked && secondOpen && fifthLocked && fifthOpen && hiddenHome && tier1Locked && tier1Open && lastLocked && lastOpen &&
-                  Thresholds(0) == "1/4/6/9/11" && Thresholds(1) == "1/4/6/8/10" && Thresholds(2) == "1/6/11/16/20",
+                  Thresholds(0) == "1/4/6/9/11" && Thresholds(1) == "1/4/6/9/11" && Thresholds(2) == "1/6/11/16/21",
                 $"training opens level by level with each HSK level's lessons (HSK 1: {Thresholds(0)}; HSK 2: {Thresholds(1)}; HSK 3: {Thresholds(2)}; last tier: the HSK 3 test), and later tiers wait for their region");
             SaveSystem.Data.lessonsDone.Clear();
             SaveSystem.Data.lessonsDone.AddRange(lessonsBefore);
@@ -555,7 +579,9 @@ namespace UntitledGame.Core
                 PlayerStats.SetLevel(s, 0);
                 return up;
             });
-            Check(each, "every income upgrade raises the daily haul");
+            Check(each && CrabPots.Stats.Length == 3 && Catalog.Shop("crabber").items.Length == 3 &&
+                  CrabPots.Stats.SequenceEqual(new[] { "crab_pots", "crab_size", "crab_deep" }),
+                "the crabber has just three upgrades (more pots, bigger pots, longer lines) and each raises the daily haul");
             var crabLessons = SaveSystem.Data.lessonsDone.ToList();
             int crabReached = SaveSystem.Data.regionReached;
             PlayerStats.SetLevel("crab_pots", 5);
@@ -571,19 +597,30 @@ namespace UntitledGame.Core
             Check(locked && why == BuyResult.Locked && opens, "crab upgrades open level by level with lessons like training (the 6th pot needs an HSK 2 lesson), priced like training");
             SetAll(5);
 
-            // Days: one haul each morning; uncollected crabs keep only as long as the cooler allows.
+            // A haul every 15 minutes of in-game time played; uncollected crabs wait for as long as it takes (nothing is lost).
             int dayBefore = DayNightCycle.Instance.Day;
-            DayNightCycle.Instance.Day = Mathf.Max(10, dayBefore);
             int today = DayNightCycle.Instance.Day;
-            SaveSystem.Data.crabPending = 0f;
-            SaveSystem.Data.crabBaitDay = -1;
-            SaveSystem.Data.crabLastDay = today - 1;
-            int one = CrabPots.Pending;
-            SaveSystem.Data.crabPending = 0f;
-            SaveSystem.Data.crabLastDay = today - 6;
-            int six = CrabPots.Pending;
-            Check(Mathf.Abs(one - CrabPots.Daily) <= 1f && Mathf.Abs(six - CrabPots.Daily * CrabPots.KeepDaysNow) <= 1f && CrabPots.KeepDaysNow == 2,
-                $"one day brings ¥{one}; six days away keeps only {CrabPots.KeepDaysNow} days' worth (¥{six}) with cooler level 5");
+            var D = SaveSystem.Data;
+            if (D.playMinutes < 1e6) D.playMinutes += 1e6; // (room to look back sixty days of play)
+            D.crabPending = 0f;
+            D.crabBaitDay = -1;
+            D.crabBaitWaiting = 0f;
+            int Hauled(double minutes)
+            {
+                D.crabPending = 0f;
+                D.crabLastMinute = D.playMinutes - minutes;
+                return CrabPots.Pending;
+            }
+            float perHaul = CrabPots.PerHaul;
+            int early = Hauled(14), one = Hauled(15), ten = Hauled(150), day = Hauled(CrabPots.HaulMinutes * CrabPots.HaulsPerDay), sixty = Hauled(CrabPots.HaulMinutes * CrabPots.HaulsPerDay * 60.0);
+            Check(early == 0 && Mathf.Abs(one - perHaul) <= 1f && Mathf.Abs(ten - perHaul * 10f) <= 1f && Mathf.Abs(day - CrabPots.Daily) <= 1f && Mathf.Abs(sixty - CrabPots.Daily * 60f) <= 6f,
+                $"a haul every {CrabPots.HaulMinutes:0} in-game minutes played (none after 14 min, ¥{one} after 15, ¥{day} over a {CrabPots.HaulsPerDay}-haul day); uncollected crabs keep: sixty days of play ¥{sixty}");
+            // Sleeping or the bus jumps the clock without counting as play.
+            double before = D.playMinutes;
+            Hauled(0);
+            DayNightCycle.Instance.SkipTo(DayNightCycle.Instance.Day + 1, 7f);
+            Check(D.playMinutes - before < 1.0 && CrabPots.Pending == 0, "sleeping (the clock jumping) doesn't count as time for the crab pots");
+            DayNightCycle.Instance.SkipTo(today, 10f);
 
             // Talking to 海叔 pays it out; giving him fish makes tomorrow's haul bigger.
             var crabber = ShopkeeperBrain.Keepers.First(k => k.Shop.crabber);
@@ -591,11 +628,11 @@ namespace UntitledGame.Core
             float marketEast = Enumerable.Range(0, 9).Max(i => WorldShape.StallPosition(i).x);
             Check(cp.x > marketEast + 10f && WorldShape.ShoreDistance(cp.x, cp.y) > 2f && WorldShape.ShoreDistance(cp.x, cp.y) < 8f,
                 $"海叔's stall is on the beach further along than the market ({cp.x - marketEast:0} m east, {WorldShape.ShoreDistance(cp.x, cp.y):0.0} m from the water)");
-            SaveSystem.Data.crabPending = 0f;
-            SaveSystem.Data.crabLastDay = today - 1;
+            D.crabPending = 0f;
+            D.crabLastMinute = D.playMinutes - 150;
             int money = Inventory.Money;
             yield return GoToShop(player, cam, WorldShape.CrabberStall, crabber);
-            Check(Inventory.Money - money == one && CrabPots.Pending == 0, $"starting to talk to 海叔 collects the crab money (+¥{Inventory.Money - money})");
+            Check(Inventory.Money - money == ten && ten > 0 && CrabPots.Pending == 0, $"starting to talk to 海叔 collects the crab money (+¥{Inventory.Money - money})");
             yield return WaitIdle(crabber, 30f);
             yield return Shot("27_crabber");
             Inventory.SellAllFish();
@@ -607,15 +644,26 @@ namespace UntitledGame.Core
             int bonus = crabber.PendingOffer?.price ?? 0;
             crabber.HandlePlayerUtterance("好的，放吧。");
             yield return WaitIdle(crabber);
-            Check(Inventory.BucketCount == 0 && CrabPots.BaitToday >= bonus - 1 && bonus > 0, $"the fish go in the pots: +¥{CrabPots.BaitToday:0} tomorrow");
-            SaveSystem.Data.crabLastDay = today;
-            DayNightCycle.Instance.Day = today + 1;
-            int tomorrow = CrabPots.Pending;
-            DayNightCycle.Instance.Day = today;
-            Check(Mathf.Abs(tomorrow - (CrabPots.Daily + bonus)) <= 1.5f, $"...and the next morning's haul includes it (¥{tomorrow} = ¥{CrabPots.Daily:0} + ¥{bonus})");
-            SaveSystem.Data.crabPending = 0f;
-            SaveSystem.Data.crabLastDay = today;
-            ShopConversation.Instance.End(sayGoodbye: false);
+            Check(Inventory.BucketCount == 0 && CrabPots.BaitWaiting >= bonus - 1 && bonus > 0, $"the fish go in the pots: +¥{CrabPots.BaitWaiting:0} in the next haul");
+            D.crabPending = 0f;
+            D.crabLastMinute = D.playMinutes - 15;
+            int next = CrabPots.Pending;
+            Check(Mathf.Abs(next - (CrabPots.PerHaul + bonus)) <= 1.5f && CrabPots.BaitWaiting == 0f, $"...and the next haul includes it (¥{next} = ¥{CrabPots.PerHaul:0.#} + ¥{bonus})");
+            D.crabPending = 0f;
+            D.crabLastMinute = D.playMinutes;
+
+            // Walking away: the keeper's voice is local to the stall, no goodbye follows, and what they were saying stops.
+            Check(crabber.Voice != null && Mathf.Approximately(crabber.Voice.SpatialBlend, 1f) && crabber.Voice.MaxHearingDistance <= 15f,
+                $"a keeper's voice stays at their stall (fully 3D, heard up to {crabber.Voice?.MaxHearingDistance:0} m)");
+            crabber.SayDirect("你好，朋友。今天的螃蟹很多，你想看一看吗？");
+            yield return new WaitForSeconds(0.5f);
+            bool wasTalking = crabber.Voice.IsSpeaking;
+            Vector2 away = WorldShape.MarketCenter;
+            player.Teleport(new Vector3(away.x, WorldShape.TerrainHeight(away.x, away.y) + 0.05f, away.y), 90f);
+            yield return new WaitForSeconds(0.6f);
+            Check(ShopConversation.Active == null && !crabber.Voice.IsSpeaking && crabber.State == CompanionState.Idle,
+                $"walking away from the stall silences the keeper (was talking: {wasTalking}) and no goodbye is started");
+            if (ShopConversation.Active != null) ShopConversation.Instance.End(sayGoodbye: false);
 
             // The games stalls: building sites until their test.
             var games = FindObjectsByType<MinigameStall>(FindObjectsSortMode.None).OrderBy(g => g.hsk).ToList();
@@ -644,7 +692,7 @@ namespace UntitledGame.Core
             SaveSystem.Data.crabLevels.Clear();
             SaveSystem.Data.crabLevels.AddRange(saved);
             DayNightCycle.Instance.Day = dayBefore;
-            SaveSystem.Data.crabLastDay = dayBefore;
+            SaveSystem.Data.crabLastMinute = SaveSystem.Data.playMinutes;
         }
 
         /// <summary>The HUD's fish grid, furniture comfort counting each kind once, and newest-first transcripts.</summary>
@@ -682,6 +730,8 @@ namespace UntitledGame.Core
             float frenzyOut = frenzy != null ? -WorldShape.ShoreDistance(frenzy.Position.x, frenzy.Position.z) : -1f;
             Check(frenzy != null && FishFrenzy.Contains(frenzy.Position) && WorldShape.IsWater(frenzy.Position.x, frenzy.Position.z) && frenzyOut > 3f && frenzyOut < 14f,
                 $"a fish frenzy bubbles in open water within casting reach ({frenzyOut:0.0} m out)");
+            Check(Mathf.Abs(FishFrenzy.Lifetime - 3.5f * 18.5f) < 0.01f && FishFrenzy.Lifetime < 70f,
+                $"a frenzy lasts about three and a half typical catches ({FishFrenzy.Lifetime:0} s, a catch takes about {FishFrenzy.TypicalCatchSeconds:0.#} s)");
 
             var placed = SaveSystem.Data.placed;
             var before = placed.ToList();
@@ -961,6 +1011,90 @@ namespace UntitledGame.Core
 
         private SpeechEngine Speech => LocalAIServices.Instance.Speech;
 
+        /// <summary>The directly-run SenseVoice (second choices): it must hear what sherpa-onnx hears.</summary>
+        private IEnumerator AsrChecks()
+        {
+            var services = LocalAIServices.Instance;
+            float deadline = Time.realtimeSinceStartup + 240f;
+            while (Time.realtimeSinceStartup < deadline && (services.SttStatus == ServiceStatus.Starting || services.TtsStatus == ServiceStatus.Starting)) yield return null;
+            while (Time.realtimeSinceStartup < deadline && !Speech.AlternativesReady) yield return null;
+            Check(Speech.AlternativesReady, "the second-choice reader loaded");
+            if (!Speech.AlternativesReady) yield break;
+            // Cross-check against the offline replay (Tools/asr-analysis): the same recordings, scored in C# (only if the list exists).
+            string tsv = Path.Combine(System.Environment.GetEnvironmentVariable("TEMP") ?? "", "graded_wavs.tsv");
+            if (File.Exists(tsv))
+            {
+                int n = 0, within = 0;
+                double sum = 0;
+                foreach (string line in File.ReadAllLines(tsv))
+                {
+                    string[] parts = line.Split('\t');
+                    if (parts.Length < 2 || !File.Exists(parts[1]) || !WavUtility.TryDecode(File.ReadAllBytes(parts[1]), out var wav)) continue;
+                    var one = Speech.AnalyzeNow(WavUtility.Resample(wav.samples, wav.sampleRate, MicRecorder.TargetRate), parts[0]);
+                    if (one?.margin == null) continue;
+                    n++;
+                    sum += one.margin.Value;
+                    if (one.margin.Value > HskSchool.ScoreMargin) within++;
+                    if (n % 40 == 0) yield return null;
+                }
+                Log($"   asr: real recordings: {within}/{n} score above {HskSchool.ScoreMargin}, mean {sum / System.Math.Max(n, 1):0.00} (offline replay: 289/319, mean -0.58)");
+                Check(System.Math.Abs(within - 289) <= 10 && n > 300, "direct scoring in the game agrees with the offline replay on the real recordings");
+            }
+            // Stall requests are scored directly too: what a stall understands, and the audio of one request against them all.
+            var gao = ShopkeeperBrain.Keepers.FirstOrDefault(k => k.Shop != null && k.Shop.school);
+            var driver = ShopkeeperBrain.Keepers.FirstOrDefault(k => k.Shop != null && k.Shop.busDriver);
+            var schoolOptions = gao?.SpokenOptions();
+            Check(schoolOptions != null && schoolOptions.Contains("我想练习") && schoolOptions.Contains("我想上课") && schoolOptions.Contains("我想考试") &&
+                  (driver == null || driver.SpokenOptions().Contains("我想去金沙湾")) && schoolOptions.All(o => o.All(Pinyin.IsHanzi)),
+                $"each stall lists the requests it understands ({schoolOptions?.Count} at the test centre: {string.Join(" ", schoolOptions ?? new System.Collections.Generic.List<string>())}; bus: {(driver == null ? "no driver" : string.Join(" ", driver.SpokenOptions()))})");
+            if (schoolOptions != null)
+            {
+                foreach (var (said, expect) in new[] { ("我想练习", "我想练习"), ("我想上课", "我想上课"), ("今天天气很好", (string)null) })
+                {
+                    WavUtility.PcmData? spoken = null;
+                    bool ready = false;
+                    Speech.Synthesize(SpeechEngine.VoiceMale, said, 1f, null, p => { spoken = p; ready = true; });
+                    while (!ready) yield return null;
+                    if (!spoken.HasValue) continue;
+                    var audio = WavUtility.Resample(spoken.Value.samples, spoken.Value.sampleRate, MicRecorder.TargetRate);
+                    var scores = Speech.ScoreOptionsNow(audio, schoolOptions);
+                    int best = 0;
+                    for (int i = 1; i < scores.Length; i++) if (scores[i] > scores[best]) best = i;
+                    bool taken = scores[best] > HskSchool.ScoreMargin;
+                    Log($"   asr: \"{said}\" best request \"{schoolOptions[best]}\" score {scores[best]:0.0}");
+                    Check(expect == null ? !taken : taken && schoolOptions[best] == expect,
+                        expect == null ? $"a sentence that isn't a request (\"{said}\") fits none of them" : $"the audio of \"{said}\" fits that request best");
+                }
+            }
+
+            foreach (string phrase in new[] { "你好，我想买鱼。", "今天天气很好。", "谢谢老师" })
+            {
+                WavUtility.PcmData? pcm = null;
+                bool done = false;
+                Speech.Synthesize(SpeechEngine.VoiceMale, phrase, 1f, null, p => { pcm = p; done = true; });
+                while (!done) yield return null;
+                if (!pcm.HasValue) { Log($"(could not synthesise {phrase})"); continue; }
+                var samples = WavUtility.Resample(pcm.Value.samples, pcm.Value.sampleRate, MicRecorder.TargetRate);
+                string sherpa = null;
+                done = false;
+                Speech.Transcribe(samples, (t, e) => { sherpa = t; done = true; }, SpeechEngine.AsrMode.SenseVoice);
+                while (!done) yield return null;
+                float t0 = Time.realtimeSinceStartup;
+                var a = Speech.AnalyzeNow(samples);
+                float took = Time.realtimeSinceStartup - t0;
+                string Strip(string x) => new string((x ?? "").Where(char.IsLetterOrDigit).ToArray());
+                Log($"   asr: \"{phrase}\" sherpa \"{sherpa}\" direct \"{a?.text}\" second choice \"{a?.alternative}\" ({took:0.00}s)");
+                Check(a != null && Strip(a.text) == Strip(sherpa), $"direct reading matches sherpa-onnx for \"{phrase}\"");
+                // Scoring the expected word directly: the word that was said is within the threshold, another word is far outside it.
+                string said = Strip(phrase), other = said.StartsWith("谢谢") ? "你好" : "谢谢";
+                var good = Speech.AnalyzeNow(samples, said);
+                var bad = Speech.AnalyzeNow(samples, other);
+                Log($"   asr: score of \"{said}\" = {good?.margin:0.0}, of \"{other}\" = {bad?.margin:0.0}");
+                Check(good?.margin > HskSchool.ScoreMargin, $"the word that was said scores within the threshold (\"{said}\")");
+                Check(bad?.margin < HskSchool.ScoreMargin, $"a different word scores below it (\"{other}\" for audio of \"{said}\")");
+            }
+        }
+
         /// <summary>The rule-based shop parser on typical (and mis-heard) customer lines.</summary>
         private void ParserChecks()
         {
@@ -1086,6 +1220,17 @@ namespace UntitledGame.Core
                 int smallest = Enumerable.Range(1, Hsk.LessonCounts[l]).Min(n => Hsk.LessonWords(l, n).Count);
                 Check(Hsk.LessonCounts[l] >= 10 && whole, $"HSK {l}: {Hsk.LessonCounts[l]} lessons cover all {counts[l]} words once (smallest lesson {smallest} words)");
             }
+            var game2 = Hsk.LessonWords(2, Hsk.LessonCounts[2]);
+            var game3 = Hsk.LessonWords(3, Hsk.LessonCounts[3]);
+            Check(game2.Count > 0 && game2.All(w => w.game) && game3.Count > 0 && game3.All(w => w.game) && Hsk.LessonTitle(2, Hsk.LessonCounts[2]).chinese == "游戏里的词" &&
+                  HskVocab.Words(1).All(w => !w.game),
+                $"the interface's own words (not in HSK 1-3) are the last lesson of HSK 2 ({string.Join(" ", game2.Select(w => w.hanzi))}) and HSK 3 ({string.Join(" ", game3.Select(w => w.hanzi))})");
+            // Every Chinese interface label is made of list words, so mastering them all turns the interface Chinese.
+            string[] labels = { "下雨", "第3天", "早上", "上午", "下午", "晚上", "问美", "给美写", "再见", "写", "钓鱼", "包", "词语", "菜单", "快", "鱼", "朋友", "说过的话",
+                                "通过了", "你有20块", "美教你的词语", "休息一下", "日记", "收线", "放", "转", "取消", "常用语", "学校", "学会了", "常用", "对了，就是这个",
+                                "再说一次", "不对，我说的是：", "关上", "存档", "太好了！点一下，放到包里" };
+            var gaps = labels.Where(t => t.Where(Pinyin.IsHanzi).Any(c => c != '美' && !HskVocab.Segment(t).Any(w => w.word.Contains(c)))).ToList();
+            Check(gaps.Count == 0, $"every interface label's words are in the word list ({labels.Length} labels; missing: {string.Join(" ", gaps)})");
             bool G(string heard, string word, bool recall = true) => HskSchool.Grade(HskSchool.Clean(heard), HskVocab.Get(word), recall);
             Check(G("卖", "卖") && G("迈", "卖") && G("买", "卖") && G("和", "喝") && G("才", "菜") && G("环", "还"),
                 "grading ignores tones: 迈/买 count for 卖, 和 for 喝, 才 for 菜, and any reading counts (环 huán for 还, which can be huán)");
@@ -1415,6 +1560,9 @@ namespace UntitledGame.Core
             var convo = ShopConversation.Instance;
             Check(ShopConversation.Active == null, $"walking to {keeper.DisplayNameEnglish} ended any earlier shop conversation");
             Check(convo != null && convo.Candidate == keeper, $"[E] prompt offers to talk to {keeper.DisplayName} ({(convo?.Candidate != null ? convo.Candidate.DisplayName : "nobody")})");
+            string prompt = GameUI.TalkPrompt(keeper);
+            Check(prompt.Contains(keeper.DisplayName) && !prompt.ToLower().Contains(keeper.Shop.english.ToLower()) && !prompt.Contains(keeper.Shop.hanzi),
+                $"the prompt is just who to talk to, not what they do (\"{prompt}\")");
             convo?.Begin(keeper);
             Check(ShopConversation.Active == keeper, $"E starts a conversation with {keeper.DisplayName}");
             yield return new WaitForSeconds(0.9f);
@@ -1566,6 +1714,13 @@ namespace UntitledGame.Core
             yield return new WaitForSeconds(1.5f);
             yield return Shot("17_lesson");
 
+            // Repeat after me: any of the recogniser's top three guesses counts (so a lone syllable isn't said ten times).
+            Check(!lesson.Current.recall, "a lesson starts with repeat-after-me words");
+            HskSchool.IncomingTopMatch = true;
+            teacher.HandlePlayerUtterance("错的");
+            HskSchool.IncomingTopMatch = null;
+            Check(lesson.index == 1 && lesson.questions[0].correct && lesson.questions[0].heard == lesson.questions[0].word.hanzi,
+                "repeat after me: the word among the recogniser's top three guesses counts");
             // Three answers are spoken (through speech recognition), the rest typed in directly. Only words of two or more
             // characters are spoken: the test voice garbles a lone character said on its own (呢 and 三 both came out as 呀).
             int spoken = 0, spokenRight = 0;
@@ -1616,6 +1771,17 @@ namespace UntitledGame.Core
                 money = Inventory.Money;
                 teacher.HandlePlayerUtterance("跳过");
                 Check(practice.last != null && !practice.last.correct && Hsk.MissedWords.Contains(missed), $"跳过 skips a word, and it's noted for later ({missed})");
+                // Each answer's verdict stands on its own for a moment (on that question), then the next question appears.
+                yield return new WaitForSeconds(0.3f);
+                Check(practice.ShowingResult && practice.last.word.hanzi == missed && practice.Current.word.hanzi != missed,
+                    "after an answer its verdict is shown on that question while the next one is waiting");
+                yield return Shot("17b_quiz_wrong");
+                yield return new WaitForSeconds(LessonSession.ResultSeconds);
+                Check(!practice.ShowingResult, "...and a moment later the next question appears by itself");
+                teacher.HandlePlayerUtterance(practice.Current.word.hanzi);
+                Check(practice.last.correct && practice.ShowingResult, "a right answer shows 'Correct!' on its own question");
+                yield return new WaitForSeconds(0.3f);
+                yield return Shot("17c_quiz_correct");
                 while (HskSchool.Current == practice)
                 {
                     teacher.HandlePlayerUtterance(practice.Current.word.hanzi);
@@ -1624,27 +1790,97 @@ namespace UntitledGame.Core
                 Check(Inventory.Money == money, "practice doesn't pay");
             }
 
-            // The HSK 1 test: 15 right and 5 skipped passes. In a test each answer waits for the player to confirm it (Y).
+            // The HSK 1 test covers every word of the level, 20 at a time: a round passes with 16, its right words are done,
+            // and missed words go back in the pool. The level passes once every word is done.
+            Check(Hsk.PassMarkFor(20) == 16 && Hsk.PassMarkFor(10) == 8 && Hsk.TestPool(1).Count == Hsk.TestWords(1).Count && Hsk.TestWords(1).Count > 100,
+                $"the HSK 1 test pool is every askable HSK 1 word ({Hsk.TestWords(1).Count}); 16/20 passes a round (8/10 a short one)");
+            teacher.HandlePlayerUtterance("我想考试");
+            var round = HskSchool.Current;
+            var missedInRound = new System.Collections.Generic.List<string>();
+            if (round != null)
+            {
+                int k = 0;
+                while (HskSchool.Current == round)
+                {
+                    bool wrong = k++ >= 17;
+                    if (wrong) missedInRound.Add(round.Current.word.hanzi);
+                    teacher.HandlePlayerUtterance(wrong ? "喂喂喂喂" : round.Current.word.hanzi);
+                    if (round.pending != null) HskSchool.SubmitPending();
+                    yield return null;
+                }
+            }
+            yield return WaitIdle(teacher, 20f);
+            Check(round != null && HskSchool.LastPassed && Hsk.Level == 0 && Hsk.TestClearedCount(1) == 17 &&
+                  missedInRound.Count == 3 && missedInRound.All(w => Hsk.TestPool(1).Any(x => x.hanzi == w)),
+                $"a round of 17/20 passes but not the level: 17 words done, the 3 missed ({string.Join(" ", missedInRound)}) go back in the pool ({Hsk.TestPool(1).Count} left)");
+            // Leave just one round's worth (the 3 missed among them), so the next round finishes the level.
+            var keep = Hsk.TestPool(1).Where(w => missedInRound.Contains(w.hanzi)).Concat(Hsk.TestPool(1).Where(w => !missedInRound.Contains(w.hanzi)).Take(Hsk.TestQuestions - 3)).ToList();
+            Hsk.ClearTestWords(1, Hsk.TestPool(1).Where(w => !keep.Contains(w)).Select(w => w.hanzi).ToList());
+            Check(Hsk.TestPool(1).Count == Hsk.TestQuestions, $"(test setup: {Hsk.TestPool(1).Count} words left in the pool)");
+
+            // The last round: 16 right and 4 skipped passes. In a test each answer waits for the player to confirm it (Y).
             var sea = FishDatabase.Get("seabass");
             int plain = Catalog.FishPrice(sea, 3f);
             teacher.HandlePlayerUtterance("我想考试");
             var test = HskSchool.Current;
             Check(test != null && test.kind == LessonKind.Test && test.level == 1 && test.questions.Count == Hsk.TestQuestions && test.questions.All(q => q.recall),
                 $"我想考试 starts the HSK 1 test ({test?.questions.Count ?? 0} words from English)");
+            Check(test != null && missedInRound.All(w => test.questions.Any(q => q.word.hanzi == w)), "the words missed in an earlier round come back");
             if (test != null)
             {
                 teacher.HandlePlayerUtterance("错的");
                 Check(test.pending == "错的" && test.index == 0, "in a test, what was heard is shown first and isn't graded yet");
                 HskSchool.DiscardPending();
                 Check(test.pending == null && test.index == 0, "N throws it away to say it again");
+                // "Did you mean X?": the recogniser's second choice is offered, and clicking it submits that instead.
+                string answer = test.Current.word.hanzi;
+                HskSchool.IncomingAlternative = answer;
+                teacher.HandlePlayerUtterance("错的");
+                HskSchool.IncomingAlternative = null;
+                Check(test.pending == "错的" && test.alternative == answer, "a second choice is offered beside what was heard");
+                yield return null;
+                yield return Shot("17d_did_you_mean");
+                HskSchool.SubmitAlternative();
+                Check(test.pending == null && test.alternative == null && test.questions[0].correct && test.index == 1, "clicking 'Did you mean' grades the second choice instead");
+                // Direct scoring: a reading that's wrong but whose expected word scores above the threshold is taken as the word.
+                string next = test.Current.word.hanzi;
+                HskSchool.IncomingMargin = -1f;
+                teacher.HandlePlayerUtterance("错的");
+                HskSchool.IncomingMargin = null;
+                Check(test.pending == next, "a near-miss reading is counted as the expected word (score -1)");
+                HskSchool.DiscardPending();
+                HskSchool.IncomingMargin = -5f;
+                teacher.HandlePlayerUtterance("错的");
+                HskSchool.IncomingMargin = null;
+                Check(test.pending == "错的", "a poor score (-5) is left as heard");
+                HskSchool.DiscardPending();
+                HskSchool.IncomingTopMatch = true;
+                teacher.HandlePlayerUtterance("错的");
+                HskSchool.IncomingTopMatch = null;
+                Check(test.pending == "错的", "the top-three rule is for repeat-after-me only: in a test the reading stays as heard");
+                HskSchool.DiscardPending();
                 int n = 0;
                 while (HskSchool.Current == test)
                 {
-                    teacher.HandlePlayerUtterance(n++ < 5 ? "跳过" : test.Current.word.hanzi);
+                    teacher.HandlePlayerUtterance(n++ < 4 ? "跳过" : test.Current.word.hanzi);
                     if (test.pending != null) HskSchool.SubmitPending(); // Y
                     yield return null;
                 }
-                Check(test.Right == 15 && Hsk.Level == 1, $"15/20 passes the HSK 1 test (HSK level now {Hsk.Level})");
+                Check(test.Right == 16 && HskSchool.LastPassed && Hsk.Level == 0 && Hsk.TestPool(1).Count == 4,
+                    $"16/20 passes the round, but the 4 skipped words go back in the pool, so HSK 1 isn't passed yet (pool {Hsk.TestPool(1).Count})");
+                yield return WaitIdle(teacher, 20f);
+                // The last 4 words: a short round (all 4 needed), and then the level is passed.
+                teacher.HandlePlayerUtterance("我想考试");
+                var last = HskSchool.Current;
+                Check(last != null && last.questions.Count == 4 && Hsk.PassMarkFor(4) == 4, $"the last round asks the {last?.questions.Count} words left");
+                while (last != null && HskSchool.Current == last)
+                {
+                    teacher.HandlePlayerUtterance(last.Current.word.hanzi);
+                    if (last.pending != null) HskSchool.SubmitPending();
+                    yield return null;
+                }
+                test = last ?? test;
+                Check(Hsk.Level == 1 && Hsk.TestPool(1).Count == 0, $"every HSK 1 word passed in a test round: HSK 1 passed (HSK level now {Hsk.Level})");
                 Check(HskSchool.LastFinished == test && HskSchool.LastPassed, "the result (PASSED) stays in Teacher Gao's window");
             }
             yield return WaitIdle(teacher, 20f);
@@ -1652,7 +1888,58 @@ namespace UntitledGame.Core
             yield return Shot("18_after_hsk1");
             teacher.HandlePlayerUtterance("我想考试");
             Check(HskSchool.Current != null && HskSchool.Current.level == 2, "no daily limit: the HSK 2 test can start straight away");
-            HskSchool.Abandon();
+            // Fail it on purpose: 3 right, the rest wrong. The window then reviews every question, right or wrong.
+            var failing = HskSchool.Current;
+            int m = 0;
+            while (HskSchool.Current == failing)
+            {
+                teacher.HandlePlayerUtterance(m++ < 3 ? failing.Current.word.hanzi : "喂喂喂喂");
+                if (failing.pending != null) HskSchool.SubmitPending();
+                yield return null;
+            }
+            yield return WaitIdle(teacher, 20f);
+            yield return new WaitForSeconds(0.8f);
+            var review = HskSchool.LastFinished;
+            Check(review == failing && !HskSchool.LastPassed && Hsk.Level == 1 && review.questions.All(q => q.answered) &&
+                  review.questions.Count(q => q.correct) == 3 && review.questions.Count(q => !q.correct && !string.IsNullOrEmpty(q.heard)) == 17,
+                $"failing a test: {review?.Right}/{review?.questions.Count} right ({string.Join(",", review.questions.Where(q => q.correct).Select(q => q.word.hanzi + "<" + q.heard + ">"))}), with what was said for the 17 wrong");
+            Check(ui.Review.IsOpen && ui.Review.RowCount == 20 && ui.Review.Title.Contains("NOT PASSED"),
+                $"the review opens under the pass/fail message (\"{ui.Review.Title}\", {ui.Review.RowCount} questions)");
+            yield return Shot("18b_test_review");
+            // A failed lesson gets the same review: skip every word in lesson 2.
+            teacher.HandlePlayerUtterance("我想上课");
+            var failedLesson = HskSchool.Current;
+            Check(failedLesson != null && failedLesson.kind == LessonKind.Lesson && ui.Review.IsOpen, "the review stays open while you start something else: only you close it");
+            while (failedLesson != null && HskSchool.Current == failedLesson)
+            {
+                teacher.HandlePlayerUtterance("跳过");
+                yield return null;
+            }
+            yield return WaitIdle(teacher, 20f);
+            yield return new WaitForSeconds(0.8f);
+            var lessonReview = HskSchool.LastFinished;
+            Check(lessonReview == failedLesson && !HskSchool.LastPassed && ui.Review.IsOpen && ui.Review.RowCount == lessonReview.RecallAsked && lessonReview.RecallAsked > 0 &&
+                  ui.Review.Title.Contains("Lesson not passed"),
+                $"failing a lesson (all {lessonReview?.RecallAsked} quiz questions skipped) shows a review of its quiz questions");
+            yield return Shot("18c_lesson_review");
+            ShopConversation.Instance.End(sayGoodbye: false);
+            Check(ui.Review.IsOpen, "...even after leaving the test centre");
+            ui.Review.Close();
+            Check(!ui.Review.IsOpen, "closing the review is manual (its button, or X)");
+            // The history: every finished lesson and test with the time it took, and the word heat map, by HSK level.
+            Check(Hsk.History.Any(r => r.kind == 0 && r.level == 1 && r.lesson == 1 && r.passed && r.seconds > 0f && r.total == Hsk.RecallPerLesson),
+                "the passed lesson is in the history with its time and quiz score");
+            Check(Hsk.History.Any(r => r.kind == 2 && r.level == 1 && r.passed) && Hsk.History.Any(r => r.kind == 2 && r.level == 2 && !r.passed && r.right == 3),
+                "the HSK 1 test (passed) and the failed HSK 2 test are in the history");
+            Check(Hsk.History.Any(r => r.kind == 1 && r.total == Hsk.PracticeQuestions), "free practice is in the history too");
+            ui.OpenSchool();
+            yield return new WaitForSeconds(0.8f);
+            Check(ui.SchoolWordCells == HskVocab.All.Count(w => w.level <= Hsk.MaxLevel), $"the School page has a cell for every HSK word ({ui.SchoolWordCells})");
+            yield return Shot("21_school_history");
+            ui.OpenSchool(used: true);
+            yield return new WaitForSeconds(0.5f);
+            yield return Shot("21b_school_used");
+            ui.CloseJournal();
             teacher.Interrupt();
             Check(UiText.Plain("Day 2", "第2天", 1) == "第2天 Day 2" && UiText.Plain("Fish", "鱼", 0) == "鱼" && UiText.Plain("Bag", "包", 3) == "Bag",
                 "after HSK 1: HSK 1 labels show both languages, easier ones only Chinese, HSK 3 ones stay English");
@@ -2119,10 +2406,13 @@ namespace UntitledGame.Core
             int est = 0;
             foreach (var m in memory.messages) est += DialogueAgent.EstimateTokens(m.content);
             Log($"   stuffed Mei's memory with {memory.messages.Count} messages (~{est} tokens)");
-            int before = ConversationLog.Entries.Count;
+            // (The transcript keeps the last 300 lines, so after a long run its count stops growing: find the reply after a marker.)
+            bool hadAny = ConversationLog.Entries.Count > 0;
+            var mark = hadAny ? ConversationLog.Entries[ConversationLog.Entries.Count - 1] : default;
             yield return Say(vc, mei, SpeechEngine.VoiceEnglish, "Mei, what should we do next?");
             yield return WaitIdle(mei, 90f);
-            string reply = ConversationLog.Entries.Count > before ? ConversationLog.Entries[ConversationLog.Entries.Count - 1].text : "";
+            int from = hadAny ? ConversationLog.Entries.LastIndexOf(mark) + 1 : 0;
+            string reply = ConversationLog.Entries.Skip(from).Where(e => !e.fromPlayer).Select(e => e.text).LastOrDefault() ?? "";
             Check(reply.Length > 0 && !reply.Contains("Could you say that again"), $"Mei still answers after a very long conversation: \"{reply}\"");
             Check(ReadShared(ChatAudit.SessionFile).Contains("to fit the context"), "the oldest messages were forgotten to fit the context");
             // Trimming happens in one chunk (down to ~40% of the room), so the next turns can reuse the server's prompt cache.

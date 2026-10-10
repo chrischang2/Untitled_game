@@ -84,6 +84,20 @@ namespace UntitledGame.Core
         public int promotedDay = -1;  // last day it moved up a box (at most once a day)
     }
 
+    /// <summary>One finished lesson, practice or test at the test centre (the School page of the journal).</summary>
+    [Serializable]
+    public class SessionRecord
+    {
+        public int kind;           // 0 lesson, 1 practice, 2 test (Companion.LessonKind)
+        public int level;          // HSK level
+        public int lesson;         // lesson number (lessons only)
+        public int day;            // game day
+        public long when;          // real time (UTC ticks)
+        public float seconds;      // real time taken
+        public int right, total;   // lessons: the quiz part; practice and tests: every question
+        public bool passed;
+    }
+
     [Serializable]
     public class StatLevel
     {
@@ -191,7 +205,10 @@ namespace UntitledGame.Core
         public int statCast, statBar, statGrip, statLuck, statQuality, statBite;
         // 海叔's crab pots (Economy.CrabPots): upgrade levels, money waiting, and fish bait for the next haul.
         public List<StatLevel> crabLevels = new List<StatLevel>();
-        public int crabLastDay = -1;
+        public int crabLastDay = -1;                           // (unused since hauls follow play time)
+        public double playMinutes;                             // in-game minutes the clock has run while playing (not slept or skipped)
+        public double crabLastMinute = -1;                     // playMinutes at the last crab haul (-1: not started)
+        public float crabBaitWaiting;                          // bait money that goes in with the next haul
         // 投壶 pitch-pot (Minigames.PitchPotGame): best round, and the day its prize was last won.
         public int pitchPotBest;
         public int pitchPotPrizeDay = -1;
@@ -225,6 +242,8 @@ namespace UntitledGame.Core
         public bool requestDone;
         public List<string> hskMissed = new List<string>();    // words answered wrong (come back in practice)
         public List<WordMastery> mastery = new List<WordMastery>(); // how well each HSK word is known (spaced repetition)
+        public List<SessionRecord> hskHistory = new List<SessionRecord>(); // every finished lesson, practice and test
+        public List<string> hskTestCleared = new List<string>();  // "level:word": words already answered right in a passed test round
 
         // Where you were standing.
         public bool hasPlayerPos;

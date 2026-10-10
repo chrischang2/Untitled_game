@@ -102,6 +102,13 @@ namespace UntitledGame.Companion
         public float Amplitude { get; private set; }
         public string CurrentSentence => _current?.display;
 
+        [SerializeField] private bool localVoice;
+
+        /// <summary>A shopkeeper's voice: fully 3D and short-ranged, so it stays at their stall (Mei's follows you).</summary>
+        public void MakeLocal() => localVoice = true;
+        public float SpatialBlend => _source != null ? _source.spatialBlend : 0f;
+        public float MaxHearingDistance => _source != null ? _source.maxDistance : 0f;
+
         public void Configure(string zhVoice, string enVoice, float voicePitch)
         {
             chineseVoice = zhVoice;
@@ -116,10 +123,10 @@ namespace UntitledGame.Companion
         {
             _source = GetComponent<AudioSource>();
             _source.playOnAwake = false;
-            _source.spatialBlend = 0.55f;
+            _source.spatialBlend = localVoice ? 1f : 0.55f;
             _source.rolloffMode = AudioRolloffMode.Linear;
-            _source.minDistance = 6f;
-            _source.maxDistance = 60f;
+            _source.minDistance = localVoice ? 2.5f : 6f;
+            _source.maxDistance = localVoice ? 14f : 60f;
             _source.dopplerLevel = 0f;
         }
 

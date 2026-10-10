@@ -104,7 +104,10 @@ namespace UntitledGame.Environment
             if (Application.isPlaying && !paused)
             {
                 float before = timeOfDay;
-                timeOfDay += Time.deltaTime / realSecondsPerHour;
+                float hours = Time.deltaTime / realSecondsPerHour;
+                timeOfDay += hours;
+                // In-game time actually played (sleeping and the bus jump the clock instead, so they don't count).
+                UntitledGame.Core.SaveSystem.Data.playMinutes += hours * 60f;
                 if (timeOfDay >= 24f)
                 {
                     timeOfDay -= 24f;

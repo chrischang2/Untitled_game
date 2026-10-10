@@ -17,12 +17,31 @@ namespace UntitledGame.Progression
     public static class Hsk
     {
         public const int MaxLevel = 3;
-        /// <summary>Lessons per HSK level (together they cover every word of that level).</summary>
-        public static readonly int[] LessonCounts = { 0, 11, 10, 20 };
+        /// <summary>Lessons of the official HSK words per level; the game's interface words add lessons at the end (see LessonCounts).</summary>
+        private static readonly int[] HskLessonCounts = { 0, 11, 10, 20 };
+        public const int GameWordsPerLesson = 15;
+
+        private static int[] _lessonCounts;
+
+        /// <summary>Lessons per HSK level (together they cover every word of that level, the game's interface words last).</summary>
+        public static int[] LessonCounts => _lessonCounts ??= new[]
+        {
+            0,
+            HskLessonCounts[1] + GameLessons(1),
+            HskLessonCounts[2] + GameLessons(2),
+            HskLessonCounts[3] + GameLessons(3),
+        };
+
+        private static int GameLessons(int level) => (HskVocab.Words(level).Count(w => w.game) + GameWordsPerLesson - 1) / GameWordsPerLesson;
         /// <summary>Money for passing a lesson for the first time (practice never pays).</summary>
         public static readonly int[] LessonReward = { 0, 40, 60, 70 };
         public const int RecallPerLesson = 8, LessonPassMark = 6;
-        public const int TestQuestions = 20, TestPassMark = 15;
+        /// <summary>
+        /// The HSK test covers every word of the level that can be asked from English, 20 random words a round. A round
+        /// passes with 16/20 (80% for a shorter last round); its right answers are done, and every word missed goes back in
+        /// the pool. A failed round puts all its words back. The level is passed once the pool is empty.
+        /// </summary>
+        public const int TestQuestions = 20, TestPassMark = 16;
         public const int PracticeQuestions = 10;
 
         /// <summary>
@@ -62,6 +81,7 @@ namespace UntitledGame.Progression
         /// <summary>The lesson's theme ("Numbers and money", "多少钱"), or ("Lesson 3", "第三课") where there are no themes.</summary>
         public static (string english, string chinese) LessonTitle(int level, int lesson)
         {
+            if (level >= 1 && level <= MaxLevel && lesson > HskLessonCounts[level] && lesson <= LessonCounts[level]) return ("Words the game uses", "游戏里的词");
             if (level == 1 && lesson >= 1 && lesson <= Hsk1Themes.Length) return (Hsk1Themes[lesson - 1].english, Hsk1Themes[lesson - 1].chinese);
             return ($"Lesson {lesson}", "");
         }
@@ -144,6 +164,27 @@ namespace UntitledGame.Progression
             return (top, 1);
         }
 
+        /// <summary>Right answers needed in a test round of n questions (16 of 20, the same 80% for a shorter last round).</summary>
+        public static int PassMarkFor(int n) => n >= TestQuestions ? TestPassMark : Mathf.CeilToInt(n * TestPassMark / (float)TestQuestions);
+
+        private static List<string> Cleared => Data.hskTestCleared ??= new List<string>();
+
+        /// <summary>Every word the level's test asks (from English, so not particles or measure words).</summary>
+        public static List<HskVocab.Word> TestWords(int level) => HskVocab.Words(level).Where(Askable).ToList();
+
+        /// <summary>The words still to pass in the level's test.</summary>
+        public static List<HskVocab.Word> TestPool(int level) => TestWords(level).Where(w => !Cleared.Contains($"{level}:{w.hanzi}")).ToList();
+
+        public static int TestClearedCount(int level) => TestWords(level).Count(w => Cleared.Contains($"{level}:{w.hanzi}"));
+
+        /// <summary>A test round was passed: its right answers are done (the missed ones stay in the pool).</summary>
+        public static void ClearTestWords(int level, IEnumerable<string> words)
+        {
+            foreach (var w in words)
+                if (!Cleared.Contains($"{level}:{w}")) Cleared.Add($"{level}:{w}");
+            Changed?.Invoke();
+        }
+
         /// <summary>The HSK test the player can take next (0 once they've passed HSK 3).</summary>
         public static int NextTest => Level >= MaxLevel ? 0 : Level + 1;
 
@@ -170,6 +211,31 @@ namespace UntitledGame.Progression
 
         public static IReadOnlyList<string> MissedWords => Missed;
 
+        // ------------------------------------------------------------------ history
+
+        public const int MaxHistory = 600;
+
+        public static List<SessionRecord> History => Data.hskHistory ??= new List<SessionRecord>();
+
+        /// <summary>A lesson, practice or test came to its end (passed or not; leaving half way isn't recorded).</summary>
+        public static void LogSession(int kind, int level, int lesson, float seconds, int right, int total, bool passed)
+        {
+            History.Add(new SessionRecord
+            {
+                kind = kind, level = level, lesson = lesson, day = Data.day, when = DateTime.UtcNow.Ticks,
+                seconds = seconds, right = right, total = total, passed = passed,
+            });
+            if (History.Count > MaxHistory) History.RemoveAt(0);
+            Changed?.Invoke();
+        }
+
+        /// <summary>"4:12" / "1:05:30".</summary>
+        public static string Clock(float seconds)
+        {
+            int s = Mathf.Max(0, Mathf.RoundToInt(seconds));
+            return s >= 3600 ? $"{s / 3600}:{s / 60 % 60:00}:{s % 60:00}" : $"{s / 60}:{s % 60:00}";
+        }
+
         // ------------------------------------------------------------------ mastery (spaced repetition)
 
         /// <summary>Days before a word in each box is due for practice again.</summary>
@@ -182,6 +248,8 @@ namespace UntitledGame.Progression
         public static int Box(string word) => MasteryOf(word)?.box ?? 0;
         public static bool Seen(string word) => MasteryOf(word) != null;
         public static bool Known(string word) => Box(word) >= KnownBox;
+        /// <summary>Mastered: the top box. A mastered word replaces its English in the interface (UI.UiText).</summary>
+        public static bool Mastered(string word) => Box(word) >= MaxBox;
         public static int KnownCount(int level) => HskVocab.Words(level).Count(w => Known(w.hanzi));
         public static int KnownCount(IEnumerable<HskVocab.Word> words) => words.Count(w => Known(w.hanzi));
 
@@ -214,6 +282,9 @@ namespace UntitledGame.Progression
             if (right)
             {
                 m.right++;
+                // Particles and measure words are never asked from English, so repeating them right is how they move up.
+                var entry = HskVocab.Get(word);
+                if (!recall && entry != null && !Askable(entry)) recall = true;
                 if (recall && m.promotedDay != Data.day)
                 {
                     m.box = Mathf.Min(MaxBox, m.box + 1);
@@ -290,14 +361,15 @@ namespace UntitledGame.Progression
                 Lessons[1] = Hsk1Themes.Select(t => t.words.Split(' ').Select(HskVocab.Get).Where(w => w != null).ToList()).ToList();
             if (!Lessons.TryGetValue(level, out var split))
             {
-                var words = HskVocab.Words(level);
+                // The official words in a fixed shuffle (so lessons stay the same when interface words are added).
+                var words = HskVocab.Words(level).Where(w => !w.game).ToList();
                 var rng = new System.Random(1000 + level * 7919);
                 for (int i = words.Count - 1; i > 0; i--)
                 {
                     int j = rng.Next(i + 1);
                     (words[i], words[j]) = (words[j], words[i]);
                 }
-                int count = LessonCounts[level];
+                int count = HskLessonCounts[level];
                 split = new List<List<HskVocab.Word>>();
                 for (int k = 0; k < count; k++)
                 {
@@ -305,6 +377,13 @@ namespace UntitledGame.Progression
                     split.Add(words.GetRange(from, to - from));
                 }
                 Lessons[level] = split;
+            }
+            if (!Lessons.ContainsKey(-level))
+            {
+                // Then the game's own interface words, in list order, a lesson at a time.
+                var game = HskVocab.Words(level).Where(w => w.game).ToList();
+                for (int k = 0; k < game.Count; k += GameWordsPerLesson) split.Add(game.GetRange(k, Mathf.Min(GameWordsPerLesson, game.Count - k)));
+                Lessons[-level] = split;
             }
             return lesson >= 1 && lesson <= split.Count ? split[lesson - 1] : new List<HskVocab.Word>();
         }

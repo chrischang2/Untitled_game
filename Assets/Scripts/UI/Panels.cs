@@ -175,28 +175,47 @@ namespace UntitledGame.UI
         private readonly List<(FishSpecies species, Image icon, TextMeshProUGUI name, TextMeshProUGUI info, Image strip)> _cards =
             new List<(FishSpecies, Image, TextMeshProUGUI, TextMeshProUGUI, Image)>();
 
-        private readonly RectTransform _grid, _peopleArea, _people, _transcriptArea, _transcript;
-        private bool _showPeople, _showTranscript, _showPhrases;
+        private readonly RectTransform _grid, _peopleArea, _people, _transcriptArea, _transcript, _schoolArea, _school;
+        private bool _showPeople, _showTranscript, _showPhrases, _showSchool, _heatUsed;
         private readonly TextMeshProUGUI _fishTab, _peopleTab, _transcriptTab, _phraseTab;
+        private readonly GameObject _schoolButtons;
+        private readonly TextMeshProUGUI _schoolTab, _learnedLabel, _usedLabel;
 
         public JournalPanel(RectTransform canvas) : base(canvas, "Journal", new Vector2(1500, 980), "Journal")
         {
+            ChineseTitle("日记", 3);
             _progress = UIFactory.Text(Window, "Progress", "", 26, UITheme.InkSoft, TextAlignmentOptions.Center);
             _progress.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -84), new Vector2(900, 36));
 
             // Tabs: fish / people (what you've learned about the shopkeepers).
-            var fishTab = UIFactory.Button(Window, "Fish", () => { _showPeople = false; _showTranscript = false; _showPhrases = false; Refresh(); }, UITheme.TealDark, 22);
+            var fishTab = UIFactory.Button(Window, "Fish", () => { _showPeople = false; _showTranscript = false; _showPhrases = false; _showSchool = false; Refresh(); }, UITheme.TealDark, 22);
             _fishTab = fishTab.GetComponentInChildren<TextMeshProUGUI>();
             fishTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(40, -28), new Vector2(130, 48));
-            var peopleTab = UIFactory.Button(Window, "People", () => { _showPeople = true; _showTranscript = false; _showPhrases = false; Refresh(); }, UITheme.Orange, 22);
+            var peopleTab = UIFactory.Button(Window, "People", () => { _showPeople = true; _showTranscript = false; _showPhrases = false; _showSchool = false; Refresh(); }, UITheme.Orange, 22);
             _peopleTab = peopleTab.GetComponentInChildren<TextMeshProUGUI>();
             peopleTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(180, -28), new Vector2(130, 48));
-            var phraseTab = UIFactory.Button(Window, "Phrasebook", () => { _showPhrases = true; _showPeople = false; _showTranscript = false; Refresh(); }, UITheme.Teal, 22);
+            var phraseTab = UIFactory.Button(Window, "Phrasebook", () => { _showPhrases = true; _showPeople = false; _showTranscript = false; _showSchool = false; Refresh(); }, UITheme.Teal, 22);
             _phraseTab = phraseTab.GetComponentInChildren<TextMeshProUGUI>();
             phraseTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(320, -28), new Vector2(170, 48));
-            var transcriptTab = UIFactory.Button(Window, "Transcript", () => { _showTranscript = true; _showPeople = false; _showPhrases = false; Refresh(); }, UITheme.InkSoft, 22);
+            var transcriptTab = UIFactory.Button(Window, "Transcript", () => { _showTranscript = true; _showPeople = false; _showPhrases = false; _showSchool = false; Refresh(); }, UITheme.InkSoft, 22);
             _transcriptTab = transcriptTab.GetComponentInChildren<TextMeshProUGUI>();
             transcriptTab.GetComponent<RectTransform>().Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-100, -28), new Vector2(170, 48));
+            var schoolTab = UIFactory.Button(Window, "School", () => ShowSchool(), UITheme.Green, 22);
+            _schoolTab = schoolTab.GetComponentInChildren<TextMeshProUGUI>();
+            schoolTab.GetComponent<RectTransform>().Anchor(new Vector2(0, 1), new Vector2(0, 1), new Vector2(510, -28), new Vector2(150, 48));
+            _schoolArea = UIFactory.Rect("SchoolArea", Window).Stretch(40, 40, 136, 36);
+            _school = UIFactory.ScrollList(_schoolArea, 10);
+            _schoolArea.gameObject.SetActive(false);
+            var buttons = UIFactory.Rect("SchoolButtons", Window);
+            buttons.Anchor(new Vector2(1, 1), new Vector2(1, 1), new Vector2(-40, -80), new Vector2(320, 44));
+            var learnedBtn = UIFactory.Button(buttons, "Learned", () => { _heatUsed = false; Refresh(); }, UITheme.TealDark, 20);
+            _learnedLabel = learnedBtn.GetComponentInChildren<TextMeshProUGUI>();
+            learnedBtn.GetComponent<RectTransform>().Anchor(new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(0, 0), new Vector2(155, 42));
+            var usedBtn = UIFactory.Button(buttons, "Most used", () => { _heatUsed = true; Refresh(); }, UITheme.Orange, 20);
+            _usedLabel = usedBtn.GetComponentInChildren<TextMeshProUGUI>();
+            usedBtn.GetComponent<RectTransform>().Anchor(new Vector2(1, 0.5f), new Vector2(1, 0.5f), new Vector2(0, 0), new Vector2(155, 42));
+            _schoolButtons = buttons.gameObject;
+            _schoolButtons.SetActive(false);
             _peopleArea = UIFactory.Rect("PeopleArea", Window).Stretch(40, 40, 136, 36);
             _people = UIFactory.ScrollList(_peopleArea, 12);
             _peopleArea.gameObject.SetActive(false);
@@ -230,8 +249,23 @@ namespace UntitledGame.UI
 
         public bool ShowingPeople => _showPeople;
 
+        public bool ShowingSchool => _showSchool;
+
+        public int SchoolWordCells => _school.GetComponentsInChildren<Transform>(true).Count(t => t.name.StartsWith("Word_"));
+
+        public void ShowSchool(bool? used = null)
+        {
+            if (used.HasValue) _heatUsed = used.Value;
+            _showSchool = true;
+            _showPeople = false;
+            _showTranscript = false;
+            _showPhrases = false;
+            if (IsOpen) Refresh();
+        }
+
         public void ShowPeople(bool people)
         {
+            _showSchool = false;
             _showPeople = people;
             _showTranscript = false;
             _showPhrases = false;
@@ -240,6 +274,7 @@ namespace UntitledGame.UI
 
         public void ShowPhrasebook()
         {
+            _showSchool = false;
             _showPhrases = true;
             _showPeople = false;
             _showTranscript = false;
@@ -248,6 +283,7 @@ namespace UntitledGame.UI
 
         public void ShowTranscript()
         {
+            _showSchool = false;
             _showTranscript = true;
             _showPeople = false;
             _showPhrases = false;
@@ -390,13 +426,151 @@ namespace UntitledGame.UI
             _progress.text = $"{known} / {total} things learned about the shopkeepers";
         }
 
+        // ------------------------------------------------------------------ School: word grid + history
+
+        private static readonly Color[] LearnedColors =
+        {
+            new Color32(0xF3, 0xE4, 0xCC, 0x99), new Color32(0xF1, 0xC5, 0xBE, 0xFF), new Color32(0xFB, 0xE7, 0xA1, 0xFF),
+            new Color32(0xE3, 0xE4, 0x8A, 0xFF), new Color32(0xA9, 0xD8, 0x8A, 0xFF), new Color32(0x6F, 0xC0, 0x8A, 0xFF), new Color32(0x3A, 0xA7, 0x9F, 0xFF),
+        };
+        private static readonly Color[] UsedColors =
+        {
+            new Color32(0xF3, 0xE4, 0xCC, 0x99), new Color32(0xFC, 0xE9, 0xC8, 0xFF), new Color32(0xF9, 0xCE, 0x94, 0xFF),
+            new Color32(0xF4, 0xA8, 0x62, 0xFF), new Color32(0xE6, 0x74, 0x3F, 0xFF), new Color32(0xC9, 0x50, 0x4A, 0xFF),
+        };
+
+        /// <summary>Colour of one word's cell. Learned: new / missed / box 1-5. Used: how many times it has been practised or used.</summary>
+        public static Color HeatColor(string word, bool used, out bool dark)
+        {
+            var m = Hsk.MasteryOf(word);
+            if (used)
+            {
+                int n = m == null ? 0 : m.right + m.wrong;
+                int step = n == 0 ? 0 : n == 1 ? 1 : n <= 3 ? 2 : n <= 6 ? 3 : n <= 10 ? 4 : 5;
+                dark = step >= 4;
+                return UsedColors[step];
+            }
+            int idx = m == null ? 0 : m.box == 0 ? 1 : m.box + 1;
+            dark = idx >= 6;
+            return LearnedColors[Mathf.Clamp(idx, 0, LearnedColors.Length - 1)];
+        }
+
+        private void SchoolText(string text, float size = 21, float pad = 8)
+        {
+            var t = UIFactory.Text(_school, "Line", text, size, UITheme.Ink, TextAlignmentOptions.TopLeft);
+            t.rectTransform.SetLayout(t.GetPreferredValues(text, 1380, 3000).y + pad);
+        }
+
+        private static string When(SessionRecord r) =>
+            new System.DateTime(r.when, System.DateTimeKind.Utc).ToLocalTime().ToString("MMM d, HH:mm");
+
+        private static string Attempt(SessionRecord r, string scoreLabel) =>
+            $"{When(r)} · day {r.day} · {Hsk.Clock(r.seconds)} · {scoreLabel} {r.right}/{r.total} · " +
+            (r.passed ? "<color=#2C7F79>passed</color>" : "<color=#C9504A>not passed</color>");
+
+        /// <summary>Every HSK level: how many of its words are learned (heat map of the words), then its lessons and tests with the time they took.</summary>
+        private void RefreshSchool()
+        {
+            foreach (Transform c in _school) Object.Destroy(c.gameObject);
+            int allKnown = 0, allWords = 0;
+            SchoolText(_heatUsed
+                ? "Colours show how often each word has been practised or used:   <color=#D8C9B0>■</color> never   <color=#FCE9C8>■</color> 1   <color=#F9CE94>■</color> 2-3   <color=#F4A862>■</color> 4-6   <color=#E6743F>■</color> 7-10   <color=#C9504A>■</color> 11+"
+                : "Colours show how well each word is known:   <color=#D8C9B0>■</color> new   <color=#E8A79E>■</color> missed   <color=#F5D970>■</color> seen   <color=#CFD060>■</color> getting there   <color=#8CCB6A>■</color> known   <color=#4FB57C>■</color> solid   <color=#3AA79F>■</color> mastered", 18, 8);
+            for (int level = 1; level <= Hsk.MaxLevel; level++)
+            {
+                var words = HskVocab.Words(level);
+                int known = Hsk.KnownCount(words), met = words.Count(w => Hsk.Seen(w.hanzi));
+                allKnown += known;
+                allWords += words.Count;
+                int pct = words.Count == 0 ? 0 : Mathf.RoundToInt(100f * known / words.Count);
+                int metPct = words.Count == 0 ? 0 : Mathf.RoundToInt(100f * met / words.Count);
+                SchoolText($"<size=30><b>HSK {level}</b></size>   <color=#2C7F79><b>{pct}% learned</b></color> ({known}/{words.Count} words)   ·   {metPct}% met   ·   " +
+                           $"lessons {Hsk.LessonsDone(level)}/{Hsk.LessonCounts[level]}   ·   test {(Hsk.Level >= level ? "<color=#2C7F79>passed</color>" : "not passed yet")}", 24, 6);
+
+                // The heat map: one cell per word.
+                const int columns = 15;
+                int rows = (words.Count + columns - 1) / columns;
+                var grid = UIFactory.Rect("WordGrid", _school);
+                grid.SetLayout(rows * 66 + 6);
+                var gl = grid.gameObject.AddComponent<GridLayoutGroup>();
+                gl.cellSize = new Vector2(88, 60);
+                gl.spacing = new Vector2(6, 6);
+                gl.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+                gl.constraintCount = columns;
+                gl.childAlignment = TextAnchor.UpperLeft;
+                foreach (var w in words)
+                {
+                    var color = HeatColor(w.hanzi, _heatUsed, out bool dark);
+                    var cell = UIFactory.Panel(grid, "Word_" + w.hanzi, color, shadow: false, small: true);
+                    var ink = dark ? Color.white : UITheme.Ink;
+                    var zh = UIFactory.Text(cell.transform, "Hanzi", w.hanzi, 26, ink, TextAlignmentOptions.Center);
+                    zh.enableAutoSizing = true;
+                    zh.fontSizeMin = 14;
+                    zh.fontSizeMax = 26;
+                    zh.textWrappingMode = TextWrappingModes.NoWrap;
+                    zh.rectTransform.Anchor(new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -3), new Vector2(84, 34));
+                    var m = Hsk.MasteryOf(w.hanzi);
+                    string sub = _heatUsed ? (m == null || m.right + m.wrong == 0 ? "" : $"x{m.right + m.wrong}") : Pinyin.Of(w.hanzi);
+                    var py = UIFactory.Text(cell.transform, "Sub", sub, 13, dark ? Color.white : UITheme.InkSoft, TextAlignmentOptions.Center);
+                    py.enableAutoSizing = true;
+                    py.fontSizeMin = 9;
+                    py.fontSizeMax = 13;
+                    py.textWrappingMode = TextWrappingModes.NoWrap;
+                    py.rectTransform.Anchor(new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 3), new Vector2(84, 20));
+                }
+
+                // History: the test, then each lesson with every try and how long it took.
+                var tests = Hsk.History.Where(r => r.kind == 2 && r.level == level).ToList();
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"<b>HSK {level} test</b>");
+                if (tests.Count == 0) sb.Append("  <color=#8A7563>not taken yet</color>");
+                foreach (var r in tests) sb.Append("\n   " + Attempt(r, "score"));
+                SchoolText(sb.ToString(), 20, 6);
+                for (int n = 1; n <= Hsk.LessonCounts[level]; n++)
+                {
+                    int lesson = n;
+                    var tries = Hsk.History.Where(r => r.kind == 0 && r.level == level && r.lesson == lesson).ToList();
+                    var (en, zh) = Hsk.LessonTitle(level, n);
+                    string title = $"Lesson {n}" + (zh != "" ? $": {en} {zh}" : "");
+                    var line = new System.Text.StringBuilder();
+                    line.Append(Hsk.LessonDone(level, n) ? $"<color=#2C7F79><b>{title}</b>  passed</color>" : $"<b>{title}</b>");
+                    if (tries.Count == 0) line.Append(Hsk.LessonDone(level, n) ? "  <color=#8A7563>(before history was kept)</color>" : "  <color=#8A7563>not taken yet</color>");
+                    else line.Append($"  <color=#8A7563>{tries.Count} {(tries.Count == 1 ? "try" : "tries")} · best {Hsk.Clock(tries.Where(r => r.passed).Select(r => r.seconds).DefaultIfEmpty(tries.Min(r => r.seconds)).Min())}</color>");
+                    foreach (var r in tries) line.Append("\n   " + Attempt(r, "quiz"));
+                    SchoolText(line.ToString(), 19, 4);
+                }
+                SchoolText("", 10, 0);
+            }
+            var practice = Hsk.History.Where(r => r.kind == 1).ToList();
+            if (practice.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder("<b>Free practice</b>  <color=#8A7563>(latest first)</color>");
+                foreach (var r in Enumerable.Reverse(practice).Take(12)) sb.Append($"\n   {When(r)} · day {r.day} · {Hsk.Clock(r.seconds)} · {r.right}/{r.total} right");
+                SchoolText(sb.ToString(), 19, 6);
+            }
+            _progress.rectTransform.sizeDelta = new Vector2(680, 36);
+            _progress.text = $"{allKnown}/{allWords} words learned  ·  {Hsk.History.Count} on record";
+        }
+
         protected override void Refresh()
         {
             if (_fishTab != null) _fishTab.text = UiText.Plain("Fish", "鱼", 1);
             if (_peopleTab != null) _peopleTab.text = UiText.Plain("People", "朋友", 1);
             if (_transcriptTab != null) _transcriptTab.text = UiText.Plain("Transcript", "说过的话", 2);
-            _grid.gameObject.SetActive(!_showPeople && !_showTranscript && !_showPhrases);
+            if (_phraseTab != null) _phraseTab.text = UiText.Plain("Phrasebook", "常用语", 3);
+            if (_schoolTab != null) _schoolTab.text = UiText.Plain("School", "学校", 1);
+            if (_learnedLabel != null) _learnedLabel.text = UiText.Plain("Learned", "学会了", 3);
+            if (_usedLabel != null) _usedLabel.text = UiText.Plain("Most used", "常用", 3);
+            _grid.gameObject.SetActive(!_showPeople && !_showTranscript && !_showPhrases && !_showSchool);
+            if (!_showSchool) _progress.rectTransform.sizeDelta = new Vector2(900, 36);
+            _schoolArea.gameObject.SetActive(_showSchool);
+            _schoolButtons.SetActive(_showSchool);
             _peopleArea.gameObject.SetActive(_showPeople);
+            if (_showSchool)
+            {
+                RefreshSchool();
+                return;
+            }
             _transcriptArea.gameObject.SetActive(_showTranscript || _showPhrases);
             if (_showPhrases)
             {

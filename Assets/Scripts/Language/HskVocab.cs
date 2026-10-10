@@ -6,7 +6,9 @@ using UnityEngine;
 namespace UntitledGame.Language
 {
     /// <summary>
-    /// The HSK 2.0 level 1-3 word list (595 words, StreamingAssets/hsk1-3.txt: word, level, pinyin, English gloss).
+    /// The HSK 2.0 level 1-3 word list (595 words, StreamingAssets/hsk1-3.txt: word, level, pinyin, English gloss), plus
+    /// the words the game's own interface uses that HSK 1-3 doesn't have (StreamingAssets/game-words.txt, filed under
+    /// HSK 2 or 3 and marked <see cref="Word.game"/>), so mastering every word turns the whole interface Chinese.
     /// Used to score how ambitious the player's Chinese is (friendship points), to keep the game's own vocabulary at
     /// about HSK 3, and as the curriculum for 高老师's lessons and tests.
     /// </summary>
@@ -18,6 +20,7 @@ namespace UntitledGame.Language
             public int level;
             public string pinyin;
             public string meaning;
+            public bool game;      // one of the game's interface words (not in the official HSK list)
         }
 
         private static Dictionary<string, Word> _words;
@@ -25,13 +28,21 @@ namespace UntitledGame.Language
         private static int _maxLen = 1;
 
         public const string FileName = "hsk1-3.txt";
+        public const string GameWordsFile = "game-words.txt";
 
         private static void EnsureLoaded()
         {
             if (_words != null) return;
             _words = new Dictionary<string, Word>();
             _ordered = new List<Word>();
-            string path = Path.Combine(Application.streamingAssetsPath, FileName);
+            Load(FileName, false);
+            Load(GameWordsFile, true);
+        }
+
+        private static void Load(string file, bool game)
+        {
+            string path = Path.Combine(Application.streamingAssetsPath, file);
+            if (game && !File.Exists(path)) return;
             try
             {
                 foreach (var line in File.ReadAllLines(path))
@@ -47,6 +58,7 @@ namespace UntitledGame.Language
                         level = lvl,
                         pinyin = cols.Length > 2 ? cols[2] : "",
                         meaning = cols.Length > 3 ? cols[3] : "",
+                        game = game,
                     };
                     _words[w] = word;
                     _ordered.Add(word);

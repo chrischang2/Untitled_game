@@ -268,21 +268,14 @@ namespace UntitledGame.Economy
             new ItemDef { id = "up_bite", english = "Calm Training", hanzi = "安静训练", category = ItemCategory.Upgrade, price = 10, stat = "bite",
                 description = "Sit quietly: fish bite 3% sooner per level." },
 
-            // ---- 海叔's crab pots: 20 levels each, five per HSK tier, priced like Coach Wu's training (CrabPots).
+            // ---- 海叔's crab pots: three upgrades, 20 levels each, five per tier, priced like Coach Wu's training (CrabPots).
             new ItemDef { id = "crab_pots", english = "More Crab Pots", hanzi = "蟹笼", category = ItemCategory.Upgrade, price = 10, stat = "crab_pots",
                 description = "One more pot in the water per level." },
             new ItemDef { id = "crab_size", english = "Bigger Pots", hanzi = "大蟹笼", category = ItemCategory.Upgrade, price = 10, stat = "crab_size",
                 description = "Each pot holds one more crab per level." },
-            new ItemDef { id = "crab_lure", english = "Crab Lures", hanzi = "诱饵", category = ItemCategory.Upgrade, price = 10, stat = "crab_lure",
-                description = "Better lures: the pots fill up more each day." },
-            new ItemDef { id = "crab_deep", english = "Deep-Water Ropes", hanzi = "长绳子", category = ItemCategory.Upgrade, price = 10, stat = "crab_deep",
-                description = "Longer ropes reach deeper water, where bigger and rarer crabs live: each crab is worth more." },
-            new ItemDef { id = "crab_bait", english = "Fish-Bait Know-how", hanzi = "鱼饵", category = ItemCategory.Upgrade, price = 10, stat = "crab_bait",
-                description = "Fish you give 海叔 for the pots bring in more crabs the next day." },
-            new ItemDef { id = "crab_cooler", english = "Cooler", hanzi = "冰箱", category = ItemCategory.Upgrade, price = 10, stat = "crab_cooler",
-                description = "Crabs you haven't collected keep for longer (one more day every 4 levels)." },
-            new ItemDef { id = "crab_helper", english = "Market Helper", hanzi = "帮手", category = ItemCategory.Upgrade, price = 10, stat = "crab_helper",
-                description = "A helper sells the crabs for a better price: +3% per level." },
+            new ItemDef { id = "crab_deep", english = "Longer Lines", hanzi = "长绳子", category = ItemCategory.Upgrade, price = 10, stat = "crab_deep",
+                description = "Longer lines reach deeper water, where bigger and rarer crabs live: each crab is worth more." },
+
         };
 
         public static readonly List<ShopDef> Shops = new List<ShopDef>
@@ -331,7 +324,7 @@ namespace UntitledGame.Economy
             new ShopDef { id = "crabber", english = "Crab Pots", hanzi = "螃蟹摊", keeperName = "海叔", keeperEnglish = "Uncle Hai",
                 voice = "zh_male", pitch = 0.88f, crabber = true,
                 personality = "a sunburnt, easy-going crab fisherman who keeps pots off the beach, looks after the player's pots too and pays them for the catch",
-                items = new[] { "crab_pots", "crab_size", "crab_lure", "crab_deep", "crab_bait", "crab_cooler", "crab_helper" } },
+                items = new[] { "crab_pots", "crab_size", "crab_deep" } },
             // Shop 10: the bus driver at the bus stop (no stall; he turns up once the first HSK test is passed).
             new ShopDef { id = "bus", english = "Bus Stop", hanzi = "汽车站", keeperName = "张师傅", keeperEnglish = "Driver Zhang",
                 voice = "zh_male", pitch = 1.0f, busDriver = true,

@@ -33,9 +33,20 @@ namespace UntitledGame.Companion
         public LessonQuestion last;
         /// <summary>In a test: what was heard for the current question, waiting for the player to confirm it (Y) or say it again.</summary>
         public string pending;
+        /// <summary>The recogniser's runner-up reading of what was just said, offered as "did you mean ...?" (or null).</summary>
+        public string alternative;
         /// <summary>In a lesson: the last wrong try at the current word (they have to say it again, or skip).</summary>
         public string retryHeard;
+        public string retryAlternative;
         public ShopkeeperBrain teacher;
+        /// <summary>When the last answer was given (unscaled time): the window shows its verdict, on its own, for a moment.</summary>
+        public float lastAnsweredAt = -999f;
+        /// <summary>When it began (unscaled time), for the time taken.</summary>
+        public float startedAt = Time.unscaledTime;
+        /// <summary>Seconds a question's verdict stays up before the next question appears.</summary>
+        public const float ResultSeconds = 1.8f;
+        /// <summary>The verdict of the last answer is on show (the next question isn't, yet).</summary>
+        public bool ShowingResult => last != null && pending == null && Time.unscaledTime - lastAnsweredAt < ResultSeconds;
 
         public LessonQuestion Current => index < questions.Count ? questions[index] : null;
         public int RecallAsked => questions.Count(q => q.recall && q.answered);
@@ -66,7 +77,22 @@ namespace UntitledGame.Companion
         /// <summary>The last finished lesson, practice or test, and whether it was passed (shown in the test centre window).</summary>
         public static LessonSession LastFinished { get; private set; }
         public static bool LastPassed { get; private set; }
+        /// <summary>
+        /// A lesson or test wasn't passed: the screen shows the pass/fail message with a review of every question beneath
+        /// it (UI.ReviewPanel), until the player closes it.
+        /// </summary>
+        public static event Action<LessonSession> ReviewRequested;
         public static event Action Changed;
+        /// <summary>Set by the voice chat while it delivers a line: the recogniser's second choice for it.</summary>
+        public static string IncomingAlternative;
+        /// <summary>Set alongside it: how likely the audio was the word being asked (log-likelihood against the model's best reading).</summary>
+        public static float? IncomingMargin;
+        /// <summary>Also set: the word asked for is among the recogniser's top three guesses (accepted in the repeat-after-me parts of lessons).</summary>
+        public static bool? IncomingTopMatch;
+        /// <summary>The audio counts as the expected word when it is at least this likely (-3 = 5% as likely as the best reading).</summary>
+        public const float ScoreMargin = -3f;
+        /// <summary>The word being asked right now (what the recogniser should score the audio against), or null.</summary>
+        public static string ExpectedWord => Current?.Current?.word?.hanzi;
 
         private static readonly string[] QuitWords = { "不学了", "不上了", "不考了", "不练了", "结束", "停", "我要走" };
         private static readonly string[] SkipWords = { "不知道", "跳过", "下一个", "不会" };
@@ -100,17 +126,31 @@ namespace UntitledGame.Companion
                     Answer(teacher, session, q, text, false, true);
                     return true;
                 }
+                bool scoredOk = IncomingMargin.HasValue && IncomingMargin.Value > ScoreMargin;
+                // Repeating after the teacher: any of the recogniser's top three guesses will do, so a lone syllable isn't said ten times.
+                bool topOk = session.kind == LessonKind.Lesson && !q.recall && IncomingTopMatch == true;
+                if (!isAnswer && !skipped && (scoredOk || topOk))
+                {
+                    // The recogniser's best reading was something else, but the word asked for is nearly as likely: take it as said.
+                    ChatAudit.Write(teacher.MemoryKey, $"{session.Title} Q{session.index + 1}: heard \"{text}\" but \"{q.word.hanzi}\" " +
+                                    (scoredOk ? $"scored {IncomingMargin.Value:0.0}" : "was among its top three guesses") + $": counted as {q.word.hanzi}");
+                    text = q.word.hanzi;
+                    s = Clean(text);
+                    isAnswer = true;
+                    IncomingAlternative = null;
+                }
                 if (NeedsConfirm(session, q))
                 {
                     // Tests and lesson quizzes: show what was heard and let the player decide (Y to submit, or say it again).
                     session.pending = text;
+                    session.alternative = IncomingAlternative;
                     ChatAudit.Write(teacher.MemoryKey, $"{session.Title} Q{session.index + 1}: heard \"{text}\" - waiting for the player to confirm");
                     Changed?.Invoke();
                     return true;
                 }
                 if (session.kind == LessonKind.Lesson && !isAnswer)
                 {
-                    Retry(teacher, session, q, text);
+                    Retry(teacher, session, q, text, IncomingAlternative);
                     return true;
                 }
                 Answer(teacher, session, q, text, isAnswer, false);
@@ -143,13 +183,31 @@ namespace UntitledGame.Companion
             var session = Current;
             var q = session?.Current;
             if (q == null || session.pending == null || session.teacher == null) return;
-            string heard = session.pending;
+            Submit(session, q, session.pending, session.alternative);
+        }
+
+        /// <summary>"Did you mean ...?": the player picks the recogniser's second choice instead, and it is graded as said.</summary>
+        public static void SubmitAlternative()
+        {
+            var session = Current;
+            var q = session?.Current;
+            if (q == null || session.teacher == null) return;
+            string alt = session.pending != null ? session.alternative : session.retryHeard != null ? session.retryAlternative : null;
+            if (string.IsNullOrEmpty(alt)) return;
+            ChatAudit.Write("HSK", $"{session.Title} Q{session.index + 1}: chose the second choice \"{alt}\" (first was \"{session.pending ?? session.retryHeard}\")");
+            Submit(session, q, alt, null);
+        }
+
+        private static void Submit(LessonSession session, LessonQuestion q, string heard, string offer)
+        {
             session.pending = null;
+            session.alternative = null;
+            session.retryAlternative = null;
             session.teacher.Interrupt();
             bool right = Grade(Clean(heard), q.word, q.recall);
             if (session.kind == LessonKind.Lesson && !right)
             {
-                Retry(session.teacher, session, q, heard);
+                Retry(session.teacher, session, q, heard, offer);
                 return;
             }
             Answer(session.teacher, session, q, heard, right, false);
@@ -160,10 +218,11 @@ namespace UntitledGame.Companion
             session.kind == LessonKind.Test || (session.kind == LessonKind.Lesson && q.recall);
 
         /// <summary>A lesson doesn't move on until the word is right: try again (or say 跳过 / skip).</summary>
-        private static void Retry(ShopkeeperBrain teacher, LessonSession session, LessonQuestion q, string heard)
+        private static void Retry(ShopkeeperBrain teacher, LessonSession session, LessonQuestion q, string heard, string offer)
         {
             q.attempts++;
             session.retryHeard = heard;
+            session.retryAlternative = offer;
             if (q.attempts == 1) Hsk.RecordAnswer(q.word.hanzi, false, q.recall); // only the first miss counts against the word
             ChatAudit.Write(teacher.MemoryKey, $"{session.Title} Q{session.index + 1}: {q.word.hanzi} heard \"{heard}\" -> wrong, try {q.attempts + 1}");
             teacher.SayDirect(q.recall ? "不对，再试一次。" : $"再说一次：{q.word.hanzi}。");
@@ -176,6 +235,7 @@ namespace UntitledGame.Companion
             if (Current?.pending == null) return;
             ChatAudit.Write("HSK", $"discarded \"{Current.pending}\" to say it again");
             Current.pending = null;
+            Current.alternative = null;
             Changed?.Invoke();
         }
 
@@ -240,11 +300,21 @@ namespace UntitledGame.Companion
                 teacher.SayDirect("你已经通过了汉语水平考试三级！太好了！你可以练习。");
                 return;
             }
-            var pool = HskVocab.Words(level).Where(Hsk.Askable).OrderBy(_ => UnityEngine.Random.value).Take(Hsk.TestQuestions).ToList();
+            // A round of the level's test: 20 random words from those not yet passed (every word of the level, in the end).
+            var remaining = Hsk.TestPool(level);
+            if (remaining.Count == 0)
+            {
+                Hsk.PassTest(level);
+                teacher.SayDirect($"恭喜你！你通过了汉语水平考试{Catalog.ChineseNumber(level)}级！");
+                return;
+            }
+            var pool = remaining.OrderBy(_ => UnityEngine.Random.value).Take(Hsk.TestQuestions).ToList();
             var session = new LessonSession { kind = LessonKind.Test, level = level };
             foreach (var w in pool) session.questions.Add(new LessonQuestion { word = w, recall = true });
+            int cleared = Hsk.TestClearedCount(level), all = Hsk.TestWords(level).Count;
             Begin(teacher, session, $"好，现在考汉语水平考试{Catalog.ChineseNumber(level)}级。一共{Catalog.ChineseNumber(session.questions.Count)}题，" +
-                                    $"对{Catalog.ChineseNumber(Hsk.TestPassMark)}题就通过。");
+                                    $"对{Catalog.ChineseNumber(Hsk.PassMarkFor(session.questions.Count))}题就通过。" +
+                                    (cleared > 0 ? $"你已经考过了{Catalog.ChineseNumber(cleared)}个词，还有{Catalog.ChineseNumber(all - cleared)}个。" : ""));
         }
 
         private static void Begin(ShopkeeperBrain teacher, LessonSession session, string intro)
@@ -266,7 +336,10 @@ namespace UntitledGame.Companion
             q.skipped = skipped;
             q.heard = heard;
             session.last = q;
+            session.lastAnsweredAt = Time.unscaledTime;
             session.retryHeard = null;
+            session.retryAlternative = null;
+            if (right) AudioManager.Instance?.PlaySfx("SFX/ui_confirmation_002", 0.7f, 0.02f); // a right answer sounds right
             if (q.attempts == 0) Hsk.RecordAnswer(q.word.hanzi, right, q.recall); // right first time moves it up; a skip drops it
             ChatAudit.Write(teacher.MemoryKey, $"{session.Title} Q{session.index + 1}: {q.word.hanzi} ({(q.recall ? "from English: " + q.word.meaning : "repeat")}) " +
                                                $"heard \"{heard}\" -> {(right ? "RIGHT" : skipped ? "skipped" : "wrong")}");
@@ -295,6 +368,15 @@ namespace UntitledGame.Companion
             Current = null;
             LastFinished = session;
             LastPassed = false;
+            FinishRound(teacher, session);
+            // The history (journal, School page): what was taken, how long it took, and how it went.
+            bool lesson = session.kind == LessonKind.Lesson;
+            Hsk.LogSession((int)session.kind, session.level, session.lesson, Time.unscaledTime - session.startedAt,
+                lesson ? session.RecallRight : session.Right, lesson ? session.RecallAsked : session.questions.Count, LastPassed);
+        }
+
+        private static void FinishRound(ShopkeeperBrain teacher, LessonSession session)
+        {
             switch (session.kind)
             {
                 case LessonKind.Lesson:
@@ -305,7 +387,7 @@ namespace UntitledGame.Companion
                     if (!passed)
                     {
                         teacher.SayDirect($"你对了{Catalog.ChineseNumber(session.RecallRight)}个。还要多练习，下次再来！");
-                        GameEvents.Banner("Lesson not passed", $"{session.Title}\nQuiz: {session.RecallRight}/{session.RecallAsked} right (you need {need}). Try it again!", false);
+                        RequestReview(session, "Lesson not passed", $"{session.Title}\nQuiz: {session.RecallRight}/{session.RecallAsked} right (you need {need}).");
                         break;
                     }
                     LastPassed = true;
@@ -335,16 +417,30 @@ namespace UntitledGame.Companion
                     break;
                 case LessonKind.Test:
                 {
-                    bool passed = session.Right >= Hsk.TestPassMark;
-                    ChatAudit.Write(teacher.MemoryKey, $"{session.Title} finished: {session.Right}/{session.questions.Count} -> {(passed ? "PASSED" : "failed")}");
+                    int mark = Hsk.PassMarkFor(session.questions.Count);
+                    bool passed = session.Right >= mark;
+                    ChatAudit.Write(teacher.MemoryKey, $"{session.Title} round finished: {session.Right}/{session.questions.Count} (need {mark}) -> {(passed ? "PASSED" : "failed")}");
                     if (!passed)
                     {
+                        // A failed round: every word goes back in the pool.
                         teacher.SayDirect($"你对了{Catalog.ChineseNumber(session.Right)}题。这次没通过，再努力一下！");
-                        GameEvents.Banner($"HSK {session.level} test: NOT PASSED", $"{session.Right}/{session.questions.Count} right  ·  you need {Hsk.TestPassMark}\n" +
-                                          "The words you missed are in Teacher Gao's window. Lessons and practice help - try again any time!", false);
+                        RequestReview(session, $"HSK {session.level} test: NOT PASSED", $"{session.Right}/{session.questions.Count} right  ·  you need {mark}\nLessons and practice help - try again any time!");
                         break;
                     }
                     LastPassed = true;
+                    // The round's right answers are done; the missed words go back in the pool for a later round.
+                    Hsk.ClearTestWords(session.level, session.questions.Where(q => q.correct).Select(q => q.word.hanzi));
+                    int left = Hsk.TestPool(session.level).Count, total = Hsk.TestWords(session.level).Count;
+                    ChatAudit.Write(teacher.MemoryKey, $"HSK {session.level} test: {total - left}/{total} words passed, {left} to go");
+                    if (left > 0)
+                    {
+                        teacher.SayDirect($"很好！这一轮通过了。还有{Catalog.ChineseNumber(left)}个词，下次再考！");
+                        var missedNow = session.questions.Where(q => !q.correct).Select(q => q.word.hanzi).ToList();
+                        GameEvents.Banner($"HSK {session.level} test: round passed!", $"{session.Right}/{session.questions.Count} right  ·  {total - left}/{total} words of HSK {session.level} passed, {left} to go" +
+                                          (missedNow.Count > 0 ? $"\nBack in the pool: {string.Join(" ", missedNow)}" : "") +
+                                          "\nEvery word of the level has to be passed in a test round.", true);
+                        break;
+                    }
                     Hsk.PassTest(session.level);
                     teacher.SayDirect($"恭喜你！你通过了汉语水平考试{Catalog.ChineseNumber(session.level)}级！");
                     GameEvents.Banner($"HSK {session.level} PASSED!", $"{session.Right}/{session.questions.Count} right\n" +
@@ -352,6 +448,13 @@ namespace UntitledGame.Companion
                     break;
                 }
             }
+        }
+
+        /// <summary>The review panel shows the message and every question (plain banner if no screen is listening, as in tests without a UI).</summary>
+        private static void RequestReview(LessonSession session, string title, string details)
+        {
+            if (ReviewRequested != null) ReviewRequested.Invoke(session);
+            else GameEvents.Banner(title, details, false);
         }
 
         // ------------------------------------------------------------------ grading
@@ -443,6 +546,7 @@ namespace UntitledGame.Companion
         {
             Current = null;
             Changed = null;
+            ReviewRequested = null;
         }
     }
 }

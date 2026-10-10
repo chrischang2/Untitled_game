@@ -244,8 +244,8 @@ namespace UntitledGame.Companion
              "Fish come in tiers: stronger fish need more training, each tier sells for about ten times the last, and each region's sea has its own fish."),
             (@"\b(crab|crabs|pot|pots|passive|mahjong|jianzi|games?|pitch)\b|螃蟹|蟹笼|海叔|麻将|毽子|投壶",
              "海叔 (Uncle Hai) has a crab stall down the beach past the market. He looks after the player's crab pots: every morning the crabs come in and he sells them; " +
-             "the player collects the money by going to talk to him (uncollected crabs only keep a day or more, depending on the cooler). Giving him fish (给你鱼) puts them in the pots " +
-             "as bait for a bigger haul the next day. He sells pot upgrades (more pots, bigger pots, lures, deep-water ropes, bait know-how, a cooler, a helper), in tiers of five that open with lessons like training. " +
+             "the player collects the money by going to talk to him (uncollected crabs wait for as long as it takes: nothing is lost). Giving him fish (给你鱼) puts them in the pots " +
+             "as bait for a bigger haul the next day. He sells three pot upgrades (more pots, bigger pots and longer lines), in tiers of five that open with lessons like training. " +
              "Next to the beach path, three games stalls are being built: 投壶 pitch-pot (opens after HSK 1: throw eight arrows into a pot's mouth; 中 = a hit, 4+ hits wins a prize once a day), 毽子 jianzi (HSK 2) and 麻将 mahjong (HSK 3), which are coming soon."),
             (@"\b(energy|tired|sleep|sleeping|bed|beds|night|pass out|passed out|faint|comfort|furniture|house|home)\b|睡|累|床",
              "Energy: each cast that lands in the water costs 10, and reeling drains more (heavy fish drain fast; E while reeling cuts the line). " +

@@ -211,6 +211,55 @@ namespace UntitledGame.GenAI
             });
         }
 
+        private SenseVoiceCtc _ctc;
+        /// <summary>The second-best reading of the last recording ("did you mean ...?"), or null.</summary>
+        public string LastAlternative { get; private set; }
+        /// <summary>How likely the last recording was the expected word, against the best reading (0 = just as likely); null if unknown.</summary>
+        public float? LastMargin { get; private set; }
+        /// <summary>The expected word is among the model's top three guesses at each of its characters (null if unknown).</summary>
+        public bool? LastTopMatch { get; private set; }
+        /// <summary>Of the spoken options passed in (a stall's requests), the one the audio fits best, and how well (null if none given).</summary>
+        public string LastOption { get; private set; }
+        public float LastOptionMargin { get; private set; } = -100f;
+
+        /// <summary>Loads SenseVoice a second time, directly on onnxruntime, to read its runner-up guesses.</summary>
+        public void LoadAlternatives(string asrModelDir, int threads)
+        {
+            _asrWorker.Post(() =>
+            {
+                try
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    _ctc = new SenseVoiceCtc(asrModelDir, threads);
+                    Debug.Log($"[Speech] Alternative-reading model loaded in {sw.Elapsed.TotalSeconds:0.0}s");
+                }
+                catch (Exception e)
+                {
+                    _ctc = null;
+                    Debug.LogWarning("[Speech] Alternative readings unavailable: " + e.Message);
+                }
+            });
+        }
+
+        /// <summary>Synchronous (call on the recognition thread or in tests): the model's best guess and runner-up.</summary>
+        public SenseVoiceCtc.Analysis AnalyzeNow(float[] samples16k, string expectedWord = null)
+        {
+            if (_ctc == null) return null;
+            _ctc.PrepareSounds();
+            return _ctc.Analyze(samples16k, string.IsNullOrEmpty(expectedWord) ? null : _ctc.ClassesFor(expectedWord));
+        }
+
+        /// <summary>Synchronous (tests): how well the audio fits each phrase (0 = as well as the best reading).</summary>
+        public float[] ScoreOptionsNow(float[] samples16k, IReadOnlyList<string> options)
+        {
+            if (_ctc == null) return null;
+            _ctc.PrepareSounds();
+            var classes = new List<int[][]>();
+            foreach (var o in options) classes.Add(_ctc.ClassesFor(o));
+            return _ctc.Analyze(samples16k, null, classes)?.optionMargins;
+        }
+        public bool AlternativesReady => _ctc != null;
+
         private static string Decode(OfflineRecognizer rec, float[] samples16k)
         {
             using var stream = rec.CreateStream();
@@ -235,19 +284,47 @@ namespace UntitledGame.GenAI
         /// Auto: SenseVoice (fast, best for learners' Mandarin); lines with English in them are re-heard by Qwen3-ASR,
         /// which handles English and mixed sentences much better. Tested on the player's own recordings.
         /// </summary>
-        public void Transcribe(float[] samples16k, Action<string, string> callback, AsrMode mode = AsrMode.Auto)
+        public void Transcribe(float[] samples16k, Action<string, string> callback, AsrMode mode = AsrMode.Auto, string expectedWord = null,
+                               IReadOnlyList<string> options = null)
         {
             if (!AsrReady)
             {
                 callback?.Invoke(null, "speech recognition not ready");
                 return;
             }
+            int[][] expectedClasses = null;
+            if (_ctc != null)
+            {
+                _ctc.PrepareSounds();
+                if (!string.IsNullOrEmpty(expectedWord)) expectedClasses = _ctc.ClassesFor(expectedWord);
+            }
+            List<int[][]> optionClasses = null;
+            if (_ctc != null && options != null && options.Count > 0)
+            {
+                optionClasses = new List<int[][]>(options.Count);
+                foreach (var o in options) optionClasses.Add(_ctc.ClassesFor(o));
+            }
             _asrWorker.Post(() =>
             {
-                string text = null, error = null;
+                string text = null, error = null, alt = null;
+                float? margin = null;
+                float[] optionMargins = null;
+                bool? topMatch = null;
                 float seconds = samples16k.Length / 16000f;
                 try
                 {
+                    try
+                    {
+                        if (_ctc != null && mode != AsrMode.Qwen)
+                        {
+                            var a = _ctc.Analyze(samples16k, expectedClasses, optionClasses);
+                            optionMargins = a?.optionMargins;
+                            alt = a?.alternative;
+                            margin = a?.margin;
+                            topMatch = a?.topMatch;
+                        }
+                    }
+                    catch (Exception e) { Debug.LogWarning("[Speech] alternative reading failed: " + e.Message); }
                     if (mode == AsrMode.Qwen && QwenReady)
                     {
                         text = Decode(_qwen, samples16k);
@@ -277,7 +354,18 @@ namespace UntitledGame.GenAI
                 {
                     error = e.Message;
                 }
-                _mainThread.Enqueue(() => callback?.Invoke(text, error));
+                _mainThread.Enqueue(() =>
+                {
+                    LastAlternative = alt;
+                    LastMargin = margin;
+                    LastOption = null;
+                    LastOptionMargin = -100f;
+                    if (optionMargins != null && options != null)
+                        for (int i = 0; i < optionMargins.Length && i < options.Count; i++)
+                            if (optionMargins[i] > LastOptionMargin) { LastOptionMargin = optionMargins[i]; LastOption = options[i]; }
+                    LastTopMatch = topMatch;
+                    callback?.Invoke(text, error);
+                });
             });
         }
 
@@ -320,6 +408,7 @@ namespace UntitledGame.GenAI
             foreach (var w in _voiceWorkers.Values) w.Dispose();
             _asr?.Dispose();
             _qwen?.Dispose();
+            _ctc?.Dispose();
             foreach (var v in _voices.Values) v.Dispose();
             _voices.Clear();
         }

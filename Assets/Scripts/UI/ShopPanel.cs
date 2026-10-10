@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
@@ -68,6 +69,8 @@ namespace UntitledGame.UI
             ShopkeeperBrain.OfferChanged -= OnOfferChanged;
         }
 
+        private bool _showingVerdict;
+
         private void MarkDirty() => _dirty = true;
         private void OnOfferChanged(ShopkeeperBrain k) { if (k == _keeper) _dirty = true; }
 
@@ -88,6 +91,13 @@ namespace UntitledGame.UI
             if (_keeper == null) return;
             _group.alpha = Mathf.MoveTowards(_group.alpha, hidden ? 0f : 1f, Time.unscaledDeltaTime * 6f);
             if (_keeper.PendingQuestion != _shownQuestion) UpdateQuestion();
+            // A quiz answer's verdict shows by itself for a moment, then the next question appears.
+            bool verdict = HskSchool.Current != null && HskSchool.Current.ShowingResult;
+            if (verdict != _showingVerdict)
+            {
+                _showingVerdict = verdict;
+                _dirty = true;
+            }
             if (_dirty) Rebuild();
         }
 
@@ -137,12 +147,12 @@ namespace UntitledGame.UI
             if (shop.crabber)
             {
                 int pending = CrabPots.Pending;
-                Row($"<b>Your crab pots</b>: {CrabPots.Crabs} crabs a day, about ¥{CrabPots.Daily:0}\n<size=17><color=#8A7563>" +
-                    $"Crabs come in every morning; 海叔 pays you when you come and talk to him. Uncollected crabs keep {CrabPots.KeepDaysNow} day{(CrabPots.KeepDaysNow == 1 ? "" : "s")}." +
-                    (pending > 0 ? $" Waiting now: ¥{pending}." : "") + "</color></size>", null, false);
-                Row($"<b>Fish as bait</b>: give him fish (给你鱼) and tomorrow's haul grows\n<size=17><color=#8A7563>" +
-                    (CrabPots.BaitToday > 0 ? $"Already +¥{CrabPots.BaitToday:0} for tomorrow (up to ¥{CrabPots.BaitCapNow:0})." : $"Up to +¥{CrabPots.BaitCapNow:0} a day.") +
-                    "</color></size>", null, false);
+                Row($"<b>Your crab pots</b>: ¥{CrabPots.PerHaul:0.#} a haul, every {CrabPots.HaulMinutes:0} min of play\n<size=17><color=#8A7563>" +
+                    $"(¥{CrabPots.Daily:0} over a full day.) Next haul in {Mathf.CeilToInt(CrabPots.MinutesToNextHaul)} min; sleeping and the bus don't count. " +
+                    "Uncollected crabs wait for you." + (pending > 0 ? $" Waiting now: ¥{pending}." : "") + "</color></size>", null, false, 118);
+                Row($"<b>Fish as bait</b>: give him fish (给你鱼), the next haul grows\n<size=17><color=#8A7563>" +
+                    (CrabPots.BaitToday > 0 ? $"Today +¥{CrabPots.BaitToday:0} so far (up to ¥{CrabPots.BaitCapNow:0} a day)." : $"Up to +¥{CrabPots.BaitCapNow:0} a day.") +
+                    "</color></size>", null, false, 92);
                 foreach (var def in ShopStock.Goods(shop))
                     ItemRow(def, level);
                 return;
@@ -268,7 +278,8 @@ namespace UntitledGame.UI
             int due = HskVocab.All.Count(w => w.level <= Mathf.Min(Hsk.Level + 1, Hsk.MaxLevel) && Hsk.Due(w.hanzi));
             Row($"<b>我想练习</b> <size=18>wǒ xiǎng liànxí</size>\n<size=18><color=#8A7563>Practice the words you're learning: {due} due for review today.</color></size>", null, false);
             Row(next > 0
-                ? $"<b>我想考试</b> <size=18>wǒ xiǎng kǎoshì</size>\n<size=18><color=#8A7563>Take the HSK {next} test: {Hsk.TestQuestions} words, {Hsk.TestPassMark} to pass. Take it as often as you like.</color></size>"
+                ? $"<b>我想考试</b> <size=18>wǒ xiǎng kǎoshì</size>\n<size=18><color=#8A7563>The HSK {next} test covers every word of the level, {Hsk.TestQuestions} at a time ({Hsk.TestPassMark} right to pass a round; missed words come back). " +
+                  $"Done: {Hsk.TestClearedCount(next)}/{Hsk.TestWords(next).Count} words.</color></size>"
                 : "<b>HSK 3 passed!</b>\n<size=18><color=#8A7563>Every test is done. Lessons and practice are still open.</color></size>", null, false);
             Line("<size=18><color=#8A7563>In a lesson: repeat each word after her, then say words from English. 不知道 skips, 不学了 stops.</color></size>");
             if (Hsk.Level < Hsk.MaxLevel) LessonList(Mathf.Min(Hsk.Level + 1, Hsk.MaxLevel));
@@ -281,7 +292,10 @@ namespace UntitledGame.UI
             }
         }
 
-        /// <summary>The last lesson or test's result, big and clear, with the words that were missed.</summary>
+        /// <summary>
+        /// The last lesson or test's result, big and clear. A lesson or test that wasn't passed gets a review of every
+        /// question asked, right or wrong; otherwise just the words that were missed.
+        /// </summary>
         private void ResultRows()
         {
             var r = HskSchool.LastFinished;
@@ -290,7 +304,7 @@ namespace UntitledGame.UI
             string score = r.kind == LessonKind.Lesson ? $"quiz {r.RecallRight}/{r.RecallAsked}" : $"{r.Right}/{r.questions.Count} right";
             string verdict = r.kind == LessonKind.Practice ? "<color=#2C7F79><b>FINISHED</b></color>"
                 : HskSchool.LastPassed ? "<color=#2C7F79><b>PASSED</b></color>" : "<color=#E0604E><b>NOT PASSED</b></color>";
-            string need = test ? $" (need {Hsk.TestPassMark})" : "";
+            string need = test ? $" (need {Hsk.PassMarkFor(r.questions.Count)})" : r.kind == LessonKind.Lesson && !HskSchool.LastPassed ? $" (need {Mathf.Min(Hsk.LessonPassMark, Mathf.CeilToInt(r.RecallAsked * 0.75f))})" : "";
             var missed = r.questions.Where(q => q.answered && !q.correct && (q.recall || r.kind != LessonKind.Lesson)).ToList();
             string missedText = missed.Count == 0 ? "No mistakes!" :
                 "Missed: " + string.Join("  ", missed.Take(12).Select(q => $"{q.word.hanzi} {q.word.pinyin} ({q.word.meaning})"));
@@ -314,43 +328,97 @@ namespace UntitledGame.UI
             t.rectTransform.SetLayout(t.GetPreferredValues(t.text, 540, 2000).y + 8);
         }
 
+        /// <summary>What a question looks like (the same card whether it's waiting for an answer or showing its verdict).</summary>
+        private static (string text, float height) QuestionCard(LessonQuestion q) => q.recall
+            ? ($"<size=19><color=#8A7563>Say in Chinese:</color></size>\n<size=34><b>{q.word.meaning}</b></size>", 120f)
+            : ($"<size=19><color=#8A7563>Listen and repeat:</color></size>\n<size=44><b>{q.word.hanzi}</b></size>  <size=26>{q.word.pinyin}</size>\n<size=20>{q.word.meaning}</size>", 150f);
+
+        /// <summary>
+        /// The quiz shows only the question, and, once it's answered, whether the answer was right. Each question is its
+        /// own screen: the verdict stays up for a moment on that question, then the next one appears on its own.
+        /// </summary>
         private void BuildSession(LessonSession session)
         {
             int total = session.questions.Count;
-            string score = session.kind == LessonKind.Lesson ? $"quiz {session.RecallRight}/{session.RecallAsked}" : $"{session.Right} right";
-            Line($"<b>{session.Title}</b>   <size=18>question {Mathf.Min(session.index + 1, total)}/{total} · {score}</size>");
-            var q = session.Current;
-            if (q != null)
+            bool verdict = session.ShowingResult;
+            var q = verdict ? session.last : session.Current ?? session.last;
+            if (q == null) return;
+            int number = Mathf.Clamp(session.questions.IndexOf(q) + 1, 1, total);
+            Line($"<b>{session.Title}</b>   <size=18>question {number}/{total}</size>");
+            var (body, height) = QuestionCard(q);
+            Row(body, null, false, height);
+
+            if (verdict)
             {
-                string body = q.recall
-                    ? $"<size=19><color=#8A7563>Say in Chinese:</color></size>\n<size=34><b>{q.word.meaning}</b></size>"
-                    : $"<size=19><color=#8A7563>Listen and repeat:</color></size>\n<size=44><b>{q.word.hanzi}</b></size>  <size=26>{q.word.pinyin}</size>\n<size=20>{q.word.meaning}</size>";
-                Row(body, null, false, q.recall ? 120 : 150);
-            }
-            if (session.retryHeard != null && session.pending == null)
-            {
-                string rpy = Pinyin.ContainsHanzi(session.retryHeard) ? Pinyin.Of(session.retryHeard) : "";
-                Row($"<color=#E0604E><b>Not quite</b></color>  <size=19>I heard: <b>{session.retryHeard}</b> {rpy}</size>\n" +
-                    $"<size=17><color=#8A7563>Try again{(q != null && q.attempts > 1 ? $" (try {q.attempts + 1})" : "")}, or say 跳过 / skip to move on.</color></size>", null, false);
+                if (q.correct)
+                    Row("<size=40><color=#2C7F79><b>Correct!</b></color></size>", null, false, 70);
+                else
+                    Row($"<size=36><color=#E0604E><b>{(q.skipped ? "Skipped" : "Not correct")}</b></color></size>\n" +
+                        $"<size=22>The answer: <b>{q.word.hanzi}</b> {q.word.pinyin}</size>" +
+                        (!q.skipped && !string.IsNullOrEmpty(q.heard) ? $"  <size=17><color=#8A7563>(you said: {q.heard})</color></size>" : ""), null, false, 96);
+                return;
             }
             if (session.pending != null)
             {
                 string py = Pinyin.ContainsHanzi(session.pending) ? Pinyin.Of(session.pending) : "";
-                Row($"<size=19><color=#8A7563>I heard:</color></size>  <size=34><b>{session.pending}</b></size>  <size=22>{py}</size>\n" +
-                    "<size=18><b>[Y]</b> that's what I said: submit  ·  <b>[N]</b> or hold V: say it again</size>", null, false, 110);
-                Line("<size=17><color=#8A7563>不知道 / skip = skip  ·  不学了 = stop  ·  E = leave (ends it)</color></size>");
+                string alt = session.alternative;
+                var buttons = new List<(string, System.Action, Color)>
+                {
+                    (UiText.Plain("Yes, submit", "对了，就是这个", 3) + "  [Y]", HskSchool.SubmitPending, UITheme.Teal),
+                    (UiText.Plain("Say it again", "再说一次", 2) + "  [N]", HskSchool.DiscardPending, UITheme.InkSoft),
+                };
+                if (!string.IsNullOrEmpty(alt)) buttons.Add(($"{UiText.Plain("No, I said:", "不对，我说的是：", 3)} {alt}", HskSchool.SubmitAlternative, UITheme.Orange));
+                ActionRow($"<size=19><color=#8A7563>I heard:</color></size>  <size=34><b>{session.pending}</b></size>  <size=22>{py}</size>\n" +
+                          (string.IsNullOrEmpty(alt) ? "<size=17><color=#8A7563>Click, or hold V to say it again.</color></size>"
+                              : $"<size=20>Did you mean <b>{alt}</b>? <size=17>{(Pinyin.ContainsHanzi(alt) ? Pinyin.Of(alt) : "")}</size></size>"),
+                    buttons, 92);
                 return;
             }
-            var last = session.last;
-            if (last != null)
+            if (session.retryHeard != null)
             {
-                string mark = last.correct ? "<color=#2C7F79><b>Right!</b></color>" : "<color=#E0604E><b>Not quite</b></color>";
-                Row($"{mark}  <b>{last.word.hanzi}</b> {last.word.pinyin}  <size=18>{last.word.meaning}</size>\n" +
-                    $"<size=17><color=#8A7563>You said: {(string.IsNullOrEmpty(last.heard) ? "-" : last.heard)}</color></size>", null, false);
+                string rpy = Pinyin.ContainsHanzi(session.retryHeard) ? Pinyin.Of(session.retryHeard) : "";
+                string ralt = session.retryAlternative;
+                string head = $"<size=30><color=#E0604E><b>Not correct</b></color></size>  <size=19>I heard: <b>{session.retryHeard}</b> {rpy}</size>\n" +
+                              $"<size=17><color=#8A7563>Try again{(q.attempts > 1 ? $" (try {q.attempts + 1})" : "")}.</color></size>";
+                if (string.IsNullOrEmpty(ralt)) Row(head, null, false, 84);
+                else ActionRow(head + $"\n<size=20>Did you mean <b>{ralt}</b>?</size>",
+                    new List<(string, System.Action, Color)> { ($"{UiText.Plain("Yes, I said:", "对，我说的是：", 3)} {ralt}", HskSchool.SubmitAlternative, UITheme.Orange) }, 92);
             }
-            Line(session.kind == LessonKind.Test
-                ? "<size=17><color=#8A7563>Answer, then check what I heard and press Y  ·  不知道 / skip = skip  ·  不考了 = stop</color></size>"
-                : "<size=17><color=#8A7563>不知道 / skip = skip  ·  不学了 = stop  ·  E = leave (ends the lesson)</color></size>");
+        }
+
+        /// <summary>A row of text with clickable buttons along its bottom (they wrap onto more lines when the window is narrow).</summary>
+        private void ActionRow(string text, List<(string label, System.Action act, Color bg)> buttons, float textHeight)
+        {
+            const float avail = 430f, bh = 46f, gap = 8f;
+            var widths = new List<float>();
+            foreach (var b in buttons) widths.Add(Mathf.Clamp(36 + b.label.Length * 10f, 150, avail));
+            int lines = 1;
+            float used = 0f;
+            var place = new List<(int line, float x)>();
+            for (int i = 0; i < widths.Count; i++)
+            {
+                if (used > 0 && used + widths[i] > avail) { lines++; used = 0; }
+                place.Add((lines - 1, used));
+                used += widths[i] + gap;
+            }
+            float buttonsHeight = lines * (bh + gap) + 8;
+            var row = UIFactory.Panel(_content, "Row", UITheme.CreamDark.WithAlpha(0.55f), shadow: false, small: true);
+            row.rectTransform.SetLayout(textHeight + buttonsHeight);
+            var t = UIFactory.Text(row.transform, "Text", text, 22, UITheme.Ink, TextAlignmentOptions.TopLeft);
+            t.rectTransform.anchorMin = Vector2.zero;
+            t.rectTransform.anchorMax = Vector2.one;
+            t.rectTransform.offsetMin = new Vector2(16, buttonsHeight);
+            t.rectTransform.offsetMax = new Vector2(-12, -6);
+            for (int i = 0; i < buttons.Count; i++)
+            {
+                var act = buttons[i].act;
+                var b = UIFactory.Button(row.transform, buttons[i].label, () => act(), buttons[i].bg, 20);
+                var rt = (RectTransform)b.transform;
+                rt.anchorMin = rt.anchorMax = Vector2.zero;
+                rt.pivot = Vector2.zero;
+                rt.anchoredPosition = new Vector2(14 + place[i].x, 8 + (lines - 1 - place[i].line) * (bh + gap));
+                rt.sizeDelta = new Vector2(widths[i], bh);
+            }
         }
 
         private void BuildFishRows(int level)

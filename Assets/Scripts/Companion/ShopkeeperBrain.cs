@@ -28,7 +28,7 @@ namespace UntitledGame.Companion
             public int quantity = 1;
             public int price;
             public string fishId = "all";
-            public bool crabBait;      // 海叔: the fish go in the crab pots as bait (no money now, a bigger haul tomorrow)
+            public bool crabBait;      // 海叔: the fish go in the crab pots as bait (no money now, a bigger next haul)
             public int busTo = -1;     // 张师傅: a ride to this region
             public string english;     // "Bamboo Rod - 120 yuan" for the UI card
         }
@@ -152,10 +152,19 @@ namespace UntitledGame.Companion
             Ask("[Game: The customer is leaving your stall. Say a short goodbye (慢走！/ 再见！).]");
         }
 
+        /// <summary>Stops talking at once (the player walked away): the reply being made and the voice already playing.</summary>
+        public void Silence()
+        {
+            Interrupt();
+            voice?.StopAll();
+            ChatAudit.Write(MemoryKey, "went quiet: the customer walked away");
+        }
+
         public void Configure(string shop, CharacterVoice v, Transform playerTransform)
         {
             shopId = shop;
             voice = v;
+            voice?.MakeLocal(); // a keeper is heard at their stall, not wherever you are
             player = playerTransform;
             llmSlot = 1;
             sampling = new ChatSampling { temperature = 0.6f, top_p = 0.85f, top_k = 20, presence_penalty = 1.0f, max_tokens = 90 };
@@ -197,6 +206,38 @@ namespace UntitledGame.Companion
         }
 
         // ------------------------------------------------------------------ conversation
+
+        /// <summary>
+        /// The requests this stall understands, as short phrases (hanzi only), for scoring a recording against them
+        /// directly: 我想练习 misheard as 我想练气 still counts if the audio fits the phrase well. Only a recording of just
+        /// that phrase can score well, so longer sentences are never replaced.
+        /// </summary>
+        public List<string> SpokenOptions()
+        {
+            var list = new List<string> { "你好", "谢谢", "再见", "你喜欢什么", "你不喜欢什么" };
+            foreach (var q in Affinity.FactQuestions.Values) list.Add(q.question);
+            var shop = Shop;
+            if (shop != null)
+            {
+                if (PendingOffer != null) list.AddRange(new[] { "好的", "好", "可以", "要", "不要", "不要了", "算了", "买吧" });
+                if (shop.school)
+                    foreach (var what in new[] { "上课", "练习", "考试" })
+                        list.AddRange(new[] { "我想" + what, "我要" + what, "老师我想" + what, "老师我要" + what });
+                if (shop.buysFish) list.AddRange(new[] { "我想卖鱼", "我要卖鱼", "我想卖所有的鱼" });
+                if (shop.crabber) list.AddRange(new[] { "我想给你鱼", "给你鱼" });
+                if (shop.busDriver)
+                {
+                    for (int i = 0; i <= Regions.Last; i++) list.Add("我想去" + Regions.Get(i).hanzi);
+                    list.AddRange(new[] { "买票", "上车", "走吧" });
+                }
+                foreach (var def in Economy.ShopStock.Goods(shop))
+                {
+                    if (string.IsNullOrEmpty(def.hanzi)) continue;
+                    list.AddRange(new[] { "我要" + def.hanzi, "我想买" + def.hanzi, def.hanzi + "多少钱" });
+                }
+            }
+            return list.Select(p => new string(p.Where(Pinyin.IsHanzi).ToArray())).Where(p => p.Length > 0).Distinct().Take(120).ToList();
+        }
 
         public override void HandlePlayerUtterance(string text)
         {
@@ -523,7 +564,7 @@ namespace UntitledGame.Companion
                 return "[Game: The student asks what you do here. Tell them simply: they can say 我想上课 for a lesson, 我想练习 to practise, or 我想考试 to take the HSK test.]";
             if (shop.crabber)
                 return "[Game: The customer asks what you do. Say simply: you look after their crab pots (螃蟹笼) in the sea; every morning the crabs come in and " +
-                       "you sell them, and they come here to get the money. You also sell pot upgrades, and if they give you fish (给你鱼), you put them in the pots and there are more crabs tomorrow.]";
+                       "you sell them, and they come here to get the money. You also sell pot upgrades, and if they give you fish (给你鱼), you put them in the pots and the next haul has more crabs. The pots are hauled every 15 minutes.]";
             if (shop.buysFish)
             {
                 string cards = " Also say that everything goes on your scale, and the more they bring at once, the more you pay for each fish.";
@@ -662,8 +703,8 @@ namespace UntitledGame.Companion
                         return "[Game: The customer wants to give you fish for the crab pots, but the pots already have all the bait they can use today. Thank them and say: tomorrow.]";
                     }
                     SetOffer(new Offer { selling = true, crabBait = true, fishId = fish.Count == Inventory.BucketCount ? "all" : fish[0].speciesId, price = extra,
-                        english = $"Put {fish.Count} fish in the crab pots — +¥{extra} tomorrow" });
-                    return $"[Game: The customer offers you {fish.Count}条鱼 as bait for their crab pots. With them, tomorrow's crabs will be worth about {Catalog.ChineseNumber(extra)}块 more. " +
+                        english = $"Put {fish.Count} fish in the crab pots — +¥{extra} in the next haul" });
+                    return $"[Game: The customer offers you {fish.Count}条鱼 as bait for their crab pots. With them, the next haul of crabs will be worth about {Catalog.ChineseNumber(extra)}块 more. " +
                            "Say that simply and ask if they want to put them in (要放吗？).]";
                 }
                 case "sell_fish":
@@ -788,12 +829,12 @@ namespace UntitledGame.Companion
             {
                 var fish = FishSale.Selection(o.fishId);
                 float extra = CrabPots.AddBait(fish);
-                string en = $"Put {fish.Count} fish in the crab pots (+¥{extra:0} tomorrow)";
+                string en = $"Put {fish.Count} fish in the crab pots (+¥{extra:0} in the next haul)";
                 ChatAudit.Write(MemoryKey, en);
                 AudioManager.Instance?.PlaySfx("SFX/water_small", 0.6f);
-                GameEvents.Toast($"{en}. Collect it from 海叔 tomorrow.", 4f);
+                GameEvents.Toast($"{en}. It comes in with the next haul (every 15 minutes).", 4f);
                 TransactionDone?.Invoke(this, en, $"把{Catalog.ChineseNumber(fish.Count)}条鱼放进了螃蟹笼");
-                return $"[Game: Done: you put the customer's {fish.Count}条鱼 in their crab pots. Tell them there will be more crabs tomorrow (明天螃蟹更多！).]";
+                return $"[Game: Done: you put the customer's {fish.Count}条鱼 in their crab pots. Tell them the next haul will have more crabs (下次螃蟹更多！).]";
             }
             if (o.selling)
             {

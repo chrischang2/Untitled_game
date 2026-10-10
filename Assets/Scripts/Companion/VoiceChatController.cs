@@ -226,6 +226,8 @@ namespace UntitledGame.Companion
             }
 
             IsTranscribing = true;
+            // At a stall (and not in the middle of a lesson or test): the requests it understands, to score the audio against.
+            var options = target is ShopkeeperBrain keeper && HskSchool.Current == null ? keeper.SpokenOptions() : null;
             string text = null, error = null;
             bool done = false;
             float t0 = Time.realtimeSinceStartup;
@@ -235,7 +237,7 @@ namespace UntitledGame.Companion
                 text = t;
                 error = e;
                 done = true;
-            }, (SpeechEngine.AsrMode)SaveSystem.Settings.asrMode);
+            }, (SpeechEngine.AsrMode)SaveSystem.Settings.asrMode, HskSchool.ExpectedWord, options);
             while (!done) yield return null;
             LastTranscriptionSeconds = Time.realtimeSinceStartup - t0;
             IsTranscribing = false;
@@ -260,7 +262,23 @@ namespace UntitledGame.Companion
                 GameEvents.Toast("Hmm, I didn't catch any words. Try again?");
                 yield break;
             }
-            target.HandlePlayerUtterance(text);
+            // A stall request the recogniser misheard (我想练习 as 我想练气): if the audio fits one of the stall's requests
+            // well enough (the same direct scoring as lesson answers), take it as said.
+            if (options != null && speech.LastOption != null && speech.LastOptionMargin > HskSchool.ScoreMargin &&
+                HskSchool.Clean(text) != HskSchool.Clean(speech.LastOption))
+            {
+                ChatAudit.Write(who, $"heard \"{text}\" but the request \"{speech.LastOption}\" scored {speech.LastOptionMargin:0.0}: taken as {speech.LastOption}");
+                text = speech.LastOption;
+                LastTranscript = text;
+            }
+            string alt = Normalize(speech.LastAlternative);
+            HskSchool.IncomingAlternative = string.IsNullOrWhiteSpace(alt) || alt == text ? null : alt;
+            if (HskSchool.IncomingAlternative != null) ChatAudit.Write(who, $"second choice \"{HskSchool.IncomingAlternative}\"");
+            HskSchool.IncomingMargin = speech.LastMargin;
+            HskSchool.IncomingTopMatch = speech.LastTopMatch;
+            if (speech.LastMargin.HasValue) ChatAudit.Write(who, $"expected \"{HskSchool.ExpectedWord}\": score {speech.LastMargin.Value:0.0} (accepted above {HskSchool.ScoreMargin:0.0}), in the top 3: {speech.LastTopMatch}");
+            try { target.HandlePlayerUtterance(text); }
+            finally { HskSchool.IncomingAlternative = null; HskSchool.IncomingMargin = null; HskSchool.IncomingTopMatch = null; }
         }
 
         /// <summary>Simplified characters; SenseVoice's SHOUTED English turned into normal sentence case.</summary>

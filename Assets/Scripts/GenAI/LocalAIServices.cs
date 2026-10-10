@@ -197,6 +197,7 @@ namespace UntitledGame.GenAI
                 TtsStatus = Speech.TtsReady ? ServiceStatus.Ready : ServiceStatus.Failed;
                 if (Speech.Error != null) LastError = Speech.Error;
                 Debug.Log($"[LocalAI] Speech ready in {Time.realtimeSinceStartup - t0:0.0}s (ASR {SttStatus}, TTS {TtsStatus}).");
+                if (Speech.AsrReady) Speech.LoadAlternatives(asr, 2);
                 if (UntitledGame.Core.SaveSystem.Settings.asrMode != (int)SpeechEngine.AsrMode.SenseVoice)
                     Speech.LoadQwen(Config.Resolve(Root, Config.qwenAsrModel), Mathf.Max(2, Config.naturalVoiceThreads));
                 StatusChanged?.Invoke();

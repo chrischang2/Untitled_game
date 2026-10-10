@@ -20,6 +20,7 @@ namespace UntitledGame.UI
 
         public SavesPanel(RectTransform canvas) : base(canvas, "Saves", new Vector2(1180, 960), "Saves & chat logs")
         {
+            ChineseTitle("存档", 3);
             var area = UIFactory.Rect("Area", Window).Stretch(50, 40, 100, 176);
             _content = UIFactory.ScrollList(area, 10);
 

@@ -65,14 +65,19 @@ namespace UntitledGame.Companion
                 // Walked off (or the keeper vanished): the conversation is over.
                 if (!_active.isActiveAndEnabled || _active.DistanceToPlayer > _active.ServiceRadius * leaveDistanceFactor)
                 {
-                    End(sayGoodbye: _active.isActiveAndEnabled);
+                    // Walking away: no goodbye shouted after you, and whatever they were saying stops.
+                    var gone = _active;
+                    End(sayGoodbye: false);
+                    gone.Silence();
                     return;
                 }
                 // The stalls are close together: walking up to the next keeper leaves this one.
                 var other = ShopkeeperBrain.Facing(transform);
                 if (other != null && other != _active && other.DistanceToPlayer + 0.75f < _active.DistanceToPlayer)
                 {
-                    End(sayGoodbye: true);
+                    var left = _active;
+                    End(sayGoodbye: false);
+                    left.Silence();
                     return;
                 }
                 // They said goodbye and the keeper has answered.

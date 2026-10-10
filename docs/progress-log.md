@@ -755,3 +755,75 @@ Benchmarked with the player's real conversation: 72 turns to Mei from their chat
   - **New checks:** the next morning on arrival; energy as if slept in the desert house (100 vs Willow Bay's 180); Willow Bay's furniture stays there; a desert bed counts only there; ten new keepers; perks from old friends (x1.20 fish, the Atlas carpet).
   - **Updated checks:** the per-region friendship HSK caps, plus stall indices and counts.
 - **Full suite:** all 352 checks passed (after the scoped runs).
+
+## Session 20: stall prompt, shorter frenzies, the quiz rework, and a three-upgrade crabber
+- **Stall prompt:** approaching a stall now says only "[E] Talk to 小林 (Xiao Lin)" (`GameUI.TalkPrompt`), with no description of what they do.
+- **Fish frenzy:** it lasts 3.5 typical catches, 65 s instead of 120 s. A typical catch is the median 18.5 s between one hooked fish and the next in the player's own chat logs (`FishFrenzy.TypicalCatchSeconds`).
+- **Quiz** (`HskSchool`, `ShopPanel.BuildSession`):
+  - **One question per screen:** the window shows only the question, with its progress.
+  - **Verdict:** an answer's verdict shows on that question's own screen for 1.8 s (`LessonSession.ShowingResult`), "Correct!" in green or "Not correct" in red, with the answer and what you said when it's wrong. The next question then appears by itself. Before, the next question came up straight away with the previous result tucked under it, which looked like the new question's result.
+  - **Sound:** a right answer plays a confirmation sound.
+  - **Cleanup:** the hint lines under the question are gone.
+- **Review of a failed lesson or test:**
+  - **What it shows:** the window opens with a row for every question asked, right or wrong. A test lists all 20; a lesson lists its quiz. Each row has the English prompt, the answer, and a right/skipped/wrong tag, plus what you said if it was wrong.
+  - **While it's open:** it takes the top of the window (friendship and gift rows step aside), and closes when you leave (`HskSchool.ReviewOpen`).
+- **Crabber:** three upgrades only: more pots, bigger pots and longer lines. Lures, fish-bait know-how, the cooler and the market helper are gone.
+  - Pots are always three-quarters full.
+  - Uncollected crabs keep three days.
+  - Fish given as bait pay x1.5, up to +50% of a day's haul.
+  - The crab value curve is re-solved so a maxed tier still earns one top fish a day. Old saves' levels in the removed upgrades are ignored.
+- **Tested** (scoped: `-only school,crabs,fish,parser`, then `-only hud,crabs,market,sale,balance,bus`), all passing.
+  - **New checks:** the prompt text, the frenzy time, three crab upgrades, the verdict screen and its timing, a failed test's review (3/20, 17 wrong with what was said), a failed lesson's review, and the review closing when you leave.
+  - The full suite wasn't run.
+
+## Session 21: crabs keep forever, keepers go quiet when you leave, the review panel
+- **Crabs** (`CrabPots.Accrue`): uncollected crabs keep indefinitely. Every morning's haul adds to what's waiting, and nothing is ever lost.
+- **Walking away from a stall:**
+  - **Voice range:** keepers' voices were 55% 3D with a 60 m range, so they followed you around at full volume. They're now fully 3D and heard up to 14 m (`CharacterVoice.MakeLocal`, set by `ShopkeeperBrain.Configure`). Mei's voice is unchanged.
+  - **No goodbye:** walking off, or up to another stall, no longer triggers a goodbye. The keeper also stops mid-sentence (`ShopkeeperBrain.Silence`: it interrupts the reply and stops the voice). Pressing E to leave still says goodbye.
+- **Review of a failed lesson or test** (`UI/ReviewPanel.cs`, `HskSchool.ReviewRequested`):
+  - **What it is:** it replaces the failure banner. It's a panel with the pass/fail message as its heading and every question beneath it: the English prompt, the answer, a right/skipped/wrong tag, and what you said if it was wrong.
+  - **Closing it:** it stays until you close it with its button or the X key. It doesn't close when you leave the test centre or start another lesson.
+  - **Window:** the test centre's window is back to the compact result row.
+- **Tested** (scoped: `-only school,crabs`). New checks:
+  - crabs after one, six and sixty days
+  - keeper voices are local
+  - walking away silences the keeper (not talking and not thinking afterwards)
+  - the review opens with 20 or 8 rows, survives leaving, and closes only when asked
+  - The full suite wasn't run.
+- **Speech recognition investigation** (nothing changed): replayed the 336 recorded lesson answers offline through the game's SenseVoice model to see why some words keep failing. Findings are in the reply, not in the code.
+- **Findings on why some words keep failing** (offline replay of the 319 real attempts through SenseVoice, scripts in `Tools/asr-analysis/`; nothing changed in the game):
+  - **Match:** the replay reproduces the game's own transcript for 93% of recordings, and accepts 89% of attempts (the log says 86%).
+  - **The right word is usually a close second:** for rejected single-character answers it was the model's 2nd or 3rd guess in 9 of 14 cases (八 came 2nd behind 啊, 呢 behind 那, 书 behind 十/七).
+  - **Settings that don't help:** language auto or en, ITN off, gain, normalising and padding or trimming silence all changed accuracy by 4 points or less; language auto or en make it much worse.
+  - **What does help:**
+    - Scoring the expected word directly (CTC likelihood, homophones allowed) rescues 20 of 34 rejected answers at 9% false accepts on other-word audio.
+    - Qwen3-ASR told the expected word as context rescues 15 of 34 (about 1 in 21 false accepts), but it's slow and needs a new recogniser per word.
+
+## Session 22: "Did you mean X?" and click-to-accept
+
+- `OrtModel.cs` (onnxruntime C API through P/Invoke, using the DLL sherpa already loads) and `SenseVoiceCtc.cs` (Kaldi fbank, LFR 7/6, CMVN in C#) run SenseVoice a second time, directly, to read the per-frame probabilities. Output matched sherpa-onnx on all test phrases; ~0.2 s per line, on the recognition thread, so it adds that to each answer.
+- The runner-up is the transcript with its least certain character swapped for the best different token (probability >= 0.02). Passed on as `HskSchool.IncomingAlternative`.
+- Quiz UI (test, and lesson recall questions): "I heard X / Did you mean Y?" with buttons `Yes, submit [Y]`, `Say it again [N]`, `No, I said: Y`. Lesson retry shows the alternative too. Y/N keys still work.
+- Self-test: new `asr` section (direct reading equals sherpa's), school checks the alternative flow. `-only asr,school` passes.
+- Not done yet (user wants to try it next): scoring the expected word directly (CTC forward probability).
+- Offline comparison (`Tools/asr-analysis/analysis4.py`, 319 attempts, 34 rejected): "did you mean" would rescue 6/34 (and 133 of its 201 offers were homophones of the first choice, so useless); direct scoring at margin > -3 rescues 15/34 with 4.4% false accepts, > -4 rescues 20/34 at ~7-8%. Real mistakes (老板 for 先生, 怎么念) score far below (-18, -30).
+
+## Session 23: direct scoring at -3
+- The expected word is now scored against the audio (`SenseVoiceCtc.Margin`: CTC forward over homophone token classes vs the model's best path). If the transcript is wrong but the word scores above `HskSchool.ScoreMargin` (-3, i.e. at least ~5% as likely as the best reading) it is taken as said (the pending line shows the expected word; the chat log records "heard X but W scored m").
+- "Did you mean" now skips homophones of the first choice (they graded identically so were useless).
+- Self-test `asr`: said word scores 0.0, other words -60..-90; on the 319 real recordings the game scores 285 above -3 (offline Python: 289), so the C# frontend is slightly stricter than the Python replay (mean -1.03 vs -0.58).
+
+## Session 24: school history, word heat map, top-3 for repeat-after-me
+- Journal has a School page: per HSK level, "% learned" (words in box >= 3) and "% met", a heat map with a cell per word (Learned: new/missed/box 1-5; Most used: how often practised or used), then the test and each lesson with every try: date, game day, time taken, quiz score, passed. Free practice listed at the end. Data: `SaveData.hskHistory` (`SessionRecord`, `Hsk.LogSession`, written in `HskSchool.Finish`; abandoned sessions aren't recorded).
+- Repeat-after-me questions in lessons (not tests, not recall questions) also accept the expected word if it is among the model's top 3 guesses at each character (`SenseVoiceCtc.TopMatch`, `HskSchool.IncomingTopMatch`). Offline on 185 repeat answers: of 12 rejected, direct scoring rescues 7, top-3 rescues 6, either 9; other-word audio accepted 2.7% / 2.6% / 4.2% (`Tools/asr-analysis/analysis5.py`).
+- Self-tests: school checks the history, the 595-cell grid, top-3 in repeat vs test; screenshots 21_school_history, 21b_school_used. Fixed the flaky "failing a test" check (wrong answer is now 喂喂喂喂).
+
+## Session 25: play-time crabs, stall requests scored, whole-level tests, interface words, skills
+- Crab pots: a haul every 15 in-game minutes actually played (`SaveData.playMinutes`, counted in `DayNightCycle.Update`; sleeping/bus jumps don't count). A haul = a full waking day's catch / 80, so the balance targets per day of play are unchanged. Bait goes into the next haul (`crabBaitWaiting`), daily bait cap kept.
+- Stall requests are direct-scored: `ShopkeeperBrain.SpokenOptions()` lists a stall's requests (school 我想上课/练习/考试 with 老师 variants, 我想卖鱼, 给你鱼, 我想去<region>, 我要/我想买/多少钱 for each good, yes/no when an offer is pending, greetings and the fact questions). `VoiceChatController` passes them to `SpeechEngine.Transcribe(..., options)`; if the best scores above -3 and differs from the transcript it's taken as said (logged). Not during lessons/tests. Offline (`Tools/asr-analysis/analysis6.py`): 22 of 23 misheard requests rescued (我想练起 -> 我想练习, 我想香可 -> 我想上课), 1 short-answer false capture (电 -> 再见, a lesson answer, which in-game wouldn't be scored against options).
+- HSK tests cover every askable word of the level in rounds of 20 random words from the pool (`SaveData.hskTestCleared`, `Hsk.TestPool/ClearTestWords/PassMarkFor`); a round passes at 16/20 (80% for a short last round), its right words are done, missed words return; a failed round returns all. The level passes when the pool is empty.
+- Lessons verified to cover every word (HSK 1 themes = all 150; HSK 2/3 seeded splits). New `StreamingAssets/game-words.txt` (18 interface words: 第 天 说 对 话 学 过 钓鱼 线 / 通过 日记 转 取消 常用 常用语 收线 存档 学会) filed under HSK 2/3, taught as an extra last lesson ("游戏里的词"), tested with the level; official lessons keep their contents.
+- Interface: a label shows only Chinese once all its words are mastered (box 5), else the HSK-tier rule. More labels go through `UiText` (Journal 日记, Reel in 收线, Place/Rotate/Cancel, journal tabs, Learned/Most used, quiz buttons, Close review, Saves 存档). Particles (never asked from English) now move up a box by repeating right.
+- FIX: offline analysis homophone helper compared only the first pinyin letter; all earlier offline numbers were too lenient. Corrected: transcript 274/319 (matches the game log); direct scoring > -3 rescues 23/45 (10/16 repeat, 13/29 recall) with 0.5% random / 2.7% similar-sounding false accepts; repeat-after-me: direct 10/16, top-3 6/16, either 11/16 at 0.8%.
+- Skills written to ~/.claude/skills: immersion-game-ui, game-world-layout, language-curriculum-progression (+ speech-grading.md).

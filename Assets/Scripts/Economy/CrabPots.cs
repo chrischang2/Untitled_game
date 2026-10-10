@@ -9,19 +9,22 @@ using UntitledGame.Progression;
 namespace UntitledGame.Economy
 {
     /// <summary>
-    /// 海叔's crab pots: passive income. Every new day the pots bring in crabs, which wait at his stall on the beach
-    /// until you come down and collect the money (he pays out when you start talking to him). Uncollected crabs only
-    /// keep so long (the cooler). Fish you give him go in the pots as bait and make the next day's haul bigger.
+    /// 海叔's crab pots: passive income. He hauls the pots every 15 minutes of in-game time that you actually play (sleeping
+    /// and bus trips skip the clock, so they don't count), and the crabs wait at his stall on the beach until you come down
+    /// and collect the money (he pays out when you start talking to him). Nothing is lost however long you take. Fish you
+    /// give him go in the pots as bait and make the next haul bigger.
     ///
-    /// Seven upgrades, 20 levels each in tiers of five (each tier opens with its HSK test, priced like Coach Wu's
-    /// training). With every upgrade of a tier, a day's haul is worth about one biggest-size rarest fish of that tier
-    /// (the crab value curve is solved from that target, see <see cref="CrabValue"/>).
+    /// Three upgrades, 20 levels each in tiers of five (each level opens with lessons, like Coach Wu's training, and is
+    /// priced the same): more pots, bigger pots and longer lines. With all three at the end of a tier, a day's haul is
+    /// worth about one biggest-size most valuable fish of that tier (the crab value curve is solved from that target,
+    /// see <see cref="CrabValue"/>).
     ///
-    /// Daily haul = pots x pot size x how full they get x crab value x price bonus.
+    /// A day's hauls (a full waking day of play, 6am-2am = 80 hauls) = pots x pot size x how full they get (three quarters)
+    /// x crab value; each haul brings one eightieth of that.
     /// </summary>
     public static class CrabPots
     {
-        public static readonly string[] Stats = { "crab_pots", "crab_size", "crab_lure", "crab_deep", "crab_bait", "crab_cooler", "crab_helper" };
+        public static readonly string[] Stats = { "crab_pots", "crab_size", "crab_deep" };
         public static bool IsCrabStat(string stat) => stat != null && stat.StartsWith("crab_");
 
         private static SaveData D => SaveSystem.Data;
@@ -32,11 +35,9 @@ namespace UntitledGame.Economy
 
         public static int Pots(int level) => 1 + level;                                // 1 -> 21 pots
         public static int PotSize(int level) => 3 + level;                             // 3 -> 23 crabs a pot
-        public static float Fill(int level) => 0.5f + 0.025f * level;                  // half full -> brim full
-        public static float PriceBonus(int level) => 1f + 0.03f * level;               // +3% a level (the helper sells them)
-        public static int KeepDays(int level) => 1 + level / 4;                        // the cooler: 1 -> 6 days
-        public static float BaitRate(int level) => 1.2f + 0.04f * level;               // a fish's price x this as extra crabs
-        public static float BaitCap(int level) => 0.3f + 0.05f * level;                // ...up to this share of a day's haul
+        public const float Fill = 0.75f;                                               // the pots are three quarters full
+        public const float BaitRate = 1.5f;                                            // a fish's price x this as extra crabs
+        public const float BaitCap = 0.5f;                                             // ...up to this share of a day's haul
 
         /// <summary>The target at tier t: one biggest-size fish of the tier's most valuable kind.</summary>
         public static float TierTarget(int tier)
@@ -57,7 +58,7 @@ namespace UntitledGame.Economy
             {
                 if (k <= 0) return 1f;
                 int lv = k * PlayerStats.LevelsPerTier;
-                return TierTarget(k - 1) / (Pots(lv) * PotSize(lv) * Fill(lv) * PriceBonus(lv));
+                return TierTarget(k - 1) / (Pots(lv) * PotSize(lv) * Fill);
             }
             int tier = Mathf.Min(level / PlayerStats.LevelsPerTier, 3);
             float u = (level - tier * PlayerStats.LevelsPerTier) / (float)PlayerStats.LevelsPerTier;
@@ -65,31 +66,44 @@ namespace UntitledGame.Economy
             return a * Mathf.Pow(b / a, u);
         }
 
-        public static float DailyAt(int pots, int size, int lure, int deep, int helper) =>
-            Pots(pots) * PotSize(size) * Fill(lure) * CrabValue(deep) * PriceBonus(helper);
+        public static float DailyAt(int pots, int size, int deep) => Pots(pots) * PotSize(size) * Fill * CrabValue(deep);
 
-        /// <summary>A normal day's haul right now (before fish bait), in yuan.</summary>
-        public static float Daily => DailyAt(L("crab_pots"), L("crab_size"), L("crab_lure"), L("crab_deep"), L("crab_helper")) *
+        /// <summary>Minutes of in-game time between hauls, and how many hauls a full waking day (6am-2am) holds.</summary>
+        public const float HaulMinutes = 15f;
+        public const float WakingHours = 20f;
+        public static int HaulsPerDay => Mathf.RoundToInt(WakingHours * 60f / HaulMinutes);
+
+        /// <summary>One haul's money right now (before bait).</summary>
+        public static float PerHaul => Daily / HaulsPerDay;
+
+        /// <summary>In-game minutes until the next haul.</summary>
+        public static float MinutesToNextHaul
+        {
+            get
+            {
+                Accrue();
+                return D.crabLastMinute < 0 ? HaulMinutes : Mathf.Max(0f, HaulMinutes - (float)(D.playMinutes - D.crabLastMinute));
+            }
+        }
+
+        /// <summary>A full day's hauls right now (before fish bait), in yuan.</summary>
+        public static float Daily => DailyAt(L("crab_pots"), L("crab_size"), L("crab_deep")) *
                                      (Progression.Perks.Has("crabber") ? Progression.Perks.CrabBonus : 1f);
-        public static int Crabs => Mathf.RoundToInt(Pots(L("crab_pots")) * PotSize(L("crab_size")) * Fill(L("crab_lure")));
-        public static int KeepDaysNow => KeepDays(L("crab_cooler"));
+        public static int Crabs => Mathf.RoundToInt(Pots(L("crab_pots")) * PotSize(L("crab_size")) * Fill);
 
         // ------------------------------------------------------------------ the days' hauls
 
-        /// <summary>Adds up the hauls since the last check (each new day brings one; the cooler caps how many wait).</summary>
+        /// <summary>Adds up the hauls since the last check: one every 15 minutes of in-game time played. Nothing is ever lost.</summary>
         public static void Accrue()
         {
-            int today = Today;
-            if (D.crabLastDay < 0) { D.crabLastDay = today; return; }
-            if (today <= D.crabLastDay) return;
-            float daily = Daily, cap = daily * KeepDaysNow;
-            for (int day = D.crabLastDay + 1; day <= today; day++)
-            {
-                // Fish put in the pots on a day make the next morning's haul bigger (that extra always fits).
-                float bait = D.crabBaitDay == day - 1 ? D.crabBaitBonus : 0f;
-                D.crabPending = Mathf.Min(D.crabPending + daily + bait, cap + bait);
-            }
-            D.crabLastDay = today;
+            double now = D.playMinutes;
+            if (D.crabLastMinute < 0 || D.crabLastMinute > now) { D.crabLastMinute = now; return; }
+            int hauls = (int)((now - D.crabLastMinute) / HaulMinutes);
+            if (hauls <= 0) return;
+            // Fish put in the pots go into the next haul.
+            D.crabPending += hauls * PerHaul + D.crabBaitWaiting;
+            D.crabBaitWaiting = 0f;
+            D.crabLastMinute += hauls * HaulMinutes;
         }
 
         /// <summary>Money waiting at 海叔's stall.</summary>
@@ -109,32 +123,34 @@ namespace UntitledGame.Economy
             if (money <= 0) return 0;
             D.crabPending -= money;
             Inventory.Earn(money);
-            ChatAudit.Write("CRABS", $"collected ¥{money} ({Crabs} crabs a day at ¥{CrabValue(L("crab_deep")):0.##}, keeps {KeepDaysNow} days)");
+            ChatAudit.Write("CRABS", $"collected ¥{money} ({Crabs} crabs a day at ¥{CrabValue(L("crab_deep")):0.##}, a haul every {HaulMinutes:0} in-game minutes)");
             return money;
         }
 
         // ------------------------------------------------------------------ fish as bait
 
-        /// <summary>Extra money tomorrow from fish already put in the pots today.</summary>
+        /// <summary>Bait money from fish put in the pots today (the daily limit counts it), and what still waits for the next haul.</summary>
         public static float BaitToday => D.crabBaitDay == Today ? D.crabBaitBonus : 0f;
-        public static float BaitCapNow => Daily * BaitCap(L("crab_bait"));
+        public static float BaitWaiting => D.crabBaitWaiting;
+        public static float BaitCapNow => Daily * BaitCap;
 
         /// <summary>What these fish would add to tomorrow's haul (capped), without using them.</summary>
         public static float BaitValue(IEnumerable<BucketFish> fish)
         {
-            float add = fish.Sum(b => Inventory.FishValue(b)) * BaitRate(L("crab_bait"));
+            float add = fish.Sum(b => Inventory.FishValue(b)) * BaitRate;
             return Mathf.Min(add, Mathf.Max(0f, BaitCapNow - BaitToday));
         }
 
-        /// <summary>Puts the fish in the pots: they're used up, and tomorrow's haul grows. Returns the extra money.</summary>
+        /// <summary>Puts the fish in the pots: they're used up, and the next haul grows. Returns the extra money.</summary>
         public static float AddBait(List<BucketFish> fish)
         {
             Accrue();
             float add = BaitValue(fish);
             if (D.crabBaitDay != Today) { D.crabBaitDay = Today; D.crabBaitBonus = 0f; }
             D.crabBaitBonus += add;
+            D.crabBaitWaiting += add;
             Inventory.RemoveFish(fish);
-            ChatAudit.Write("CRABS", $"baited the pots with {fish.Count} fish: +¥{add:0} tomorrow (today's bait ¥{D.crabBaitBonus:0} of ¥{BaitCapNow:0} max)");
+            ChatAudit.Write("CRABS", $"baited the pots with {fish.Count} fish: +¥{add:0} in the next haul (today's bait ¥{D.crabBaitBonus:0} of ¥{BaitCapNow:0} max)");
             return add;
         }
 
@@ -142,13 +158,9 @@ namespace UntitledGame.Economy
 
         public static string StatName(string stat) => stat switch
         {
-            "crab_pots" => "Crab pots",
-            "crab_size" => "Pot size",
-            "crab_lure" => "Crab lures",
-            "crab_deep" => "Deep-water ropes",
-            "crab_bait" => "Fish-bait know-how",
-            "crab_cooler" => "Cooler",
-            "crab_helper" => "Market helper",
+            "crab_pots" => "More pots",
+            "crab_size" => "Bigger pots",
+            "crab_deep" => "Longer lines",
             _ => stat,
         };
 
@@ -159,17 +171,13 @@ namespace UntitledGame.Economy
             {
                 "crab_pots" => $"{Pots(l)} pot{(Pots(l) == 1 ? "" : "s")}",
                 "crab_size" => $"{PotSize(l)} crabs a pot",
-                "crab_lure" => $"{Fill(l) * 100f:0}% full each day",
                 "crab_deep" => $"crabs worth ¥{CrabValue(l):0.#}",
-                "crab_bait" => $"fish pay x{BaitRate(l):0.00}, up to +{BaitCap(l) * 100f:0}% a day",
-                "crab_cooler" => $"keeps {KeepDays(l)} day{(KeepDays(l) == 1 ? "" : "s")}",
-                "crab_helper" => $"+{(PriceBonus(l) - 1f) * 100f:0}% price",
                 _ => "",
             };
         }
 
         public static string Describe() =>
-            $"{Crabs} crabs a day (¥{Daily:0}), keeps {KeepDaysNow} day{(KeepDaysNow == 1 ? "" : "s")}, ¥{Pending} waiting" +
-            (BaitToday > 0 ? $", +¥{BaitToday:0} tomorrow from fish bait" : "");
+            $"A haul every {HaulMinutes:0} minutes (¥{PerHaul:0.#} each, ¥{Daily:0} over a full day), ¥{Pending} waiting" +
+            (BaitWaiting > 0 ? $", +¥{BaitWaiting:0} in the next haul from fish bait" : "");
     }
 }

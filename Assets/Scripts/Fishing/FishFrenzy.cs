@@ -6,13 +6,15 @@ namespace UntitledGame.Fishing
 {
     /// <summary>
     /// A fish frenzy: a patch of bubbling, rippling water off the beach where a shoal is feeding. Cast into it and
-    /// fish bite twice as fast and come up bigger (the weight window moves up). Every couple of minutes the shoal
-    /// moves on somewhere else within reach of the dock and the beach.
+    /// fish bite twice as fast and come up bigger (the weight window moves up). After about three and a half typical
+    /// catches' time (Lifetime) the shoal moves on somewhere else within reach of the dock and the beach.
     /// </summary>
     public class FishFrenzy : MonoBehaviour
     {
         public static FishFrenzy Instance { get; private set; }
-        public const float Radius = 3.5f, BiteSpeedUp = 2f, WeightBoost = 0.2f, Lifetime = 120f;
+        public const float Radius = 3.5f, BiteSpeedUp = 2f, WeightBoost = 0.2f;
+        /// <summary>3.5 x 18.5 s: the median time from one hooked fish to the next in real play (chat logs).</summary>
+        public const float TypicalCatchSeconds = 18.5f, Lifetime = 3.5f * TypicalCatchSeconds;
 
         public Vector3 Position { get; private set; }
         private float _movesAt, _nextRipple, _nextSplash;
